@@ -1,0 +1,84 @@
+import { useEffect, useState } from "react";
+import "@/App.css";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import axios from "axios";
+import { Toaster } from "@/components/ui/sonner";
+
+// Pages
+import SetupWizard from "@/pages/SetupWizard";
+import Dashboard from "@/pages/Dashboard";
+import Bookings from "@/pages/Bookings";
+import Rooms from "@/pages/Rooms";
+import Staff from "@/pages/Staff";
+import Toiletry from "@/pages/Toiletry";
+import Settings from "@/pages/Settings";
+import FeedbackPage from "@/pages/FeedbackPage";
+import MonthlyReport from "@/pages/MonthlyReport";
+import Layout from "@/components/Layout";
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+export const API = `${BACKEND_URL}/api`;
+
+function App() {
+  const [settings, setSettings] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchSettings = async () => {
+    try {
+      const response = await axios.get(`${API}/settings`);
+      setSettings(response.data);
+    } catch (e) {
+      console.error("Error fetching settings:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50" data-testid="loading-screen">
+        <div className="text-center">
+          <div className="spinner mx-auto mb-4"></div>
+          <p className="text-slate-600 font-medium">Loading E-ARMS...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show setup wizard if not configured
+  if (!settings?.is_setup_complete) {
+    return (
+      <>
+        <SetupWizard onComplete={fetchSettings} />
+        <Toaster position="top-right" richColors />
+      </>
+    );
+  }
+
+  return (
+    <div className="App">
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Layout settings={settings} />}>
+            <Route index element={<Dashboard />} />
+            <Route path="bookings" element={<Bookings />} />
+            <Route path="rooms" element={<Rooms />} />
+            <Route path="staff" element={<Staff />} />
+            <Route path="toiletry" element={<Toiletry />} />
+            <Route path="settings" element={<Settings settings={settings} onUpdate={fetchSettings} />} />
+            <Route path="feedback" element={<FeedbackPage />} />
+            <Route path="reports" element={<MonthlyReport settings={settings} />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+      <Toaster position="top-right" richColors />
+    </div>
+  );
+}
+
+export default App;

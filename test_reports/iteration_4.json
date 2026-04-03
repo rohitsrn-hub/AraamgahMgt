@@ -1,0 +1,20 @@
+{
+  "summary": "Tested new Pending Refund Amount clickable button feature. Button visible in Fund Generation section, opens modal with guest/payment details. API and UI both working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All features tested and passing. Pending refunds modal: button data-testid='pending-refunds-amount-btn' visible when pending_refunds>0, modal data-testid='pending-refunds-modal' shows guest name, booking number, amount, and UPI/bank details. Guest 'rty' has UPI ID 'hjhkjhjkhkk@upi' shown correctly. API GET /api/refunds?status=pending returns correct data."
+}

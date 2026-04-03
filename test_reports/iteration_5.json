@@ -1,0 +1,47 @@
+{
+  "summary": "Tested simplified booking form (iteration 5). Fixed critical bug: Guest.contact_number was required str but guest_contact is now Optional - caused 500 on booking creation. Fixed to Optional[str]=None. All form fields verified: correct 10 fields present, removed fields absent. Full E2E booking creation working.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/bookings",
+        "issue": "Guest model had contact_number: str (required) but BookingCreate.guest_contact is Optional[str]=None. Passing None caused Pydantic validation error -> 500. FIXED: changed Guest.contact_number to Optional[str]=None",
+        "priority": "CRITICAL - was fixed"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/bookings",
+        "issue": "guest_unit field is in BookingCreate model and frontend form, but NOT stored in Booking model or passed to Booking constructor. Unit is only saved to Guest record, not accessible from booking data.",
+        "priority": "MEDIUM"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_booking_simplified.py",
+    "/app/test_reports/pytest/iteration5_results.xml"
+  ],
+  "action_items": [
+    "Add guest_unit field to Booking model and store it in create_booking endpoint (currently lost after creation)",
+    "No other action items - critical bug was fixed in this iteration"
+  ],
+  "critical_code_review_comments": [
+    "Guest.contact_number was required str - fixed to Optional[str]=None to match simplified form",
+    "guest_unit in BookingCreate is not mapped to Booking object - data loss on unit field"
+  ],
+  "updated_files": [
+    "/app/backend/server.py (Guest.contact_number: str -> Optional[str] = None)"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3 after fix)",
+    "frontend": "100%"
+  },
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Simplified booking form fully tested and working. Form has 4 sections: Guest Details (Rank, Name, Army No, Aadhaar, Unit, Num Rooms), Stay Dates, Room Selection, Advance Amount. No phone/payment/address/family fields. Booking API accepts payload without guest_contact. Check-in dialog still works. Minor issue: guest_unit not stored in booking model.",
+  "rca_of_the_issue": "Root cause: When E1 made guest_contact Optional in BookingCreate, the create_booking handler still creates a Guest object with contact_number=booking.guest_contact. Guest model had contact_number: str (required), not Optional. Pydantic raised ValidationError causing 500. Fix: make Guest.contact_number Optional[str]=None."
+}
