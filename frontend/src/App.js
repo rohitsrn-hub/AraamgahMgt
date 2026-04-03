@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 // Pages
 import SetupWizard from "@/pages/SetupWizard";
+import SplashScreen from "@/pages/SplashScreen";
 import Dashboard from "@/pages/Dashboard";
 import Bookings from "@/pages/Bookings";
 import Rooms from "@/pages/Rooms";
@@ -63,6 +64,7 @@ function App() {
     <div className="App">
       <BrowserRouter>
         <Routes>
+          <Route path="/splash" element={<SplashScreen />} />
           <Route path="/" element={<Layout settings={settings} />}>
             <Route index element={<Dashboard />} />
             <Route path="bookings" element={<Bookings />} />
