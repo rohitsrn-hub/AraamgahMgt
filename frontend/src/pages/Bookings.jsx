@@ -76,6 +76,8 @@ export default function Bookings() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [pendingCheckoutBooking, setPendingCheckoutBooking] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [createdBookingData, setCreatedBookingData] = useState(null);
 
   // Pending refunds
   const [pendingRefunds, setPendingRefunds] = useState([]);
@@ -85,6 +87,7 @@ export default function Bookings() {
   // Form state
   const [bookingForm, setBookingForm] = useState({
     guest_name: "",
+    guest_contact: "",
     guest_rank: "",
     army_number: "",
     aadhaar_number: "",
@@ -129,6 +132,7 @@ export default function Bookings() {
   });
 
   const [phoneError, setPhoneError] = useState("");
+  const [bookingPhoneError, setBookingPhoneError] = useState("");
 
   const location = useLocation();
 
@@ -239,6 +243,7 @@ export default function Bookings() {
   const resetBookingForm = () => {
     setBookingForm({
       guest_name: "",
+      guest_contact: "",
       guest_rank: "",
       army_number: "",
       aadhaar_number: "",
@@ -257,6 +262,7 @@ export default function Bookings() {
       upi_phone: ""
     });
     setAvailableRooms([]);
+    setBookingPhoneError("");
   };
 
   const toggleRoomSelection = (roomId) => {
@@ -308,8 +314,14 @@ export default function Bookings() {
     }
 
     try {
+      // Format phone number with +91 prefix if provided
+      const formattedPhone = bookingForm.guest_contact
+        ? "+91 " + bookingForm.guest_contact.replace(/\s/g, "").replace(/^\+91/, "")
+        : undefined;
+
       const payload = {
         guest_name: bookingForm.guest_name,
+        guest_contact: formattedPhone,
         guest_rank: bookingForm.guest_rank,
         army_number: bookingForm.army_number,
         aadhaar_number: bookingForm.aadhaar_number,
@@ -327,9 +339,16 @@ export default function Bookings() {
         upi_id: bookingForm.upi_id,
         upi_phone: bookingForm.upi_phone
       };
-      await axios.post(`${API}/bookings`, payload);
+      const response = await axios.post(`${API}/bookings`, payload);
+      const createdBooking = response.data;
+      
       toast.success(`Booking created for ${bookingForm.num_rooms} room(s)!`);
       setShowNewBooking(false);
+      
+      // Show WhatsApp message modal with booking details
+      setCreatedBookingData(createdBooking);
+      setShowWhatsAppModal(true);
+      
       resetBookingForm();
       fetchData();
     } catch (error) {
@@ -351,6 +370,16 @@ export default function Bookings() {
       setPhoneError(validateIndianPhone(formatted) ? "" : "Enter a valid 10-digit Indian mobile number");
     } else {
       setPhoneError("");
+    }
+  };
+
+  const handleBookingPhoneChange = (value) => {
+    const formatted = formatIndianPhone(value);
+    setBookingForm(prev => ({ ...prev, guest_contact: formatted }));
+    if (formatted.replace(/\s/g, "").length >= 10) {
+      setBookingPhoneError(validateIndianPhone(formatted) ? "" : "Enter a valid 10-digit Indian mobile number");
+    } else {
+      setBookingPhoneError("");
     }
   };
 
@@ -736,6 +765,23 @@ export default function Bookings() {
                   <Input value={bookingForm.guest_name} onChange={(e) => setBookingForm({...bookingForm, guest_name: e.target.value})} onFocus={(e) => e.target.select()} placeholder="Full name" className="earms-input mt-1" data-testid="input-guest-name" />
                 </div>
                 <div>
+                  <Label>Mobile Number</Label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">+91</span>
+                    <Input 
+                      value={bookingForm.guest_contact} 
+                      onChange={(e) => handleBookingPhoneChange(e.target.value)} 
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="Mobile number" 
+                      className={`earms-input mt-1 pl-12 ${bookingPhoneError ? 'border-red-500' : ''}`}
+                      data-testid="input-guest-contact" 
+                      maxLength={11}
+                    />
+                  </div>
+                  {bookingPhoneError && <p className="text-xs text-red-500 mt-1">{bookingPhoneError}</p>}
+                  <p className="text-xs text-slate-500 mt-1">For WhatsApp booking confirmation</p>
+                </div>
+                <div>
                   <Label>Army / Service Number</Label>
                   <Input value={bookingForm.army_number} onChange={(e) => setBookingForm({...bookingForm, army_number: e.target.value})} onFocus={(e) => e.target.select()} placeholder="e.g., 15814432-F" className="earms-input mt-1" data-testid="input-army-number" />
                 </div>
@@ -1008,7 +1054,19 @@ export default function Bookings() {
       </Dialog>
 
       {/* ===== CHECK-IN DIALOG ===== */}
-      <Dialog open={showCheckIn} onOpenChange={(open) => { setShowCheckIn(open); if (!open) { setSelectedBooking(null); resetActionForm(); setPhoneError(""); } }}>
+      <Dialog open={showCheckIn} onOpenChange={(open) => { 
+        setShowCheckIn(open); 
+        if (!open) { 
+          setSelectedBooking(null); 
+          resetActionForm(); 
+          setPhoneError(""); 
+        } else if (selectedBooking?.guest_contact) {
+          // Pre-populate phone from booking data
+          const phoneOnly = selectedBooking.guest_contact.replace(/^\+91\s*/, "").replace(/\s/g, "");
+          const formatted = formatIndianPhone(phoneOnly);
+          setActionForm(prev => ({ ...prev, guest_contact: formatted }));
+        }
+      }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="checkin-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1582,6 +1640,123 @@ export default function Bookings() {
           onSubmitted={handleFeedbackSubmitted}
         />
       )}
+
+      {/* ===== WHATSAPP MESSAGE MODAL ===== */}
+      <Dialog open={showWhatsAppModal} onOpenChange={setShowWhatsAppModal}>
+        <DialogContent className="max-w-lg" data-testid="whatsapp-modal">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-600">
+              <CheckSquare size={24} weight="fill" />
+              Booking Confirmed!
+            </DialogTitle>
+          </DialogHeader>
+          
+          {createdBookingData && (
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <p className="text-sm text-emerald-700 mb-2">✅ Booking created successfully!</p>
+                <p className="font-semibold text-emerald-800">Booking #{createdBookingData.booking_number}</p>
+                <p className="text-sm text-emerald-700">{createdBookingData.guest_name}</p>
+                <p className="text-sm text-emerald-600">
+                  Room {(createdBookingData.room_numbers || []).join(", ")} · {(createdBookingData.room_categories || []).filter((v, i, arr) => arr.indexOf(v) === i).join(", ")}
+                </p>
+              </div>
+
+              <div>
+                <Label className="font-semibold text-slate-700 mb-2 block">
+                  WhatsApp Message (Ready to Copy)
+                </Label>
+                <div className="relative">
+                  <Textarea
+                    readOnly
+                    value={`🏠 *ARAAMGAH BOOKING CONFIRMATION*
+
+Dear ${createdBookingData.guest_name},
+
+Your booking has been confirmed! 🎉
+
+📋 *Booking Details:*
+• Booking No: ${createdBookingData.booking_number}
+• Guest: ${createdBookingData.guest_name}
+${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}` : ""}
+${createdBookingData.guest_unit ? `• Unit: ${createdBookingData.guest_unit}` : ""}
+• Room(s): ${(createdBookingData.room_numbers || []).join(", ")}
+• Category: ${(createdBookingData.room_categories || []).filter((v, i, arr) => arr.indexOf(v) === i).join(", ")}
+
+📅 *Stay Period:*
+• Check-in: ${format(parseISO(createdBookingData.check_in_date), "dd MMM yyyy")}
+• Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")}
+
+💰 *Payment:*
+• Total Amount: ₹${createdBookingData.total_amount}
+• Advance Paid: ₹${createdBookingData.advance_paid}
+• Balance Due: ₹${createdBookingData.balance_amount}
+
+Please arrive by check-in time. Looking forward to serving you!
+
+🙏 Thank you
+*E-ARMS Team*`}
+                    className="mt-2 font-mono text-sm min-h-[400px] bg-slate-50"
+                    onClick={(e) => e.target.select()}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="absolute top-2 right-2 bg-white"
+                    onClick={() => {
+                      const message = `🏠 *ARAAMGAH BOOKING CONFIRMATION*
+
+Dear ${createdBookingData.guest_name},
+
+Your booking has been confirmed! 🎉
+
+📋 *Booking Details:*
+• Booking No: ${createdBookingData.booking_number}
+• Guest: ${createdBookingData.guest_name}
+${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}\n` : ""}${createdBookingData.guest_unit ? `• Unit: ${createdBookingData.guest_unit}\n` : ""}• Room(s): ${(createdBookingData.room_numbers || []).join(", ")}
+• Category: ${(createdBookingData.room_categories || []).filter((v, i, arr) => arr.indexOf(v) === i).join(", ")}
+
+📅 *Stay Period:*
+• Check-in: ${format(parseISO(createdBookingData.check_in_date), "dd MMM yyyy")}
+• Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")}
+
+💰 *Payment:*
+• Total Amount: ₹${createdBookingData.total_amount}
+• Advance Paid: ₹${createdBookingData.advance_paid}
+• Balance Due: ₹${createdBookingData.balance_amount}
+
+Please arrive by check-in time. Looking forward to serving you!
+
+🙏 Thank you
+*E-ARMS Team*`;
+                      navigator.clipboard.writeText(message);
+                      toast.success("Message copied to clipboard!");
+                    }}
+                    data-testid="copy-whatsapp-btn"
+                  >
+                    Copy Message
+                  </Button>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  💡 Click "Copy Message" button, then paste in WhatsApp to send to guest
+                </p>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button 
+              onClick={() => {
+                setShowWhatsAppModal(false);
+                setCreatedBookingData(null);
+              }}
+              className="bg-emerald-500 hover:bg-emerald-600"
+            >
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

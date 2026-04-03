@@ -190,6 +190,7 @@ class Booking(BaseModel):
     booking_number: str = Field(default_factory=lambda: f"BK{datetime.now().strftime('%Y%m%d%H%M%S')}{str(uuid.uuid4())[:4].upper()}")
     guest_id: str
     guest_name: str
+    guest_contact: Optional[str] = None
     guest_rank: Optional[str] = None
     guest_unit: Optional[str] = None
     guest_service_status: Optional[str] = None  # "Serving" or "Retired"
@@ -696,6 +697,7 @@ async def create_booking(booking: BookingCreate):
     booking_obj = Booking(
         guest_id=guest["id"],
         guest_name=booking.guest_name,
+        guest_contact=booking.guest_contact,
         guest_rank=booking.guest_rank,
         guest_unit=booking.guest_unit,
         guest_service_status=booking.guest_service_status,
