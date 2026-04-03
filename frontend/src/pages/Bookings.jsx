@@ -79,6 +79,12 @@ export default function Bookings() {
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [createdBookingData, setCreatedBookingData] = useState(null);
 
+  // Guest History
+  const [showGuestHistory, setShowGuestHistory] = useState(false);
+  const [guestHistorySearch, setGuestHistorySearch] = useState({ phone: "", army_number: "" });
+  const [guestHistoryData, setGuestHistoryData] = useState(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   // Pending refunds
   const [pendingRefunds, setPendingRefunds] = useState([]);
   const [refundAction, setRefundAction] = useState(null);
@@ -503,6 +509,45 @@ export default function Bookings() {
     }
   };
 
+  const handleSearchGuestHistory = async () => {
+    if (!guestHistorySearch.phone && !guestHistorySearch.army_number) {
+      toast.error("Please enter phone number or army number");
+      return;
+    }
+
+    setLoadingHistory(true);
+    try {
+      const params = {};
+      if (guestHistorySearch.phone) {
+        params.phone_number = guestHistorySearch.phone;
+      }
+      if (guestHistorySearch.army_number) {
+        params.army_number = guestHistorySearch.army_number;
+      }
+
+      const response = await axios.get(`${API}/bookings/guest-history`, { params });
+      
+      if (response.data.found) {
+        setGuestHistoryData(response.data);
+        toast.success(`Found ${response.data.statistics.total_bookings} booking(s)`);
+      } else {
+        setGuestHistoryData(null);
+        toast.info("No booking history found for this guest");
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to fetch guest history");
+      setGuestHistoryData(null);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const resetGuestHistorySearch = () => {
+    setGuestHistorySearch({ phone: "", army_number: "" });
+    setGuestHistoryData(null);
+  };
+
+
   const handleProcessRefund = async (refund) => {
     setRefundAction(refund);
     setRefundForm({ transaction_ref: "", refund_date: format(new Date(), "yyyy-MM-dd"), notes: "" });
@@ -591,6 +636,15 @@ export default function Bookings() {
           >
             <ArrowCounterClockwise size={20} />
             Pending Refunds
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setShowGuestHistory(true)}
+            className="flex items-center gap-2 text-indigo-700 border-indigo-300 hover:bg-indigo-50"
+            data-testid="guest-history-btn"
+          >
+            <MagnifyingGlass size={20} />
+            Guest History
           </Button>
           <Button
             onClick={() => setShowNewBooking(true)}
@@ -1636,6 +1690,215 @@ export default function Bookings() {
           onSubmitted={handleFeedbackSubmitted}
         />
       )}
+
+
+      {/* ===== GUEST HISTORY DIALOG ===== */}
+      <Dialog open={showGuestHistory} onOpenChange={(open) => { setShowGuestHistory(open); if (!open) resetGuestHistorySearch(); }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" data-testid="guest-history-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MagnifyingGlass size={24} className="text-indigo-500" weight="fill" />
+              Guest History Lookup
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Search Form */}
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">Search by guest's phone number or army/service number</p>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Phone Number</Label>
+                  <Input
+                    value={guestHistorySearch.phone}
+                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, phone: e.target.value }))}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="10-digit mobile number"
+                    className="earms-input mt-1"
+                    data-testid="history-phone-input"
+                    maxLength={10}
+                  />
+                </div>
+                <div>
+                  <Label>Army / Service Number</Label>
+                  <Input
+                    value={guestHistorySearch.army_number}
+                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, army_number: e.target.value }))}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="e.g., 15814432-F"
+                    className="earms-input mt-1"
+                    data-testid="history-army-input"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <Button
+                  onClick={handleSearchGuestHistory}
+                  disabled={loadingHistory}
+                  className="flex items-center gap-2 bg-indigo-500 hover:bg-indigo-600"
+                  data-testid="search-history-btn"
+                >
+                  {loadingHistory ? (
+                    <><SpinnerGap size={20} className="animate-spin" /> Searching...</>
+                  ) : (
+                    <><MagnifyingGlass size={20} /> Search</>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={resetGuestHistorySearch}
+                  className="flex items-center gap-2"
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+
+            {/* Results */}
+            {guestHistoryData && guestHistoryData.found && (
+              <div className="space-y-6 mt-6 border-t pt-6">
+                {/* Guest Info Summary */}
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                  <h3 className="font-semibold text-indigo-900 mb-3 flex items-center gap-2">
+                    <User size={20} />
+                    Guest Information
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                    <div>
+                      <p className="text-slate-500">Name</p>
+                      <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_name}</p>
+                    </div>
+                    {guestHistoryData.guest_info.guest_contact && (
+                      <div>
+                        <p className="text-slate-500">Phone</p>
+                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_contact}</p>
+                      </div>
+                    )}
+                    {guestHistoryData.guest_info.guest_rank && (
+                      <div>
+                        <p className="text-slate-500">Rank</p>
+                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_rank}</p>
+                      </div>
+                    )}
+                    {guestHistoryData.guest_info.army_number && (
+                      <div>
+                        <p className="text-slate-500">Army Number</p>
+                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.army_number}</p>
+                      </div>
+                    )}
+                    {guestHistoryData.guest_info.guest_unit && (
+                      <div>
+                        <p className="text-slate-500">Unit</p>
+                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_unit}</p>
+                      </div>
+                    )}
+                    {guestHistoryData.guest_info.guest_service_status && (
+                      <div>
+                        <p className="text-slate-500">Service Status</p>
+                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_service_status}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Statistics */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                    <div className="text-2xl font-bold text-blue-800">{guestHistoryData.statistics.total_bookings}</div>
+                    <div className="text-xs text-blue-600 mt-1">Total Bookings</div>
+                  </div>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                    <div className="text-2xl font-bold text-emerald-800">{guestHistoryData.statistics.completed_stays}</div>
+                    <div className="text-xs text-emerald-600 mt-1">Completed Stays</div>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-center">
+                    <div className="text-2xl font-bold text-purple-800">{guestHistoryData.statistics.total_nights_stayed}</div>
+                    <div className="text-xs text-purple-600 mt-1">Total Nights</div>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+                    <div className="text-2xl font-bold text-amber-800">₹{guestHistoryData.statistics.total_spent}</div>
+                    <div className="text-xs text-amber-600 mt-1">Total Spent</div>
+                  </div>
+                </div>
+
+                {/* Booking History */}
+                <div>
+                  <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                    <CalendarCheck size={20} />
+                    Booking History ({guestHistoryData.bookings.length})
+                  </h3>
+                  <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                    {guestHistoryData.bookings.map((booking) => (
+                      <div 
+                        key={booking.id} 
+                        className="border border-slate-200 rounded-xl p-4 hover:border-indigo-300 transition-colors"
+                      >
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-slate-800">#{booking.booking_number}</p>
+                            <p className="text-xs text-slate-500">
+                              {format(parseISO(booking.check_in_date), "dd MMM yyyy")} - {format(parseISO(booking.check_out_date), "dd MMM yyyy")}
+                            </p>
+                          </div>
+                          <Badge className={
+                            booking.status === "checked_out" ? "badge-success" :
+                            booking.status === "checked_in" ? "badge-warning" :
+                            booking.status === "confirmed" ? "badge-info" :
+                            "badge-danger"
+                          }>
+                            {booking.status === "checked_in" ? "Checked In" :
+                             booking.status === "checked_out" ? "Checked Out" :
+                             booking.status === "confirmed" ? "Confirmed" :
+                             "Cancelled"}
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                          <div>
+                            <p className="text-slate-500 text-xs">Room(s)</p>
+                            <p className="font-medium text-slate-700">{booking.room_numbers.join(", ")}</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-500 text-xs">Category</p>
+                            <p className="font-medium text-slate-700">{[...new Set(booking.room_categories)].join(", ")}</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-500 text-xs">Total Amount</p>
+                            <p className="font-medium text-slate-700">₹{booking.total_amount}</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-500 text-xs">Payment</p>
+                            <p className="font-medium text-slate-700">{booking.payment_mode || "N/A"}</p>
+                          </div>
+                        </div>
+
+                        {booking.extra_beds > 0 && (
+                          <p className="text-xs text-slate-500 mt-2">Extra Beds: {booking.extra_beds}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {guestHistoryData && !guestHistoryData.found && (
+              <div className="text-center py-8 text-slate-500">
+                <MagnifyingGlass size={48} className="mx-auto mb-3 opacity-30" />
+                <p>No booking history found for this guest</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => { setShowGuestHistory(false); resetGuestHistorySearch(); }}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ===== WHATSAPP MESSAGE MODAL ===== */}
       <Dialog open={showWhatsAppModal} onOpenChange={setShowWhatsAppModal}>

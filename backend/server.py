@@ -968,6 +968,120 @@ async def cancel_booking(request: CancelBookingRequest):
     
     return {"message": "Booking cancelled successfully", "booking_id": request.booking_id}
 
+# ============= GUEST HISTORY =============
+
+@api_router.get("/bookings/guest-history")
+async def get_guest_history(
+    phone_number: Optional[str] = Query(None, description="Guest phone number"),
+    army_number: Optional[str] = Query(None, description="Army/Service number")
+):
+    """
+    Get booking history for a guest by phone number or army number.
+    Returns all bookings, statistics, and guest information.
+    """
+    if not phone_number and not army_number:
+        raise HTTPException(
+            status_code=400, 
+            detail="Please provide either phone_number or army_number"
+        )
+    
+    # Build query
+    query = {}
+    if phone_number:
+        # Remove spaces and format for search (support multiple formats)
+        phone_clean = phone_number.replace(" ", "").replace("+91", "").replace("-", "")
+        query["$or"] = [
+            {"guest_contact": {"$regex": phone_clean, "$options": "i"}},
+            {"guest_contact": {"$regex": f"\\+91.*{phone_clean}", "$options": "i"}}
+        ]
+    elif army_number:
+        query["army_number"] = {"$regex": army_number, "$options": "i"}
+    
+    # Fetch all bookings for this guest
+    bookings = await db.bookings.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    
+    if not bookings:
+        return {
+            "found": False,
+            "guest_info": None,
+            "bookings": [],
+            "statistics": None
+        }
+    
+    # Extract guest info from first booking
+    first_booking = bookings[0]
+    guest_info = {
+        "guest_name": first_booking.get("guest_name"),
+        "guest_contact": first_booking.get("guest_contact"),
+        "army_number": first_booking.get("army_number"),
+        "guest_rank": first_booking.get("guest_rank"),
+        "guest_unit": first_booking.get("guest_unit"),
+        "guest_service_status": first_booking.get("guest_service_status")
+    }
+    
+    # Calculate statistics
+    total_bookings = len(bookings)
+    completed_stays = len([b for b in bookings if b.get("status") == "checked_out"])
+    cancelled_bookings = len([b for b in bookings if b.get("status") == "cancelled"])
+    current_bookings = len([b for b in bookings if b.get("status") in ["confirmed", "checked_in"]])
+    
+    total_spent = sum(b.get("total_amount", 0) for b in bookings if b.get("status") == "checked_out")
+    total_advance_paid = sum(b.get("advance_paid", 0) for b in bookings)
+    
+    # Calculate total nights stayed
+    total_nights = 0
+    for booking in bookings:
+        if booking.get("status") == "checked_out":
+            try:
+                checkin = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
+                checkout = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
+                nights = (checkout - checkin).days
+                total_nights += nights
+            except:
+                pass
+    
+    statistics = {
+        "total_bookings": total_bookings,
+        "completed_stays": completed_stays,
+        "cancelled_bookings": cancelled_bookings,
+        "current_bookings": current_bookings,
+        "total_spent": round(total_spent, 2),
+        "total_advance_paid": round(total_advance_paid, 2),
+        "total_nights_stayed": total_nights,
+        "first_visit": bookings[-1].get("created_at") if bookings else None,
+        "last_visit": bookings[0].get("created_at") if bookings else None
+    }
+    
+    # Format bookings for response
+    formatted_bookings = []
+    for booking in bookings:
+        formatted_bookings.append({
+            "id": booking.get("id"),
+            "booking_number": booking.get("booking_number"),
+            "check_in_date": booking.get("check_in_date"),
+            "check_out_date": booking.get("check_out_date"),
+            "actual_check_in": booking.get("actual_check_in"),
+            "actual_check_out": booking.get("actual_check_out"),
+            "room_numbers": booking.get("room_numbers", []),
+            "room_categories": booking.get("room_categories", []),
+            "num_rooms": booking.get("num_rooms", 0),
+            "num_guests": booking.get("num_guests", 1),
+            "status": booking.get("status"),
+            "total_amount": booking.get("total_amount", 0),
+            "advance_paid": booking.get("advance_paid", 0),
+            "balance_amount": booking.get("balance_amount", 0),
+            "payment_mode": booking.get("payment_mode"),
+            "created_at": booking.get("created_at"),
+            "extra_beds": booking.get("extra_beds", 0)
+        })
+    
+    return {
+        "found": True,
+        "guest_info": guest_info,
+        "bookings": formatted_bookings,
+        "statistics": statistics
+    }
+
 # ============= STAFF =============
 
 @api_router.get("/staff", response_model=List[dict])
