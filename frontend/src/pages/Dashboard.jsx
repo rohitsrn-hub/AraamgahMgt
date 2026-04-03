@@ -288,89 +288,99 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6" data-testid="dashboard">
-      {/* Page Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-800" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            Dashboard
-          </h1>
-          <p className="text-slate-500 mt-1">Real-time overview of E-ARMS</p>
-        </div>
-        <div className="flex flex-wrap gap-3">
+      {/* Page Title & Action Buttons */}
+      <div className="space-y-4">
+        <h1 className="text-2xl md:text-3xl font-bold text-slate-800" style={{ fontFamily: 'Outfit, sans-serif' }}>
+          Dashboard
+        </h1>
+        
+        {/* Action Buttons Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+          {/* New Booking - Prominent */}
           <Button 
             onClick={() => navigate('/bookings?action=new')}
-            className="h-12 px-5 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-xl flex items-center gap-2"
+            className="col-span-2 sm:col-span-1 h-16 px-6 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transform transition-all hover:scale-105"
             data-testid="new-booking-btn"
           >
-            <CalendarCheck size={20} />
-            New Booking
+            <CalendarCheck size={24} weight="fill" />
+            <span className="text-base">New Booking</span>
           </Button>
+          
           <Button 
             onClick={() => setShowCheckInModal(true)}
-            className="h-12 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center gap-2"
+            className="h-16 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
             data-testid="quick-checkin-btn"
           >
-            <SignIn size={20} />
-            Check In
+            <SignIn size={22} />
+            <span>Check In</span>
           </Button>
+          
           <Button 
             onClick={() => setShowCheckOutModal(true)}
-            className="h-12 px-5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl flex items-center gap-2"
+            className="h-16 px-5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
             data-testid="quick-checkout-btn"
           >
-            <SignOut size={20} />
-            Check Out
+            <SignOut size={22} />
+            <span>Check Out</span>
           </Button>
+          
           <Button 
             onClick={() => setShowCancelModal(true)}
-            className="h-12 px-5 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl flex items-center gap-2"
+            className="h-16 px-5 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
             data-testid="cancel-booking-btn"
           >
-            <X size={20} />
-            Cancel
+            <X size={22} />
+            <span>Cancel</span>
           </Button>
-          {/* Placeholder for Meals button - Phase 2 */}
-          <Button 
-            disabled
-            className="h-12 px-5 bg-slate-200 text-slate-400 font-medium rounded-xl flex items-center gap-2 cursor-not-allowed"
-            data-testid="meals-btn-placeholder"
-          >
-            <ForkKnife size={20} />
-            Meals
-          </Button>
+          
           {/* Feedback Button */}
           {(() => {
             const score = feedbackAnalysis?.average_score || 0;
             const count = feedbackAnalysis?.total_count || 0;
             const emoji = count === 0 ? "" : score >= 4 ? " 😊" : score >= 2.5 ? " 😐" : " 😢";
             const btnClass = count === 0
-              ? "h-12 px-5 bg-slate-100 text-slate-600 font-medium rounded-xl flex items-center gap-2 border border-slate-200"
+              ? "h-16 px-5 bg-slate-100 text-slate-600 font-medium rounded-xl flex items-center justify-center gap-2 border border-slate-200 shadow-sm"
               : score >= 4
-              ? "h-12 px-5 bg-emerald-100 text-emerald-800 border border-emerald-300 font-medium rounded-xl flex items-center gap-2"
+              ? "h-16 px-5 bg-emerald-100 text-emerald-800 border border-emerald-300 font-medium rounded-xl flex items-center justify-center gap-2 shadow-sm"
               : score >= 2.5
-              ? "h-12 px-5 bg-orange-100 text-orange-800 border border-orange-300 font-medium rounded-xl flex items-center gap-2"
-              : "h-12 px-5 bg-red-100 text-red-800 border border-red-300 font-medium rounded-xl flex items-center gap-2";
+              ? "h-16 px-5 bg-orange-100 text-orange-800 border border-orange-300 font-medium rounded-xl flex items-center justify-center gap-2 shadow-sm"
+              : "h-16 px-5 bg-red-100 text-red-800 border border-red-300 font-medium rounded-xl flex items-center justify-center gap-2 shadow-sm";
             return (
               <Button
                 onClick={() => navigate('/feedback')}
                 className={btnClass}
                 data-testid="feedback-btn"
               >
-                <Star size={20} weight={count > 0 ? "fill" : "regular"} />
-                Feedback{emoji}
+                <Star size={22} weight={count > 0 ? "fill" : "regular"} />
+                <span>Feedback{emoji}</span>
               </Button>
             );
           })()}
-          <Button onClick={() => navigate('/reports')} className="h-12 px-5 bg-slate-100 text-slate-700 border border-slate-200 font-medium rounded-xl flex items-center gap-2 hover:bg-slate-200" data-testid="reports-btn">
-            <ChartBar size={20} />
-            Monthly Report
+          
+          <Button 
+            onClick={() => navigate('/reports')} 
+            className="h-16 px-5 bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium rounded-xl flex items-center justify-center gap-2 hover:bg-indigo-200 shadow-sm" 
+            data-testid="reports-btn"
+          >
+            <ChartBar size={22} />
+            <span>Reports</span>
+          </Button>
+          
+          {/* Meals - Disabled for now */}
+          <Button 
+            disabled
+            className="h-16 px-5 bg-slate-100 text-slate-400 font-medium rounded-xl flex items-center justify-center gap-2 cursor-not-allowed opacity-50"
+            data-testid="meals-btn-placeholder"
+          >
+            <ForkKnife size={22} />
+            <span>Meals</span>
           </Button>
         </div>
       </div>
 
-      {/* Overall Occupancy Summary - TOP PRIORITY */}
+      {/* Overall Occupancy Summary */}
       {occupancy && (
-        <Card className="earms-card border-2 border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50" data-testid="overall-occupancy-card">
+        <Card className="earms-card border-2 border-blue-200 bg-gradient-to-br from-blue-50 via-indigo-50 to-blue-50 shadow-md" data-testid="overall-occupancy-card">
           <CardContent className="p-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
               <div className="flex items-center gap-4">
@@ -412,7 +422,7 @@ export default function Dashboard() {
       {occupancy && (
         <div className="grid md:grid-cols-2 gap-6">
           {/* Cat I */}
-          <Card className="earms-card" data-testid="cat-i-occupancy-card">
+          <Card className="earms-card bg-gradient-to-br from-blue-50 to-cyan-50 border-blue-200 shadow-md" data-testid="cat-i-occupancy-card">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-blue-800">
                 <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
@@ -421,19 +431,19 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-4 gap-3">
-                <div className="text-center p-3 bg-blue-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-blue-100">
                   <div className="text-2xl font-bold text-blue-800">{occupancy.cat_i.total}</div>
                   <div className="text-xs text-blue-600">Total</div>
                 </div>
-                <div className="text-center p-3 bg-red-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-red-100">
                   <div className="text-2xl font-bold text-red-800">{occupancy.cat_i.occupied}</div>
                   <div className="text-xs text-red-600">Occupied</div>
                 </div>
-                <div className="text-center p-3 bg-emerald-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-emerald-100">
                   <div className="text-2xl font-bold text-emerald-800">{occupancy.cat_i.available}</div>
                   <div className="text-xs text-emerald-600">Available</div>
                 </div>
-                <div className="text-center p-3 bg-slate-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-slate-200">
                   <div className="text-2xl font-bold text-slate-800">{occupancy.cat_i.occupancy_percent}%</div>
                   <div className="text-xs text-slate-600">Rate</div>
                 </div>
@@ -442,7 +452,7 @@ export default function Dashboard() {
           </Card>
 
           {/* Cat II */}
-          <Card className="earms-card" data-testid="cat-ii-occupancy-card">
+          <Card className="earms-card bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200 shadow-md" data-testid="cat-ii-occupancy-card">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-purple-800">
                 <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
@@ -451,19 +461,19 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-4 gap-3">
-                <div className="text-center p-3 bg-purple-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-purple-100">
                   <div className="text-2xl font-bold text-purple-800">{occupancy.cat_ii.total}</div>
                   <div className="text-xs text-purple-600">Total</div>
                 </div>
-                <div className="text-center p-3 bg-red-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-red-100">
                   <div className="text-2xl font-bold text-red-800">{occupancy.cat_ii.occupied}</div>
                   <div className="text-xs text-red-600">Occupied</div>
                 </div>
-                <div className="text-center p-3 bg-emerald-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-emerald-100">
                   <div className="text-2xl font-bold text-emerald-800">{occupancy.cat_ii.available}</div>
                   <div className="text-xs text-emerald-600">Available</div>
                 </div>
-                <div className="text-center p-3 bg-slate-50 rounded-xl">
+                <div className="text-center p-3 bg-white/70 rounded-xl border border-slate-200">
                   <div className="text-2xl font-bold text-slate-800">{occupancy.cat_ii.occupancy_percent}%</div>
                   <div className="text-xs text-slate-600">Rate</div>
                 </div>
@@ -476,10 +486,10 @@ export default function Dashboard() {
       {/* Today's & Upcoming Bookings */}
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Today's Bookings */}
-        <Card className="earms-card" data-testid="today-bookings-card">
+        <Card className="earms-card bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-md" data-testid="today-bookings-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Clock size={20} className="text-amber-500" weight="fill" />
+              <Clock size={20} className="text-amber-600" weight="fill" />
               Today's Bookings
             </CardTitle>
           </CardHeader>
@@ -491,7 +501,7 @@ export default function Dashboard() {
                 {bookings.today.slice(0, 5).map((booking) => (
                   <div 
                     key={booking.id} 
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-xl"
+                    className="flex items-center justify-between p-3 bg-white/70 rounded-xl border border-amber-100"
                     data-testid={`today-booking-${booking.id}`}
                   >
                     <div>
@@ -509,7 +519,7 @@ export default function Dashboard() {
         </Card>
 
         {/* Upcoming Bookings */}
-        <Card className="earms-card" data-testid="upcoming-bookings-card">
+        <Card className="earms-card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200 shadow-md" data-testid="upcoming-bookings-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CalendarCheck size={20} className="text-blue-500" weight="fill" />
@@ -524,7 +534,7 @@ export default function Dashboard() {
                 {bookings.upcoming.slice(0, 5).map((booking) => (
                   <div 
                     key={booking.id} 
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-xl"
+                    className="flex items-center justify-between p-3 bg-white/70 rounded-xl border border-emerald-100"
                     data-testid={`upcoming-booking-${booking.id}`}
                   >
                     <div>
@@ -703,7 +713,7 @@ export default function Dashboard() {
       {/* Analytics */}
       {analytics && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="analytics-section">
-          <Card className="earms-card">
+          <Card className="earms-card bg-gradient-to-br from-sky-50 to-blue-50 border-sky-200 shadow-md">
             <CardContent className="p-6 text-center">
               <div className="p-3 bg-blue-100 rounded-full w-14 h-14 mx-auto mb-3 flex items-center justify-center">
                 <CalendarCheck size={28} className="text-blue-600" weight="fill" />
@@ -715,7 +725,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="earms-card">
+          <Card className="earms-card bg-gradient-to-br from-emerald-50 to-green-50 border-emerald-200 shadow-md">
             <CardContent className="p-6 text-center">
               <div className="p-3 bg-emerald-100 rounded-full w-14 h-14 mx-auto mb-3 flex items-center justify-center">
                 <CheckCircle size={28} className="text-emerald-600" weight="fill" />
@@ -727,7 +737,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="earms-card">
+          <Card className="earms-card bg-gradient-to-br from-violet-50 to-purple-50 border-violet-200 shadow-md">
             <CardContent className="p-6 text-center">
               <div className="p-3 bg-purple-100 rounded-full w-14 h-14 mx-auto mb-3 flex items-center justify-center">
                 <Users size={28} className="text-purple-600" weight="fill" />
@@ -739,7 +749,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="earms-card">
+          <Card className="earms-card bg-gradient-to-br from-amber-50 to-yellow-50 border-amber-200 shadow-md">
             <CardContent className="p-6 text-center">
               <div className="p-3 bg-amber-100 rounded-full w-14 h-14 mx-auto mb-3 flex items-center justify-center">
                 <TrendUp size={28} className="text-amber-600" weight="fill" />
@@ -755,7 +765,7 @@ export default function Dashboard() {
 
       {/* Fund Generation Dashboard */}
       {funds && (
-        <Card className="earms-card" data-testid="fund-dashboard-card">
+        <Card className="earms-card bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 border-emerald-200 shadow-md" data-testid="fund-dashboard-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CurrencyInr size={24} className="text-emerald-500" weight="fill" />
