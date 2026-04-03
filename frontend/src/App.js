@@ -6,7 +6,7 @@ import { Toaster } from "@/components/ui/sonner";
 
 // Pages
 import SetupWizard from "@/pages/SetupWizard";
-import SplashScreen from "@/pages/SplashScreen";
+import CommandCenter from "@/components/CommandCenter";
 import Dashboard from "@/pages/Dashboard";
 import Bookings from "@/pages/Bookings";
 import Rooms from "@/pages/Rooms";
@@ -64,9 +64,12 @@ function App() {
     <div className="App">
       <BrowserRouter>
         <Routes>
-          <Route path="/splash" element={<SplashScreen />} />
-          <Route path="/" element={<Layout settings={settings} />}>
-            <Route index element={<Dashboard />} />
+          {/* Command Center as main landing */}
+          <Route path="/" element={<CommandCenter />} />
+          
+          {/* App routes with layout */}
+          <Route path="/app" element={<Layout settings={settings} />}>
+            <Route path="dashboard" element={<Dashboard />} />
             <Route path="bookings" element={<Bookings />} />
             <Route path="rooms" element={<Rooms />} />
             <Route path="staff" element={<Staff />} />
@@ -75,6 +78,15 @@ function App() {
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="reports" element={<MonthlyReport settings={settings} />} />
           </Route>
+          
+          {/* Direct routes (for backward compatibility) */}
+          <Route path="/dashboard" element={<Layout settings={settings} />}>
+            <Route index element={<Dashboard />} />
+          </Route>
+          <Route path="/bookings" element={<Layout settings={settings} />}>
+            <Route index element={<Bookings />} />
+          </Route>
+          
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
