@@ -483,110 +483,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Today's & Upcoming Bookings */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Today's Bookings */}
-        <Card className="earms-card bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-md" data-testid="today-bookings-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock size={20} className="text-amber-600" weight="fill" />
-              Today's Bookings
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {bookings.today.length === 0 ? (
-              <p className="text-slate-400 text-center py-6">No bookings for today</p>
-            ) : (
-              <div className="space-y-3">
-                {bookings.today.slice(0, 5).map((booking) => (
-                  <div 
-                    key={booking.id} 
-                    className="flex items-center justify-between p-3 bg-white/70 rounded-xl border border-amber-100"
-                    data-testid={`today-booking-${booking.id}`}
-                  >
-                    <div>
-                      <p className="font-medium text-slate-800">{booking.guest_name}</p>
-                      <p className="text-sm text-slate-500">Room {getRoomDisplay(booking)}</p>
-                    </div>
-                    <Badge className={booking.status === "checked_in" ? "badge-success" : "badge-info"}>
-                      {booking.status === "checked_in" ? "Checked In" : "Confirmed"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Upcoming Bookings */}
-        <Card className="earms-card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200 shadow-md" data-testid="upcoming-bookings-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CalendarCheck size={20} className="text-blue-500" weight="fill" />
-              Upcoming Bookings (7 days)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {bookings.upcoming.length === 0 ? (
-              <p className="text-slate-400 text-center py-6">No upcoming bookings</p>
-            ) : (
-              <div className="space-y-3">
-                {bookings.upcoming.slice(0, 5).map((booking) => (
-                  <div 
-                    key={booking.id} 
-                    className="flex items-center justify-between p-3 bg-white/70 rounded-xl border border-emerald-100"
-                    data-testid={`upcoming-booking-${booking.id}`}
-                  >
-                    <div>
-                      <p className="font-medium text-slate-800">{booking.guest_name}</p>
-                      <p className="text-sm text-slate-500">
-                        Room {getRoomDisplay(booking)} • {format(parseISO(booking.check_in_date), "dd MMM")}
-                      </p>
-                    </div>
-                    <Badge className="badge-info">Confirmed</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Period Selector */}
-      <Card className="earms-card" data-testid="period-selector-card">
-        <CardContent className="p-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <span className="font-medium text-slate-700">Analytics Period:</span>
-            <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
-              <SelectTrigger className="w-40" data-testid="month-selector">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {months.map((m) => (
-                  <SelectItem key={m.value} value={m.value.toString()}>
-                    {m.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
-              <SelectTrigger className="w-28" data-testid="year-selector">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[2024, 2025, 2026].map((y) => (
-                  <SelectItem key={y} value={y.toString()}>
-                    {y}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Monthly Calendar Planner Toggle */}
-      <Card className="earms-card" data-testid="calendar-planner-card">
+      <Card className="earms-card bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200 shadow-md" data-testid="calendar-planner-card">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
@@ -708,6 +606,108 @@ export default function Dashboard() {
             </div>
           </CardContent>
         )}
+      </Card>
+
+      {/* Today's & Upcoming Bookings */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Today's Bookings */}
+        <Card className="earms-card bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-md" data-testid="today-bookings-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock size={20} className="text-amber-600" weight="fill" />
+              Today's Bookings
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {bookings.today.length === 0 ? (
+              <p className="text-slate-400 text-center py-6">No bookings for today</p>
+            ) : (
+              <div className="space-y-3">
+                {bookings.today.slice(0, 5).map((booking) => (
+                  <div 
+                    key={booking.id} 
+                    className="flex items-center justify-between p-3 bg-white/70 rounded-xl border border-amber-100"
+                    data-testid={`today-booking-${booking.id}`}
+                  >
+                    <div>
+                      <p className="font-medium text-slate-800">{booking.guest_name}</p>
+                      <p className="text-sm text-slate-500">Room {getRoomDisplay(booking)}</p>
+                    </div>
+                    <Badge className={booking.status === "checked_in" ? "badge-success" : "badge-info"}>
+                      {booking.status === "checked_in" ? "Checked In" : "Confirmed"}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Upcoming Bookings */}
+        <Card className="earms-card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200 shadow-md" data-testid="upcoming-bookings-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarCheck size={20} className="text-blue-500" weight="fill" />
+              Upcoming Bookings (7 days)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {bookings.upcoming.length === 0 ? (
+              <p className="text-slate-400 text-center py-6">No upcoming bookings</p>
+            ) : (
+              <div className="space-y-3">
+                {bookings.upcoming.slice(0, 5).map((booking) => (
+                  <div 
+                    key={booking.id} 
+                    className="flex items-center justify-between p-3 bg-white/70 rounded-xl border border-emerald-100"
+                    data-testid={`upcoming-booking-${booking.id}`}
+                  >
+                    <div>
+                      <p className="font-medium text-slate-800">{booking.guest_name}</p>
+                      <p className="text-sm text-slate-500">
+                        Room {getRoomDisplay(booking)} • {format(parseISO(booking.check_in_date), "dd MMM")}
+                      </p>
+                    </div>
+                    <Badge className="badge-info">Confirmed</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Period Selector */}
+      <Card className="earms-card" data-testid="period-selector-card">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <span className="font-medium text-slate-700">Analytics Period:</span>
+            <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+              <SelectTrigger className="w-40" data-testid="month-selector">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {months.map((m) => (
+                  <SelectItem key={m.value} value={m.value.toString()}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+              <SelectTrigger className="w-28" data-testid="year-selector">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[2024, 2025, 2026].map((y) => (
+                  <SelectItem key={y} value={y.toString()}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
       </Card>
 
       {/* Analytics */}
