@@ -285,7 +285,7 @@ export default function Bookings() {
   const isPaymentDetailsFilled = () => {
     const m = bookingForm.payment_mode;
     if (m === "cash") return !!bookingForm.payment_id;
-    if (m === "upi") return !!(bookingForm.upi_id || bookingForm.upi_phone);
+    if (m === "upi") return !!(bookingForm.upi_id || bookingForm.payment_id);
     if (m === "bank_transfer") return !!(bookingForm.bank_name && bookingForm.bank_account);
     if (m === "card") return !!bookingForm.payment_id;
     return false;
@@ -766,18 +766,15 @@ export default function Bookings() {
                 </div>
                 <div>
                   <Label>Mobile Number</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm pointer-events-none">+91</span>
-                    <Input 
-                      value={bookingForm.guest_contact} 
-                      onChange={(e) => handleBookingPhoneChange(e.target.value)} 
-                      onFocus={(e) => e.target.select()} 
-                      placeholder="Mobile number" 
-                      className={`earms-input mt-1 pl-12 ${bookingPhoneError ? 'border-red-500' : ''}`}
-                      data-testid="input-guest-contact" 
-                      maxLength={11}
-                    />
-                  </div>
+                  <Input 
+                    value={bookingForm.guest_contact} 
+                    onChange={(e) => handleBookingPhoneChange(e.target.value)} 
+                    onFocus={(e) => e.target.select()} 
+                    placeholder="10-digit mobile number" 
+                    className={`earms-input mt-1 ${bookingPhoneError ? 'border-red-500' : ''}`}
+                    data-testid="input-guest-contact" 
+                    maxLength={11}
+                  />
                   {bookingPhoneError && <p className="text-xs text-red-500 mt-1">{bookingPhoneError}</p>}
                   <p className="text-xs text-slate-500 mt-1">For WhatsApp booking confirmation</p>
                 </div>
@@ -984,16 +981,15 @@ export default function Bookings() {
                 {bookingForm.payment_mode === "upi" && (
                   <div className="grid grid-cols-2 gap-3 mt-3">
                     <div>
-                      <Label>UPI ID</Label>
+                      <Label>UPI ID *</Label>
                       <Input value={bookingForm.upi_id} onChange={(e) => setBookingForm({...bookingForm, upi_id: e.target.value})}
                         onFocus={(e) => e.target.select()} placeholder="e.g., name@upi" className="earms-input mt-1" data-testid="input-upi-id" />
                     </div>
                     <div>
-                      <Label>UPI Phone Number *</Label>
-                      <Input value={bookingForm.upi_phone} onChange={(e) => setBookingForm({...bookingForm, upi_phone: e.target.value})}
-                        onFocus={(e) => e.target.select()} placeholder="10-digit mobile" className="earms-input mt-1" data-testid="input-upi-phone" />
+                      <Label>Transaction ID *</Label>
+                      <Input value={bookingForm.payment_id} onChange={(e) => setBookingForm({...bookingForm, payment_id: e.target.value})}
+                        onFocus={(e) => e.target.select()} placeholder="UPI Transaction/Reference ID" className="earms-input mt-1" data-testid="input-upi-transaction-id" />
                     </div>
-                    <p className="col-span-2 text-xs text-slate-500">* At least one of UPI ID or UPI Phone is required</p>
                   </div>
                 )}
 
