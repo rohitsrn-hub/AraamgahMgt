@@ -2,7 +2,10 @@
 
 .cc-container {
   height: 100vh;
-  background: radial-gradient(circle at center, #0b1c1c, #020606);
+  background-image: url('https://customer-assets.emergentagent.com/job_arms-dashboard/artifacts/38623wx0_78825.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   color: white;
   display: flex;
   flex-direction: column;
@@ -13,68 +16,57 @@
   position: relative;
 }
 
-/* Animated grid background */
+/* Dark overlay for better text visibility */
 .cc-container::before {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: 
-    repeating-linear-gradient(0deg, transparent, transparent 49px, rgba(0, 255, 200, 0.1) 50px),
-    repeating-linear-gradient(90deg, transparent, transparent 49px, rgba(0, 255, 200, 0.1) 50px);
-  opacity: 0.3;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
   pointer-events: none;
 }
 
 .cc-title {
   text-align: center;
-  margin-bottom: 60px;
+  margin-bottom: 50px;
   position: relative;
   z-index: 10;
 }
 
 .cc-title h1 {
-  font-size: 48px;
+  font-size: 52px;
   font-weight: 700;
-  letter-spacing: 6px;
+  letter-spacing: 8px;
   margin: 0;
-  text-shadow: 0 0 20px rgba(0, 255, 200, 0.8);
-  animation: glow 2s ease-in-out infinite alternate;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+  color: #ffffff;
 }
 
 .cc-title p {
-  opacity: 0.8;
-  font-size: 14px;
-  letter-spacing: 3px;
-  margin-top: 10px;
-  color: #00ffc8;
-  font-weight: 300;
-}
-
-@keyframes glow {
-  from {
-    text-shadow: 0 0 10px rgba(0, 255, 200, 0.4);
-  }
-  to {
-    text-shadow: 0 0 25px rgba(0, 255, 200, 1);
-  }
+  font-size: 13px;
+  letter-spacing: 4px;
+  margin-top: 12px;
+  color: #e0e0e0;
+  font-weight: 400;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
 }
 
 .cc-core {
   position: relative;
-  width: 380px;
-  height: 380px;
+  width: 500px;
+  height: 500px;
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 10;
 }
 
 .cc-hub {
   position: absolute;
-  width: 140px;
-  height: 140px;
+  width: 160px;
+  height: 160px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(240, 240, 240, 0.95));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -83,162 +75,198 @@
   left: 50%;
   transform: translate(-50%, -50%);
   box-shadow: 
-    0 0 30px rgba(0, 255, 200, 0.6),
-    inset 0 0 20px rgba(0, 255, 200, 0.2);
-  border: 2px solid rgba(0, 255, 200, 0.5);
-  z-index: 5;
-  animation: hub-pulse 3s ease-in-out infinite;
-}
-
-@keyframes hub-pulse {
-  0%, 100% {
-    box-shadow: 
-      0 0 30px rgba(0, 255, 200, 0.6),
-      inset 0 0 20px rgba(0, 255, 200, 0.2);
-  }
-  50% {
-    box-shadow: 
-      0 0 50px rgba(0, 255, 200, 0.9),
-      inset 0 0 30px rgba(0, 255, 200, 0.4);
-  }
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 0 0 6px rgba(255, 255, 255, 0.2);
+  border: 3px solid rgba(255, 255, 255, 0.8);
+  z-index: 6;
 }
 
 .cc-hub div h2 {
-  font-size: 20px;
+  font-size: 24px;
   margin: 0;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 2px;
+  color: #1a1a1a;
 }
 
 .cc-hub div span {
-  font-size: 11px;
-  opacity: 0.7;
+  font-size: 12px;
   letter-spacing: 1px;
-  color: #00ffc8;
+  color: #666;
+  font-weight: 500;
+  margin-top: 4px;
+  display: block;
 }
 
 .cc-btn {
   position: absolute;
-  width: 130px;
-  height: 85px;
+  width: 180px;
+  height: 180px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  font-weight: 500;
-  font-size: 14px;
+  font-weight: 600;
+  font-size: 16px;
   cursor: pointer;
-  clip-path: polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%);
   transition: all 0.3s ease;
-  animation: pulse 2.5s infinite;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  letter-spacing: 1px;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-  z-index: 2;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 3;
+  color: white;
+  border-radius: 12px;
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .cc-btn:hover {
-  transform: scale(1.15);
-  filter: brightness(1.3);
+  transform: scale(1.08) translateY(-5px);
+  box-shadow: 
+    0 12px 32px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
   z-index: 10;
 }
 
 .cc-btn:active {
-  transform: scale(1.05);
+  transform: scale(1.02);
 }
 
+/* Solid colors matching dashboard theme */
 .green { 
-  background: linear-gradient(135deg, #00ff9c, #009e6d); 
-  box-shadow: 0 0 20px rgba(0, 255, 156, 0.5);
-}
-
-.green:hover {
-  box-shadow: 0 0 35px rgba(0, 255, 156, 0.9);
+  background: #10B981;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
 }
 
 .blue { 
-  background: linear-gradient(135deg, #3fa9ff, #004e92); 
-  box-shadow: 0 0 20px rgba(63, 169, 255, 0.5);
-}
-
-.blue:hover {
-  box-shadow: 0 0 35px rgba(63, 169, 255, 0.9);
+  background: #3B82F6;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
 }
 
 .orange { 
-  background: linear-gradient(135deg, #ff9a00, #ff5e00); 
-  box-shadow: 0 0 20px rgba(255, 154, 0, 0.5);
-}
-
-.orange:hover {
-  box-shadow: 0 0 35px rgba(255, 154, 0, 0.9);
+  background: #F59E0B;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
 }
 
 .red { 
-  background: linear-gradient(135deg, #ff4d4d, #b30000); 
-  box-shadow: 0 0 20px rgba(255, 77, 77, 0.5);
-}
-
-.red:hover {
-  box-shadow: 0 0 35px rgba(255, 77, 77, 0.9);
+  background: #EF4444;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
 }
 
 .purple { 
-  background: linear-gradient(135deg, #c77dff, #5a00b3); 
-  box-shadow: 0 0 20px rgba(199, 125, 255, 0.5);
+  background: #A855F7;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
 }
 
-.purple:hover {
-  box-shadow: 0 0 35px rgba(199, 125, 255, 0.9);
-}
-
+/* Positioning - Pentagon/Star layout */
 .top { 
-  top: 0; 
+  top: -20px; 
   left: 50%; 
-  transform: translateX(-50%); 
+  transform: translateX(-50%) rotate(0deg); 
 }
 
 .left { 
-  top: 50%; 
-  left: 0; 
-  transform: translateY(-50%); 
+  top: 38%; 
+  left: -50px; 
+  transform: translateY(-50%) rotate(-72deg); 
+}
+
+.left span {
+  transform: rotate(72deg);
+  display: block;
 }
 
 .right { 
-  top: 50%; 
-  right: 0; 
-  transform: translateY(-50%); 
+  top: 38%; 
+  right: -50px; 
+  transform: translateY(-50%) rotate(72deg); 
+}
+
+.right span {
+  transform: rotate(-72deg);
+  display: block;
 }
 
 .bottom-left { 
-  bottom: 0; 
-  left: 20%; 
+  bottom: -20px; 
+  left: 18%; 
+  transform: rotate(-144deg);
+}
+
+.bottom-left span {
+  transform: rotate(144deg);
+  display: block;
 }
 
 .bottom-right { 
-  bottom: 0; 
-  right: 20%; 
+  bottom: -20px; 
+  right: 18%; 
+  transform: rotate(144deg);
 }
 
-@keyframes pulse {
-  0% { 
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3); 
-  }
-  50% { 
-    box-shadow: 0 0 25px rgba(255, 255, 255, 0.7); 
-  }
-  100% { 
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3); 
-  }
+.bottom-right span {
+  transform: rotate(-144deg);
+  display: block;
 }
 
 /* Responsive design */
 @media (max-width: 768px) {
   .cc-title h1 {
-    font-size: 36px;
+    font-size: 40px;
+    letter-spacing: 6px;
   }
   
   .cc-title p {
-    font-size: 12px;
+    font-size: 11px;
+    letter-spacing: 3px;
+  }
+  
+  .cc-core {
+    width: 400px;
+    height: 400px;
+  }
+  
+  .cc-hub {
+    width: 130px;
+    height: 130px;
+  }
+  
+  .cc-hub div h2 {
+    font-size: 20px;
+  }
+  
+  .cc-hub div span {
+    font-size: 11px;
+  }
+  
+  .cc-btn {
+    width: 150px;
+    height: 150px;
+    font-size: 14px;
+  }
+  
+  .top {
+    top: -15px;
+  }
+  
+  .left {
+    left: -40px;
+  }
+  
+  .right {
+    right: -40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .cc-title h1 {
+    font-size: 32px;
+    letter-spacing: 4px;
+  }
+  
+  .cc-title p {
+    font-size: 10px;
+    letter-spacing: 2px;
   }
   
   .cc-core {
@@ -247,8 +275,8 @@
   }
   
   .cc-hub {
-    width: 110px;
-    height: 110px;
+    width: 100px;
+    height: 100px;
   }
   
   .cc-hub div h2 {
@@ -256,35 +284,32 @@
   }
   
   .cc-hub div span {
-    font-size: 10px;
+    font-size: 9px;
   }
   
   .cc-btn {
-    width: 110px;
-    height: 75px;
+    width: 120px;
+    height: 120px;
     font-size: 12px;
   }
-}
-
-@media (max-width: 480px) {
-  .cc-title h1 {
-    font-size: 28px;
-    letter-spacing: 4px;
+  
+  .top {
+    top: -10px;
   }
   
-  .cc-core {
-    width: 280px;
-    height: 280px;
+  .left {
+    left: -30px;
   }
   
-  .cc-hub {
-    width: 90px;
-    height: 90px;
+  .right {
+    right: -30px;
   }
   
-  .cc-btn {
-    width: 95px;
-    height: 65px;
-    font-size: 11px;
+  .bottom-left {
+    left: 12%;
+  }
+  
+  .bottom-right {
+    right: 12%;
   }
 }

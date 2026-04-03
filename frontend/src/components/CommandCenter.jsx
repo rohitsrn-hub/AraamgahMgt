@@ -23,23 +23,23 @@ const CommandCenter = () => {
         </div>
 
         <div className="cc-btn green top" onClick={() => navigate('/bookings?action=new')}>
-          New Booking
+          <span>New Booking</span>
         </div>
 
         <div className="cc-btn blue left" onClick={() => navigate('/bookings')}>
-          Check In
+          <span>Check In</span>
         </div>
 
         <div className="cc-btn orange right" onClick={() => navigate('/bookings')}>
-          Check Out
+          <span>Check Out</span>
         </div>
 
         <div className="cc-btn red bottom-left" onClick={() => navigate('/bookings')}>
-          Cancel
+          <span>Cancel</span>
         </div>
 
         <div className="cc-btn purple bottom-right" onClick={() => navigate('/dashboard')}>
-          Dashboard
+          <span>Dashboard</span>
         </div>
 
       </div>
