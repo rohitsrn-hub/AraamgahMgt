@@ -86,6 +86,24 @@ function App() {
           <Route path="/bookings" element={<Layout settings={settings} />}>
             <Route index element={<Bookings />} />
           </Route>
+          <Route path="/feedback" element={<Layout settings={settings} />}>
+            <Route index element={<FeedbackPage />} />
+          </Route>
+          <Route path="/reports" element={<Layout settings={settings} />}>
+            <Route index element={<MonthlyReport settings={settings} />} />
+          </Route>
+          <Route path="/rooms" element={<Layout settings={settings} />}>
+            <Route index element={<Rooms />} />
+          </Route>
+          <Route path="/staff" element={<Layout settings={settings} />}>
+            <Route index element={<Staff />} />
+          </Route>
+          <Route path="/toiletry" element={<Layout settings={settings} />}>
+            <Route index element={<Toiletry />} />
+          </Route>
+          <Route path="/settings" element={<Layout settings={settings} />}>
+            <Route index element={<Settings settings={settings} onUpdate={fetchSettings} />} />
+          </Route>
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
