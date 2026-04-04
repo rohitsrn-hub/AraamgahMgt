@@ -307,24 +307,75 @@ export default function Bookings() {
   };
 
   const handleCreateBooking = async () => {
-    if (!bookingForm.guest_name) {
-      toast.error("Please enter guest name");
+    // Guest Name validation
+    if (!bookingForm.guest_name || bookingForm.guest_name.trim().length < 2) {
+      toast.error("Guest name is required (minimum 2 characters)");
       return;
     }
-    if (bookingForm.room_ids.length === 0 || !bookingForm.check_in_date || !bookingForm.check_out_date) {
-      toast.error("Please select dates and rooms");
+    if (bookingForm.guest_name.length > 100) {
+      toast.error("Guest name cannot exceed 100 characters");
+      return;
+    }
+    
+    // Phone number validation (if provided)
+    if (bookingForm.guest_contact) {
+      const cleanPhone = bookingForm.guest_contact.replace(/\s/g, "");
+      if (!validateIndianPhone(cleanPhone)) {
+        toast.error("Enter valid 10-digit Indian mobile number");
+        return;
+      }
+    }
+    
+    // Aadhaar validation (if provided)
+    if (bookingForm.aadhaar_number && !/^\d{12}$/.test(bookingForm.aadhaar_number)) {
+      toast.error("Aadhaar must be exactly 12 digits");
+      return;
+    }
+    
+    // Date and room validation
+    if (!bookingForm.check_in_date || !bookingForm.check_out_date) {
+      toast.error("Please select check-in and check-out dates");
+      return;
+    }
+    
+    // Check-in date must be today or future
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const checkInDate = new Date(bookingForm.check_in_date);
+    checkInDate.setHours(0, 0, 0, 0);
+    if (checkInDate < today) {
+      toast.error("Check-in date must be today or a future date");
+      return;
+    }
+    
+    // Check-out must be after check-in
+    if (bookingForm.check_out_date <= bookingForm.check_in_date) {
+      toast.error("Check-out date must be after check-in date");
+      return;
+    }
+    
+    if (bookingForm.room_ids.length === 0) {
+      toast.error("Please select at least one room");
       return;
     }
     if (bookingForm.room_ids.length !== bookingForm.num_rooms) {
       toast.error(`Please select exactly ${bookingForm.num_rooms} room(s)`);
       return;
     }
+    
+    // Payment validation
     if (!bookingForm.payment_mode) {
       toast.error("Please select payment mode");
       return;
     }
     if (!isPaymentDetailsFilled()) {
       toast.error("Please fill in the required payment details");
+      return;
+    }
+    
+    // Advance amount validation
+    if (bookingForm.advance_paid < 0) {
+      toast.error("Advance amount cannot be negative");
       return;
     }
 
@@ -436,17 +487,70 @@ export default function Bookings() {
   }));
 
   const handleCheckIn = async () => {
-    if (!actionForm.staff_id) { toast.error("Please select staff member"); return; }
+    // Staff validation
+    if (!actionForm.staff_id) { 
+      toast.error("Please select staff member"); 
+      return; 
+    }
+    
+    // Phone validation (required for check-in)
+    if (!actionForm.guest_contact) {
+      toast.error("Phone number is required for check-in");
+      return;
+    }
+    const cleanPhone = actionForm.guest_contact.replace(/\s/g, "");
+    if (!validateIndianPhone(cleanPhone)) {
+      toast.error("Enter valid 10-digit mobile number");
+      return;
+    }
+    
+    // Age validation (required for check-in)
+    if (!actionForm.guest_age) {
+      toast.error("Age is required");
+      return;
+    }
+    const age = parseInt(actionForm.guest_age);
+    if (age < 18 || age > 120) {
+      toast.error("Enter valid age (18-120)");
+      return;
+    }
+    
+    // Gender validation
+    if (!actionForm.guest_sex) {
+      toast.error("Please select gender");
+      return;
+    }
+    
+    // Address validation (required and min 10 chars)
+    if (!actionForm.guest_address || actionForm.guest_address.trim().length < 10) {
+      toast.error("Enter complete address (minimum 10 characters)");
+      return;
+    }
+    if (actionForm.guest_address.length > 500) {
+      toast.error("Address cannot exceed 500 characters");
+      return;
+    }
+    
+    // Identity card validation
+    if (!actionForm.identity_card_number || actionForm.identity_card_number.trim().length === 0) {
+      toast.error("Enter valid identity card number");
+      return;
+    }
+    
+    // Service status validation
+    if (!actionForm.guest_service_status) {
+      toast.error("Please select service status");
+      return;
+    }
+    
     try {
-      const cleanPhone = actionForm.guest_contact
-        ? "+91 " + actionForm.guest_contact.replace(/\s/g, "").replace(/^\+91/, "")
-        : undefined;
+      const formattedPhone = "+91 " + cleanPhone.replace(/^\+91/, "");
       await axios.post(`${API}/bookings/check-in`, {
         booking_id: selectedBooking.id,
         staff_id: actionForm.staff_id,
         extra_beds: actionForm.extra_beds,
         notes: actionForm.notes,
-        guest_contact: cleanPhone,
+        guest_contact: formattedPhone,
         guest_age: actionForm.guest_age ? parseInt(actionForm.guest_age) : undefined,
         guest_sex: actionForm.guest_sex || undefined,
         guest_address: actionForm.guest_address || undefined,
@@ -550,27 +654,6 @@ export default function Bookings() {
     try {
       const params = {};
       if (guestHistorySearch.phone) {
-
-  const handlePrintBookingSlips = () => {
-    // Get confirmed or checked-in bookings
-    const eligibleBookings = bookings.filter(b => 
-      b.status === "confirmed" || b.status === "checked_in"
-    );
-    
-    if (eligibleBookings.length === 0) {
-      toast.error("No confirmed or checked-in bookings to print");
-      return;
-    }
-    
-    try {
-      generateBookingSlips(eligibleBookings);
-      toast.success(`Generated ${eligibleBookings.length} booking slip(s)`);
-    } catch (error) {
-      toast.error("Failed to generate booking slips");
-      console.error(error);
-    }
-  };
-
         params.phone_number = guestHistorySearch.phone;
       }
       if (guestHistorySearch.army_number) {
@@ -591,6 +674,26 @@ export default function Bookings() {
       setGuestHistoryData(null);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handlePrintBookingSlips = () => {
+    // Get confirmed or checked-in bookings
+    const eligibleBookings = bookings.filter(b => 
+      b.status === "confirmed" || b.status === "checked_in"
+    );
+    
+    if (eligibleBookings.length === 0) {
+      toast.error("No confirmed or checked-in bookings to print");
+      return;
+    }
+    
+    try {
+      generateBookingSlips(eligibleBookings);
+      toast.success(`Generated ${eligibleBookings.length} booking slip(s)`);
+    } catch (error) {
+      toast.error("Failed to generate booking slips");
+      console.error(error);
     }
   };
 

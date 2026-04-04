@@ -552,7 +552,10 @@ async def complete_setup(request: SetupRequest):
         )
         await db.rooms.insert_one(serialize_doc(room.model_dump()))
     
-    return {"message": "Setup completed successfully", "settings": doc}
+    # Fetch the updated settings without _id
+    settings_response = await db.app_settings.find_one({}, {"_id": 0})
+    
+    return {"message": "Setup completed successfully", "settings": settings_response}
 
 @api_router.put("/settings")
 async def update_settings(request: AppSettingsUpdate):
