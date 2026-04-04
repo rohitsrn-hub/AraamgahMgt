@@ -611,7 +611,11 @@ export default function Dashboard() {
       {/* Today's & Upcoming Bookings */}
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Today's Bookings */}
-        <Card className="earms-card bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-md" data-testid="today-bookings-card">
+        <Card 
+          className="earms-card bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200 shadow-md cursor-pointer hover:shadow-lg transition-shadow" 
+          data-testid="today-bookings-card"
+          onClick={() => navigate('/bookings')}
+        >
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Clock size={20} className="text-amber-600" weight="fill" />
@@ -638,13 +642,22 @@ export default function Dashboard() {
                     </Badge>
                   </div>
                 ))}
+                {bookings.today.length > 5 && (
+                  <p className="text-xs text-slate-500 text-center pt-2">
+                    Click to view all {bookings.today.length} bookings
+                  </p>
+                )}
               </div>
             )}
           </CardContent>
         </Card>
 
         {/* Upcoming Bookings */}
-        <Card className="earms-card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200 shadow-md" data-testid="upcoming-bookings-card">
+        <Card 
+          className="earms-card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-200 shadow-md cursor-pointer hover:shadow-lg transition-shadow" 
+          data-testid="upcoming-bookings-card"
+          onClick={() => navigate('/bookings')}
+        >
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <CalendarCheck size={20} className="text-blue-500" weight="fill" />
@@ -671,6 +684,11 @@ export default function Dashboard() {
                     <Badge className="badge-info">Confirmed</Badge>
                   </div>
                 ))}
+                {bookings.upcoming.length > 5 && (
+                  <p className="text-xs text-slate-500 text-center pt-2">
+                    Click to view all {bookings.upcoming.length} upcoming bookings
+                  </p>
+                )}
               </div>
             )}
           </CardContent>

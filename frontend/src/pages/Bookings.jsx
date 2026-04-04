@@ -12,7 +12,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { generateCheckoutReceipt, generateRefundsPDF } from "@/utils/pdfUtils";
+import { generateCheckoutReceipt, generateRefundsPDF, generateBookingSlips } from "@/utils/pdfUtils";
 import FeedbackForm from "@/components/FeedbackForm";
 import { 
   Plus, 
@@ -89,6 +89,10 @@ export default function Bookings() {
   // 4-night booking confirmation
   const [showNightConfirmation, setShowNightConfirmation] = useState(false);
   const [pendingBookingData, setPendingBookingData] = useState(null);
+
+  // Bulk booking slip generation
+  const [selectedBookingIds, setSelectedBookingIds] = useState([]);
+  const [showBulkActions, setShowBulkActions] = useState(false);
 
   // Pending refunds
   const [pendingRefunds, setPendingRefunds] = useState([]);
@@ -546,6 +550,27 @@ export default function Bookings() {
     try {
       const params = {};
       if (guestHistorySearch.phone) {
+
+  const handlePrintBookingSlips = () => {
+    // Get confirmed or checked-in bookings
+    const eligibleBookings = bookings.filter(b => 
+      b.status === "confirmed" || b.status === "checked_in"
+    );
+    
+    if (eligibleBookings.length === 0) {
+      toast.error("No confirmed or checked-in bookings to print");
+      return;
+    }
+    
+    try {
+      generateBookingSlips(eligibleBookings);
+      toast.success(`Generated ${eligibleBookings.length} booking slip(s)`);
+    } catch (error) {
+      toast.error("Failed to generate booking slips");
+      console.error(error);
+    }
+  };
+
         params.phone_number = guestHistorySearch.phone;
       }
       if (guestHistorySearch.army_number) {
@@ -672,6 +697,15 @@ export default function Bookings() {
           >
             <MagnifyingGlass size={20} />
             Guest History
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handlePrintBookingSlips}
+            className="flex items-center gap-2 text-green-700 border-green-300 hover:bg-green-50"
+            data-testid="print-slips-btn"
+          >
+            <FilePdf size={20} />
+            Print Booking Slips
           </Button>
           <Button
             onClick={() => setShowNewBooking(true)}

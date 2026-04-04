@@ -322,3 +322,159 @@ export function generateMonthlyReportPDF(data, settings) {
   addFooter(doc);
   doc.save(`monthly_report_${data.month_name}_${data.year}.pdf`);
 }
+
+
+// ===== BOOKING SLIP (REQUISITION FOR ACCN IN ECSAG) =====
+// Generates requisition form slips - 3 per A4 page
+export function generateBookingSlips(bookings) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageWidth = 210; // A4 width in mm
+  const slipHeight = 99; // A4 height (297mm) / 3 = 99mm per slip
+  
+  bookings.forEach((booking, index) => {
+    // Add new page if not first slip and index is multiple of 3
+    if (index > 0 && index % 3 === 0) {
+      doc.addPage();
+    }
+    
+    // Calculate Y position for this slip (0, 99, or 198)
+    const startY = (index % 3) * slipHeight;
+    
+    // Draw border around slip
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    doc.rect(5, startY + 3, pageWidth - 10, slipHeight - 6);
+    
+    // Header
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("REQUISITION FOR ACCN IN ECSAG (JCO/OR)", pageWidth / 2, startY + 10, { align: "center" });
+    
+    // Calculate nights
+    const checkIn = new Date(booking.check_in_date);
+    const checkOut = new Date(booking.check_out_date);
+    const nights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+    
+    // Form fields - Left column
+    let y = startY + 18;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    
+    // Serial Number
+    doc.text("SER NO:", 10, y);
+    doc.text((index + 1).toString(), 30, y);
+    
+    // NO (Army Number)
+    y += 6;
+    doc.text("NO:", 10, y);
+    doc.text(booking.army_number || "N/A", 30, y);
+    
+    // Rank
+    y += 6;
+    doc.text("RANK:", 10, y);
+    doc.text(booking.guest_rank || "N/A", 30, y);
+    
+    // Name
+    y += 6;
+    doc.text("NAME:", 10, y);
+    doc.setFont("helvetica", "bold");
+    doc.text((booking.guest_name || "").toUpperCase(), 30, y);
+    doc.setFont("helvetica", "normal");
+    
+    // Unit
+    y += 6;
+    doc.text("UNIT:", 10, y);
+    doc.text(booking.guest_unit || "N/A", 30, y);
+    
+    // Right column
+    y = startY + 18;
+    
+    // Number of Days
+    doc.text("NO OF DAYS:", 110, y);
+    doc.text(nights.toString(), 145, y);
+    
+    // Number of Rooms
+    y += 6;
+    doc.text("NO OF ROOM:", 110, y);
+    doc.text((booking.num_rooms || 1).toString(), 145, y);
+    
+    // Room Number
+    y += 6;
+    doc.text("ROOM NO:", 110, y);
+    doc.text((booking.room_numbers || []).join(", "), 145, y);
+    
+    // From Date
+    y += 6;
+    doc.text("FROM:", 110, y);
+    doc.text(format(checkIn, "dd/MM/yyyy"), 145, y);
+    
+    // To Date
+    y += 6;
+    doc.text("TO:", 110, y);
+    doc.text(format(checkOut, "dd/MM/yyyy"), 145, y);
+    
+    // Full width fields
+    y += 8;
+    
+    // I-Card Number
+    doc.text("ICARD NO:", 10, y);
+    doc.text(booking.identity_card_number || booking.aadhaar_number || "N/A", 40, y);
+    
+    // Mobile Number
+    doc.text("MOBILE NO:", 110, y);
+    doc.text(booking.guest_contact || "N/A", 145, y);
+    
+    // Date
+    y += 6;
+    doc.text("DATE:", 10, y);
+    doc.text(format(new Date(booking.created_at || new Date()), "dd/MM/yyyy"), 40, y);
+    
+    // Contact Address
+    y += 6;
+    doc.text("CONTACT ADDRESS:", 10, y);
+    doc.text(booking.guest_address || "N/A", 45, y, { maxWidth: 150 });
+    
+    // S/JCO/NOK Mobile No
+    y += 6;
+    doc.text("S/JCO/NOK MOBILE NO:", 10, y);
+    doc.line(60, y, 200, y); // Blank line for manual entry
+    
+    // D.Card No / Aadhar Card No
+    y += 6;
+    doc.text("D.CARD NO/AADHAR CARD NO:", 10, y);
+    doc.text(booking.aadhaar_number || "N/A", 70, y);
+    
+    // D/Card Issued By
+    y += 6;
+    doc.text("D/CARD ISSUED BY:", 10, y);
+    doc.line(55, y, 200, y); // Blank line for manual entry
+    
+    // Signature section
+    y += 10;
+    const sigWidth = 45;
+    
+    doc.setFontSize(8);
+    doc.text("SIG OF INDL", 15, y);
+    doc.line(10, y + 2, 10 + sigWidth, y + 2);
+    
+    doc.text("NCO/IC", 65, y);
+    doc.line(60, y + 2, 60 + sigWidth, y + 2);
+    
+    doc.text("JCO/IC", 115, y);
+    doc.line(110, y + 2, 110 + sigWidth, y + 2);
+    
+    doc.text("OIC", 165, y);
+    doc.line(160, y + 2, 160 + sigWidth, y + 2);
+    
+    // Dotted line separator between slips (except for last slip on page)
+    if ((index + 1) % 3 !== 0 && index < bookings.length - 1) {
+      doc.setLineDash([2, 2]);
+      doc.line(10, startY + slipHeight - 3, pageWidth - 10, startY + slipHeight - 3);
+      doc.setLineDash([]);
+    }
+  });
+  
+  // Save the PDF
+  const timestamp = format(new Date(), "yyyyMMdd_HHmmss");
+  doc.save(`booking_slips_${timestamp}.pdf`);
+}
