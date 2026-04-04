@@ -101,3 +101,92 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "E-ARMS military rest house booking system with phone capture, WhatsApp confirmation, dashboard improvements, guest history, booking slip PDFs, and validation rules. Recent blocker: Bookings page crash due to function scoping issue."
+
+backend:
+  - task: "Fix MongoDB ObjectId serialization in setup endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Fixed /api/settings/setup endpoint to exclude _id from response. Changed return to fetch settings with {_id: 0} projection instead of returning raw doc."
+      - working: true
+        agent: "testing"
+        comment: "Backend test PASSED: POST /api/settings/setup returns 200 without ObjectId serialization error. GET /api/settings also returns 200 without _id field."
+
+frontend:
+  - task: "Fix Bookings page crash (handlePrintBookingSlips scoping error)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "user"
+        comment: "User reported: 'The new booking form is not opening' - white screen crash"
+      - working: true
+        agent: "main"
+        comment: "Fixed ReferenceError by moving handlePrintBookingSlips function out of nested handleSearchGuestHistory scope to component level (lines 576-594)"
+      - working: true
+        agent: "testing"
+        comment: "Frontend test PASSED: Bookings page loads without JavaScript crash or ReferenceError. All buttons (New Booking, Guest History, Print Booking Slips, Pending Refunds) are visible and functional."
+
+  - task: "Bulk Booking Slip PDF generation"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/utils/pdfUtils.js, /app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Print Booking Slips button present. generateBookingSlips function implemented in pdfUtils.js. Formats 3 slips per A4 page. Needs E2E testing with actual booking data."
+      - working: true
+        agent: "testing"
+        comment: "Frontend test PASSED: Print Booking Slips button functional. Clicked and received success toast: 'Generated 1 booking slip(s)'. PDF generation triggered successfully for confirmed/checked-in bookings."
+
+  - task: "Enhanced form validation rules"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Added comprehensive validation: Guest name (2-100 chars), phone (10 digit Indian), Aadhaar (12 digits), check-in date >= today, check-out > check-in, advance >= 0. Enhanced check-in validation: required phone, age 18-120, gender, address (10-500 chars), identity card, service status."
+      - working: true
+        agent: "testing"
+        comment: "Frontend test PASSED: New Booking form displays all validation fields with proper placeholders. Guest History modal validates empty input with 'Please enter phone number or army number' error. Date pickers show 'Stay Duration: X night(s)'. Room selection works after date selection."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "Fix Bookings page crash (handlePrintBookingSlips scoping error)"
+    - "Bulk Booking Slip PDF generation"
+    - "Enhanced form validation rules"
+    - "Fix MongoDB ObjectId serialization in setup endpoint"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Fixed P0 blocker (Bookings page crash) and P1 issue (MongoDB ObjectId error). Enhanced validation per VALIDATION_RULES.md. All changes tested with screenshot tool - page loads correctly, modal opens, linting passes. Ready for comprehensive E2E testing. Test credentials: Check /app/memory/test_credentials.md for any existing test accounts."
+  - agent: "testing"
+    message: "COMPREHENSIVE TESTING COMPLETE - ALL TESTS PASSED ✅ Backend: 11 tests passed, 4 skipped (100% success rate). Frontend: All critical features verified working. Bookings page crash fixed, PDF generation working, validations implemented correctly, ObjectId serialization issue resolved. No action items, no bugs found. Ready for production use."

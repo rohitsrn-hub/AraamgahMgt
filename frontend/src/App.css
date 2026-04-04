@@ -1,34 +1,301 @@
-.App-logo {
-    height: 40vmin;
-    pointer-events: none;
+/* E-ARMS App Styles */
+
+.App {
+    min-height: 100vh;
+    background-color: #F8FAFC;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-    .App-logo {
-        animation: App-logo-spin infinite 20s linear;
+/* Header styles */
+.earms-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: white;
+    border-bottom: 1px solid #E2E8F0;
+    height: 80px;
+}
+
+/* Main content area */
+.earms-main {
+    padding: 24px;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+/* Dashboard grid */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 24px;
+}
+
+@media (min-width: 768px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 }
 
-.App-header {
-    background-color: #0f0f10;
-    min-height: 100vh;
+@media (min-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (min-width: 1280px) {
+    .dashboard-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+/* Occupancy stats */
+.occupancy-stat {
     display: flex;
     flex-direction: column;
     align-items: center;
+    padding: 16px;
+    border-radius: 16px;
+    transition: all 0.2s;
+}
+
+.occupancy-stat.occupied {
+    background: #FEE2E2;
+    color: #991B1B;
+}
+
+.occupancy-stat.available {
+    background: #D1FAE5;
+    color: #065F46;
+}
+
+.occupancy-stat.total {
+    background: #DBEAFE;
+    color: #1E40AF;
+}
+
+/* Navigation sidebar */
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-weight: 500;
+    transition: all 0.2s;
+    color: #475569;
+}
+
+.nav-item:hover {
+    background: #F1F5F9;
+    color: #1E40AF;
+}
+
+.nav-item.active {
+    background: #DBEAFE;
+    color: #1E40AF;
+}
+
+/* Form styles */
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #334155;
+}
+
+/* Table styles */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th {
+    text-align: left;
+    padding: 12px 16px;
+    background: #F8FAFC;
+    font-weight: 600;
+    color: #475569;
+    border-bottom: 2px solid #E2E8F0;
+}
+
+.data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #E2E8F0;
+}
+
+.data-table tr:hover {
+    background: #F8FAFC;
+}
+
+/* Modal overlay */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
     justify-content: center;
-    font-size: calc(10px + 2vmin);
+    z-index: 100;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 24px;
+    padding: 32px;
+    max-width: 600px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+/* Setup wizard */
+.setup-wizard {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #DBEAFE 0%, #E0E7FF 50%, #FCE7F3 100%);
+    padding: 24px;
+}
+
+.setup-card {
+    background: white;
+    border-radius: 24px;
+    padding: 48px;
+    max-width: 600px;
+    width: 100%;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
+}
+
+/* Room card */
+.room-card {
+    padding: 16px;
+    border-radius: 16px;
+    border: 2px solid #E2E8F0;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.room-card:hover {
+    border-color: #3B82F6;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.room-card.occupied {
+    background: #FEF2F2;
+    border-color: #FECACA;
+}
+
+.room-card.available {
+    background: #F0FDF4;
+    border-color: #BBF7D0;
+}
+
+.room-card.maintenance {
+    background: #FEF3C7;
+    border-color: #FDE68A;
+}
+
+/* Stats card */
+.stats-card {
+    background: white;
+    border-radius: 20px;
+    padding: 24px;
+    border: 1px solid #E2E8F0;
+}
+
+.stats-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    line-height: 1;
+    font-family: 'Outfit', sans-serif;
+}
+
+.stats-label {
+    font-size: 0.875rem;
+    color: #64748B;
+    margin-top: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Fund dashboard */
+.fund-card {
+    padding: 20px;
+    border-radius: 16px;
+    text-align: center;
+}
+
+.fund-card.earnings {
+    background: #D1FAE5;
+}
+
+.fund-card.advance {
+    background: #FEF3C7;
+}
+
+.fund-card.refund {
+    background: #FEE2E2;
+}
+
+.fund-card.net {
+    background: #DBEAFE;
+}
+
+/* Calendar day styles */
+.calendar-day {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.calendar-day:hover {
+    background: #E2E8F0;
+}
+
+.calendar-day.selected {
+    background: #3B82F6;
     color: white;
 }
 
-.App-link {
-    color: #61dafb;
+.calendar-day.has-booking {
+    background: #DBEAFE;
+    color: #1E40AF;
 }
 
-@keyframes App-logo-spin {
-    from {
-        transform: rotate(0deg);
+/* Loading spinner */
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #E2E8F0;
+    border-top-color: #3B82F6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .earms-main {
+        padding: 16px;
     }
-    to {
-        transform: rotate(360deg);
+    
+    .setup-card {
+        padding: 24px;
+    }
+    
+    .stats-value {
+        font-size: 1.75rem;
     }
 }

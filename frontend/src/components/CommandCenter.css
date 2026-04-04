@@ -1,0 +1,315 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+.cc-container {
+  height: 100vh;
+  background-image: url('https://customer-assets.emergentagent.com/job_arms-dashboard/artifacts/38623wx0_78825.jpg');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Poppins', sans-serif;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Dark overlay for better text visibility */
+.cc-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+
+.cc-title {
+  text-align: center;
+  margin-bottom: 50px;
+  position: relative;
+  z-index: 10;
+}
+
+.cc-title h1 {
+  font-size: 52px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  margin: 0;
+  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+  color: #ffffff;
+}
+
+.cc-title p {
+  font-size: 13px;
+  letter-spacing: 4px;
+  margin-top: 12px;
+  color: #e0e0e0;
+  font-weight: 400;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+
+.cc-core {
+  position: relative;
+  width: 500px;
+  height: 500px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.cc-hub {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(240, 240, 240, 0.95));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    0 0 0 6px rgba(255, 255, 255, 0.2);
+  border: 3px solid rgba(255, 255, 255, 0.8);
+  z-index: 6;
+}
+
+.cc-hub div h2 {
+  font-size: 24px;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #1a1a1a;
+}
+
+.cc-hub div span {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #666;
+  font-weight: 500;
+  margin-top: 4px;
+  display: block;
+}
+
+.cc-btn {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 3;
+  color: white;
+  border-radius: 12px;
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.cc-btn:hover {
+  transform: scale(1.08) translateY(-5px);
+  box-shadow: 
+    0 12px 32px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  z-index: 10;
+}
+
+.cc-btn:active {
+  transform: scale(1.02);
+}
+
+/* Solid colors matching dashboard theme */
+.green { 
+  background: #10B981;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+.blue { 
+  background: #3B82F6;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+.orange { 
+  background: #F59E0B;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+.red { 
+  background: #EF4444;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+.purple { 
+  background: #A855F7;
+  clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%);
+}
+
+/* Positioning - Pentagon/Star layout */
+.top { 
+  top: -20px; 
+  left: 50%; 
+  transform: translateX(-50%) rotate(0deg); 
+}
+
+.left { 
+  top: 38%; 
+  left: -50px; 
+  transform: translateY(-50%) rotate(-72deg); 
+}
+
+.left span {
+  transform: rotate(72deg);
+  display: block;
+}
+
+.right { 
+  top: 38%; 
+  right: -50px; 
+  transform: translateY(-50%) rotate(72deg); 
+}
+
+.right span {
+  transform: rotate(-72deg);
+  display: block;
+}
+
+.bottom-left { 
+  bottom: -20px; 
+  left: 18%; 
+  transform: rotate(-144deg);
+}
+
+.bottom-left span {
+  transform: rotate(144deg);
+  display: block;
+}
+
+.bottom-right { 
+  bottom: -20px; 
+  right: 18%; 
+  transform: rotate(144deg);
+}
+
+.bottom-right span {
+  transform: rotate(-144deg);
+  display: block;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .cc-title h1 {
+    font-size: 40px;
+    letter-spacing: 6px;
+  }
+  
+  .cc-title p {
+    font-size: 11px;
+    letter-spacing: 3px;
+  }
+  
+  .cc-core {
+    width: 400px;
+    height: 400px;
+  }
+  
+  .cc-hub {
+    width: 130px;
+    height: 130px;
+  }
+  
+  .cc-hub div h2 {
+    font-size: 20px;
+  }
+  
+  .cc-hub div span {
+    font-size: 11px;
+  }
+  
+  .cc-btn {
+    width: 150px;
+    height: 150px;
+    font-size: 14px;
+  }
+  
+  .top {
+    top: -15px;
+  }
+  
+  .left {
+    left: -40px;
+  }
+  
+  .right {
+    right: -40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .cc-title h1 {
+    font-size: 32px;
+    letter-spacing: 4px;
+  }
+  
+  .cc-title p {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+  
+  .cc-core {
+    width: 320px;
+    height: 320px;
+  }
+  
+  .cc-hub {
+    width: 100px;
+    height: 100px;
+  }
+  
+  .cc-hub div h2 {
+    font-size: 16px;
+  }
+  
+  .cc-hub div span {
+    font-size: 9px;
+  }
+  
+  .cc-btn {
+    width: 120px;
+    height: 120px;
+    font-size: 12px;
+  }
+  
+  .top {
+    top: -10px;
+  }
+  
+  .left {
+    left: -30px;
+  }
+  
+  .right {
+    right: -30px;
+  }
+  
+  .bottom-left {
+    left: 12%;
+  }
+  
+  .bottom-right {
+    right: 12%;
+  }
+}

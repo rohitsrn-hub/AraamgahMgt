@@ -1,0 +1,101 @@
+{
+  "theme": "dark",
+  "archetype": "7 (Electric & Neon - Tactical Military Variant)",
+  "colors": {
+    "background": {
+      "base": "#04080F",
+      "surface": "#08111E",
+      "surface_glass": "rgba(8, 17, 30, 0.6)"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#A0B5C6",
+      "muted": "#56758C"
+    },
+    "brand": {
+      "primary": "#00FF41",
+      "primary_glow": "rgba(0, 255, 65, 0.4)",
+      "accent_blue": "#00F0FF",
+      "accent_orange": "#FF9500",
+      "accent_purple": "#BF5AF2",
+      "accent_red": "#FF3B30",
+      "hud_teal": "#1B93A4"
+    },
+    "borders": {
+      "default": "rgba(0, 255, 65, 0.2)",
+      "active": "rgba(0, 255, 65, 0.8)"
+    }
+  },
+  "typography": {
+    "heading_font": "Chakra Petch",
+    "body_font": "JetBrains Mono",
+    "data_font": "Share Tech Mono",
+    "sizes": {
+      "h1": "text-4xl sm:text-5xl tracking-widest",
+      "h2": "text-2xl sm:text-3xl tracking-tight",
+      "body": "text-sm",
+      "small": "text-xs tracking-[0.2em] uppercase"
+    }
+  },
+  "layout": {
+    "grid_system": "flex-col items-center justify-center",
+    "spacing": "p-4 md:p-8",
+    "containers": {
+      "hub": "rounded-full w-32 h-32 md:w-48 md:h-48 border-2 border-brand-primary relative",
+      "panel": "absolute bg-surface_glass backdrop-blur-md clip-path-trapezoid"
+    }
+  },
+  "components": {
+    "hub_core": {
+      "shape": "circle",
+      "border": "2px solid #00FF41",
+      "glow": "inset 0 0 20px rgba(0,255,65,0.5), 0 0 20px rgba(0,255,65,0.5)",
+      "animation": "Radar sweep with conic-gradient"
+    },
+    "trapezoid_buttons": {
+      "shape": "clip-path: polygon(10% 0%, 90% 0%, 100% 100%, 0% 100%)",
+      "layout": "Radial positioning using CSS transform / absolute positioning",
+      "colors": {
+        "New Booking": "#00FF41",
+        "Check Out": "#FF9500",
+        "Dashboard": "#BF5AF2",
+        "Cancel Booking": "#FF3B30",
+        "Check In": "#00F0FF"
+      },
+      "style": "backdrop-blur-md bg-white/5 border border-white/10 hover:border-white/30 transition-all text-center flex flex-col items-center justify-center gap-1",
+      "hover_effect": "glow, scale(1.05)"
+    }
+  },
+  "motion": {
+    "radar_sweep": "rotate 4s linear infinite (conic-gradient)",
+    "flicker": "opacity 1 to 0.8 randomly",
+    "pulse": "box-shadow spread pulsing 2s infinite",
+    "sequential_entry": "staggered fade-in + translate from center"
+  },
+  "visual_enhancers": {
+    "background_image": "https://images.unsplash.com/photo-1639313521811-fdfb1c040ddb",
+    "background_overlay": "bg-gradient-to-b from-[#04080F]/90 via-[#08111E]/80 to-[#04080F]/95 backdrop-blur-md",
+    "grid_lines": "repeating-linear-gradient for tactical grid effect",
+    "hud_elements": "crosshairs, coordinates, scanning lines",
+    "light_particles": "Subtle CSS particles or radial gradients mimicking scattered light"
+  },
+  "instructions_to_main_agent": [
+    "IMPORT GOOGLE FONTS: Add 'Chakra Petch' and 'Share Tech Mono' to the HTML head or CSS imports.",
+    "BACKGROUND: Use the provided background image URL. Apply a heavy overlay (`bg-[#04080F]/80`) and heavy backdrop blur (`backdrop-blur-xl`) so it looks like an out-of-focus control room.",
+    "TACTICAL GRID: Create a fixed full-screen overlay with a repeating linear gradient to act as thin grid lines. Keep the opacity very low (e.g., 5-10%).",
+    "HEADER: Center the text 'E-ARMS'. Apply `font-family: 'Chakra Petch'` and `text-shadow: 0 0 15px rgba(0, 255, 65, 0.8)`. Below it, add 'ECSAG AUTOMATED ROOM MANAGEMENT SYSTEM' in a smaller monospaced font with high tracking.",
+    "CENTER HUB: Create a circular div (e.g., w-32 h-32 or w-48 h-48). Use an inner green box-shadow for depth. Add a radar sweep animation using an absolute pseudo-element with `background: conic-gradient(from 0deg, transparent 70%, rgba(0, 255, 65, 0.6) 100%)` and a spinning keyframe animation (0 to 360deg).",
+    "RADIAL MENU (THE 5 BUTTONS): Arrange 5 absolute positioned buttons radially around the center hub.",
+    "TRAPEZOID SHAPE: Use `clip-path: polygon(0% 0%, 100% 0%, 85% 100%, 15% 100%)` for a wedge shape where the top (outer edge) is wider and the bottom (inner edge) is narrower. Note: Depending on orientation, you might need to adjust the polygon or rotate the button.",
+    "BUTTON MAPPING & ANGLES (Starting top, clockwise 72deg each):",
+    "1. Top (-90deg): New Booking (Green #00FF41)",
+    "2. Upper Right (-18deg): Check Out (Orange #FF9500)",
+    "3. Lower Right (+54deg): Dashboard (Purple #BF5AF2)",
+    "4. Lower Left (+126deg): Cancel Booking (Red #FF3B30)",
+    "5. Upper Left (+198deg): Check In (Blue #00F0FF)",
+    "Ensure each button reflects its assigned color via border-color or text glow, and has an icon.",
+    "HUD DETAILS: Add purely decorative 'tech overlays' to the corners of the screen (e.g., static coordinates, '[SYS.RDY]', or mini bar charts). Use absolute positioning.",
+    "Make sure all interactive elements include 'data-testid' attributes (e.g., `data-testid='btn-new-booking'`).",
+    "Ensure responsiveness! The 9:16 layout means the radial menu must scale down on smaller mobile screens so the buttons don't overflow the viewport width."
+  ]
+}
