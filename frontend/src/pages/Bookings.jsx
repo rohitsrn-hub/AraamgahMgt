@@ -596,8 +596,9 @@ export default function Bookings() {
         notes: form.notes
       });
       toast.success("Check-out successful!");
-      // Generate receipt
-      generateCheckoutReceipt(booking, settings);
+      // Generate receipt with enhanced notification
+      const result = generateCheckoutReceipt(booking, settings);
+      showPDFNotification(result, "Checkout Receipt Generated");
       setPendingCheckoutBooking(null);
       setSelectedBooking(null);
       setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
@@ -689,8 +690,8 @@ export default function Bookings() {
     }
     
     try {
-      generateBookingSlips(eligibleBookings);
-      toast.success(`Generated ${eligibleBookings.length} booking slip(s)`);
+      const result = generateBookingSlips(eligibleBookings);
+      showPDFNotification(result, `Generated ${result.count} booking slip(s)`);
     } catch (error) {
       toast.error("Failed to generate booking slips");
       console.error(error);
@@ -700,6 +701,33 @@ export default function Bookings() {
   const resetGuestHistorySearch = () => {
     setGuestHistorySearch({ phone: "", army_number: "" });
     setGuestHistoryData(null);
+  };
+
+  // Helper function for PDF download notification
+  const showPDFNotification = (result, title = "PDF Generated") => {
+    toast.success(
+      <div className="flex flex-col gap-2">
+        <div className="font-semibold">
+          ✓ {title}
+        </div>
+        <div className="text-sm text-gray-600">
+          Saved to Downloads: {result.filename}
+        </div>
+        <button
+          onClick={() => {
+            window.open(result.blobUrl, '_blank');
+            toast.dismiss();
+          }}
+          className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+        >
+          📄 Open PDF
+        </button>
+      </div>,
+      {
+        duration: 10000,
+        style: { minWidth: '350px' }
+      }
+    );
   };
 
 
@@ -922,7 +950,10 @@ export default function Bookings() {
                                 <SignOut size={16} className="mr-1" />Check Out
                               </Button>
                               <Button size="sm" variant="outline"
-                                onClick={() => generateCheckoutReceipt(booking, settings)}
+                                onClick={() => {
+                                  const result = generateCheckoutReceipt(booking, settings);
+                                  showPDFNotification(result, "Receipt Generated");
+                                }}
                                 className="text-purple-600 border-purple-200 hover:bg-purple-50"
                                 title="Print Bill"
                                 data-testid={`print-bill-btn-${booking.id}`}>
@@ -1742,7 +1773,10 @@ export default function Bookings() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <p className="text-sm text-amber-700 font-medium">{pendingRefunds.length} refund(s) pending</p>
-                  <Button size="sm" onClick={() => generateRefundsPDF(pendingRefunds)} className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white" data-testid="print-refunds-btn">
+                  <Button size="sm" onClick={() => {
+                    const result = generateRefundsPDF(pendingRefunds);
+                    showPDFNotification(result, `Refunds Report (${result.count} refunds)`);
+                  }} className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white" data-testid="print-refunds-btn">
                     <FilePdf size={16} /> Print PDF
                   </Button>
                 </div>

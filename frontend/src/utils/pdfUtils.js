@@ -137,7 +137,18 @@ export function generateCheckoutReceipt(booking, settings) {
   doc.text("(Duty Staff Signature)", W - 65, y + 13);
 
   addFooter(doc);
-  doc.save(`receipt_${booking.booking_number}.pdf`);
+  
+  // Save and return blob URL
+  const filename = `receipt_${booking.booking_number}.pdf`;
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  
+  return { blobUrl, filename };
 }
 
 // ===== PENDING REFUNDS PDF =====
@@ -151,8 +162,17 @@ export function generateRefundsPDF(refunds) {
     doc.setFontSize(12);
     doc.text("No pending refunds at this time.", W / 2, y + 20, { align: "center" });
     addFooter(doc);
-    doc.save("pending_refunds.pdf");
-    return;
+    
+    const filename = "pending_refunds.pdf";
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    link.click();
+    
+    return { blobUrl, filename, count: 0 };
   }
 
   autoTable(doc, {
@@ -182,7 +202,18 @@ export function generateRefundsPDF(refunds) {
   doc.text(`Total Pending Refunds: ₹${total.toFixed(2)}  (${refunds.length} guest(s))`, W - 10, finalY, { align: "right" });
 
   addFooter(doc);
-  doc.save("pending_refunds.pdf");
+  
+  // Save and return blob URL
+  const filename = "pending_refunds.pdf";
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  
+  return { blobUrl, filename, count: refunds.length };
 }
 
 // ===== MONTHLY REPORT PDF =====
@@ -320,7 +351,18 @@ export function generateMonthlyReportPDF(data, settings) {
   }
 
   addFooter(doc);
-  doc.save(`monthly_report_${data.month_name}_${data.year}.pdf`);
+  
+  // Save and return blob URL
+  const filename = `monthly_report_${data.month_name}_${data.year}.pdf`;
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  
+  return { blobUrl, filename };
 }
 
 
@@ -474,7 +516,20 @@ export function generateBookingSlips(bookings) {
     }
   });
   
-  // Save the PDF
+  // Save the PDF and return blob for opening
   const timestamp = format(new Date(), "yyyyMMdd_HHmmss");
-  doc.save(`booking_slips_${timestamp}.pdf`);
+  const filename = `booking_slips_${timestamp}.pdf`;
+  
+  // Get the PDF as a blob
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  
+  // Trigger download
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  
+  // Return blob URL for opening in new tab
+  return { blobUrl, filename, count: bookings.length };
 }
