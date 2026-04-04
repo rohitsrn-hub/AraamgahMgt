@@ -32,6 +32,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============= HELPER FUNCTIONS =============
+async def generate_booking_number():
+    """Generate sequential booking number starting from BK0001"""
+    # Get the latest booking number
+    latest_booking = await db.bookings.find_one(
+        {},
+        {"_id": 0, "booking_number": 1},
+        sort=[("created_at", -1)]
+    )
+    
+    if not latest_booking or not latest_booking.get("booking_number"):
+        return "BK0001"
+    
+    try:
+        # Extract the number from the booking number (e.g., BK0001 -> 1)
+        current_number = int(latest_booking["booking_number"].replace("BK", ""))
+        next_number = current_number + 1
+        # Format with leading zeros (e.g., 1 -> BK0001)
+        return f"BK{next_number:04d}"
+    except (ValueError, KeyError):
+        # Fallback to counting all bookings if format is unexpected
+        count = await db.bookings.count_documents({})
+        return f"BK{count + 1:04d}"
+
 # ============= ENUMS =============
 class RoomCategory(str, Enum):
     CAT_I = "Cat I"
@@ -187,7 +211,7 @@ class GuestCreate(BaseModel):
 class Booking(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    booking_number: str = Field(default_factory=lambda: f"BK{datetime.now().strftime('%Y%m%d%H%M%S')}{str(uuid.uuid4())[:4].upper()}")
+    booking_number: str  # Will be set manually using generate_booking_number()
     guest_id: str
     guest_name: str
     guest_contact: Optional[str] = None
@@ -697,7 +721,11 @@ async def create_booking(booking: BookingCreate):
         await db.guests.insert_one(guest_doc)
         guest = guest_doc
 
+    # Generate sequential booking number
+    booking_number = await generate_booking_number()
+
     booking_obj = Booking(
+        booking_number=booking_number,
         guest_id=guest["id"],
         guest_name=booking.guest_name,
         guest_contact=booking.guest_contact,
