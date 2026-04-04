@@ -163,7 +163,7 @@ export function generateRefundsPDF(refunds) {
     doc.text("No pending refunds at this time.", W / 2, y + 20, { align: "center" });
     addFooter(doc);
     
-    const filename = "pending_refunds.pdf";
+    const filename = "ECSAG_pending_refunds.pdf";
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
     
@@ -204,7 +204,7 @@ export function generateRefundsPDF(refunds) {
   addFooter(doc);
   
   // Save and return blob URL
-  const filename = "pending_refunds.pdf";
+  const filename = "ECSAG_pending_refunds.pdf";
   const pdfBlob = doc.output('blob');
   const blobUrl = URL.createObjectURL(pdfBlob);
   
@@ -353,7 +353,7 @@ export function generateMonthlyReportPDF(data, settings) {
   addFooter(doc);
   
   // Save and return blob URL
-  const filename = `monthly_report_${data.month_name}_${data.year}.pdf`;
+  const filename = `ECSAG_monthly_report_${data.month_name}_${data.year}.pdf`;
   const pdfBlob = doc.output('blob');
   const blobUrl = URL.createObjectURL(pdfBlob);
   
@@ -518,7 +518,7 @@ export function generateBookingSlips(bookings) {
   
   // Save the PDF and return blob for opening
   const timestamp = format(new Date(), "yyyyMMdd_HHmmss");
-  const filename = `booking_slips_${timestamp}.pdf`;
+  const filename = `ECSAG_booking_slips_${timestamp}.pdf`;
   
   // Get the PDF as a blob
   const pdfBlob = doc.output('blob');
