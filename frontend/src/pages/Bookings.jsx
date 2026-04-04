@@ -32,7 +32,8 @@ import {
   ArrowCounterClockwise,
   FilePdf,
   UserPlus,
-  Trash
+  Trash,
+  WarningCircle
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useLocation } from "react-router-dom";
@@ -84,6 +85,10 @@ export default function Bookings() {
   const [guestHistorySearch, setGuestHistorySearch] = useState({ phone: "", army_number: "" });
   const [guestHistoryData, setGuestHistoryData] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // 4-night booking confirmation
+  const [showNightConfirmation, setShowNightConfirmation] = useState(false);
+  const [pendingBookingData, setPendingBookingData] = useState(null);
 
   // Pending refunds
   const [pendingRefunds, setPendingRefunds] = useState([]);
@@ -319,37 +324,59 @@ export default function Bookings() {
       return;
     }
 
+    // Calculate number of nights
+    const checkIn = new Date(bookingForm.check_in_date);
+    const checkOut = new Date(bookingForm.check_out_date);
+    const nights = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
+
+    // Check if booking is more than 4 nights
+    if (nights > 4) {
+      // Store booking data and show confirmation dialog
+      setPendingBookingData(bookingForm);
+      setShowNightConfirmation(true);
+      return;
+    }
+
+    // Proceed with booking
+    await executeBooking();
+  };
+
+  const executeBooking = async () => {
+    const formData = pendingBookingData || bookingForm;
+    
     try {
       // Format phone number with +91 prefix if provided
-      const formattedPhone = bookingForm.guest_contact
-        ? "+91 " + bookingForm.guest_contact.replace(/\s/g, "").replace(/^\+91/, "")
+      const formattedPhone = formData.guest_contact
+        ? "+91 " + formData.guest_contact.replace(/\s/g, "").replace(/^\+91/, "")
         : undefined;
 
       const payload = {
-        guest_name: bookingForm.guest_name,
+        guest_name: formData.guest_name,
         guest_contact: formattedPhone,
-        guest_rank: bookingForm.guest_rank,
-        army_number: bookingForm.army_number,
-        aadhaar_number: bookingForm.aadhaar_number,
-        guest_unit: bookingForm.guest_unit,
-        room_ids: bookingForm.room_ids,
-        num_rooms: bookingForm.num_rooms,
-        check_in_date: format(bookingForm.check_in_date, "yyyy-MM-dd"),
-        check_out_date: format(bookingForm.check_out_date, "yyyy-MM-dd"),
-        advance_paid: bookingForm.advance_paid,
-        payment_mode: bookingForm.payment_mode,
-        payment_id: bookingForm.payment_id,
-        bank_name: bookingForm.bank_name,
-        bank_ifsc: bookingForm.bank_ifsc,
-        bank_account: bookingForm.bank_account,
-        upi_id: bookingForm.upi_id,
-        upi_phone: bookingForm.upi_phone
+        guest_rank: formData.guest_rank,
+        army_number: formData.army_number,
+        aadhaar_number: formData.aadhaar_number,
+        guest_unit: formData.guest_unit,
+        room_ids: formData.room_ids,
+        num_rooms: formData.num_rooms,
+        check_in_date: format(formData.check_in_date, "yyyy-MM-dd"),
+        check_out_date: format(formData.check_out_date, "yyyy-MM-dd"),
+        advance_paid: formData.advance_paid,
+        payment_mode: formData.payment_mode,
+        payment_id: formData.payment_id,
+        bank_name: formData.bank_name,
+        bank_ifsc: formData.bank_ifsc,
+        bank_account: formData.bank_account,
+        upi_id: formData.upi_id,
+        upi_phone: formData.upi_phone
       };
       const response = await axios.post(`${API}/bookings`, payload);
       const createdBooking = response.data;
       
-      toast.success(`Booking created for ${bookingForm.num_rooms} room(s)!`);
+      toast.success(`Booking created for ${formData.num_rooms} room(s)!`);
       setShowNewBooking(false);
+      setShowNightConfirmation(false);
+      setPendingBookingData(null);
       
       // Show WhatsApp message modal with booking details
       setCreatedBookingData(createdBooking);
@@ -1900,6 +1927,46 @@ export default function Bookings() {
         </DialogContent>
       </Dialog>
 
+      {/* ===== 4-NIGHT CONFIRMATION DIALOG ===== */}
+      <Dialog open={showNightConfirmation} onOpenChange={setShowNightConfirmation}>
+        <DialogContent className="max-w-md" data-testid="night-confirmation-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <WarningCircle size={24} weight="fill" />
+              Extended Stay Confirmation
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <p className="text-slate-700 mb-4">
+              You are booking room(s) for more than 4 nights.
+            </p>
+            <p className="text-slate-700 font-semibold">
+              Please confirm that you have taken due approval from OIC ECSAG for the same.
+            </p>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowNightConfirmation(false);
+                setPendingBookingData(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={executeBooking}
+              className="bg-amber-500 hover:bg-amber-600"
+            >
+              Confirm & Proceed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+
       {/* ===== WHATSAPP MESSAGE MODAL ===== */}
       <Dialog open={showWhatsAppModal} onOpenChange={setShowWhatsAppModal}>
         <DialogContent className="max-w-lg" data-testid="whatsapp-modal">
@@ -1954,7 +2021,7 @@ ${createdBookingData.guest_unit ? `• Unit: ${createdBookingData.guest_unit}` :
 Please arrive by check-in time. Looking forward to serving you!
 
 🙏 Thank you
-*E-ARMS Team*`}
+*ECSAG Shillong*`}
                     className="mt-2 font-mono text-sm min-h-[400px] bg-slate-50"
                     onClick={(e) => e.target.select()}
                   />
@@ -1987,7 +2054,7 @@ ${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}\n`
 Please arrive by check-in time. Looking forward to serving you!
 
 🙏 Thank you
-*E-ARMS Team*`;
+*ECSAG Shillong*`;
                       navigator.clipboard.writeText(message);
                       toast.success("Message copied to clipboard!");
                     }}
