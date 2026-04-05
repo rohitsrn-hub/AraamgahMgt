@@ -34,7 +34,10 @@ export default function MonthlyReport({ settings }) {
     }
   };
 
-  useEffect(() => { fetchReport(); }, [month, year]);
+  useEffect(() => { 
+    fetchReport(); 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [month, year]);
 
   const handlePrint = () => {
     if (!report) return;
