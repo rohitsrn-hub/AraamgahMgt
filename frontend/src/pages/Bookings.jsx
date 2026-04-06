@@ -154,8 +154,35 @@ export default function Bookings() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const action = params.get('action');
-    if (action === 'new') setShowNewBooking(true);
-  }, [location]);
+    
+    if (action === 'new') {
+      setShowNewBooking(true);
+    } else if (action === 'checkin') {
+      // Find first confirmed booking and open check-in dialog
+      const confirmedBooking = bookings.find(b => b.status === 'confirmed');
+      if (confirmedBooking) {
+        openCheckInDialog(confirmedBooking);
+      } else {
+        toast.info("No confirmed bookings available for check-in");
+      }
+    } else if (action === 'checkout') {
+      // Find first checked-in booking and open check-out dialog
+      const checkedInBooking = bookings.find(b => b.status === 'checked_in');
+      if (checkedInBooking) {
+        openCheckOutDialog(checkedInBooking);
+      } else {
+        toast.info("No checked-in bookings available for check-out");
+      }
+    } else if (action === 'cancel') {
+      // Find first confirmed or checked-in booking and open cancel dialog
+      const cancelableBooking = bookings.find(b => b.status === 'confirmed' || b.status === 'checked_in');
+      if (cancelableBooking) {
+        openCancelDialog(cancelableBooking);
+      } else {
+        toast.info("No bookings available for cancellation");
+      }
+    }
+  }, [location, bookings]);
 
   const fetchData = async () => {
     try {
@@ -622,6 +649,16 @@ export default function Bookings() {
     } catch (err) {
       console.error("Failed to calculate refund:", err);
     }
+  };
+
+  const openCheckInDialog = (booking) => {
+    setSelectedBooking(booking);
+    setShowCheckIn(true);
+  };
+
+  const openCheckOutDialog = (booking) => {
+    setSelectedBooking(booking);
+    setShowCheckOut(true);
   };
 
   const handleCancel = async () => {
