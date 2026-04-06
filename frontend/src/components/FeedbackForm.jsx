@@ -122,10 +122,17 @@ export default function FeedbackForm({ booking, open, onClose, onSubmitted }) {
   };
 
   const today = format(new Date(), "dd MMM yyyy");
-  const checkInFormatted = booking?.check_in_date ? booking.check_in_date : "";
-  const checkOutFormatted = booking?.check_out_date ? booking.check_out_date : "";
-  const duration = booking?.actual_check_in
-    ? `${Math.ceil((new Date(booking.check_out_date) - new Date(booking.check_in_date)) / 86400000)} Night(s)`
+  
+  // Use actual check-in date and today (checkout date) instead of booked dates
+  const actualCheckInDate = booking?.actual_check_in || booking?.check_in_date;
+  const actualCheckOutDate = format(new Date(), "dd MMM yyyy"); // Today is checkout date
+  
+  const checkInFormatted = actualCheckInDate ? format(new Date(actualCheckInDate), "dd MMM yyyy") : "";
+  const checkOutFormatted = actualCheckOutDate;
+  
+  // Calculate actual nights stayed (from check-in to today)
+  const duration = actualCheckInDate
+    ? `${Math.ceil((new Date() - new Date(actualCheckInDate)) / 86400000)} Night(s)`
     : "";
 
   return (
