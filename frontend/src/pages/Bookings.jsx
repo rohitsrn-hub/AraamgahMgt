@@ -155,9 +155,13 @@ export default function Bookings() {
     const params = new URLSearchParams(location.search);
     const action = params.get('action');
     
+    if (!action) return;
+    
     if (action === 'new') {
       setShowNewBooking(true);
     } else if (action === 'checkin') {
+      // Only process if bookings are loaded
+      if (bookings.length === 0) return;
       // Find first confirmed booking and open check-in dialog
       const confirmedBooking = bookings.find(b => b.status === 'confirmed');
       if (confirmedBooking) {
@@ -166,6 +170,8 @@ export default function Bookings() {
         toast.info("No confirmed bookings available for check-in");
       }
     } else if (action === 'checkout') {
+      // Only process if bookings are loaded
+      if (bookings.length === 0) return;
       // Find first checked-in booking and open check-out dialog
       const checkedInBooking = bookings.find(b => b.status === 'checked_in');
       if (checkedInBooking) {
@@ -174,6 +180,8 @@ export default function Bookings() {
         toast.info("No checked-in bookings available for check-out");
       }
     } else if (action === 'cancel') {
+      // Only process if bookings are loaded
+      if (bookings.length === 0) return;
       // Find first confirmed or checked-in booking and open cancel dialog
       const cancelableBooking = bookings.find(b => b.status === 'confirmed' || b.status === 'checked_in');
       if (cancelableBooking) {

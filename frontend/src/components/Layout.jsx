@@ -17,14 +17,14 @@ import axios from "axios";
 import { API } from "@/App";
 
 const navItems = [
-  { path: "/", icon: House, label: "Dashboard" },
-  { path: "/bookings", icon: CalendarCheck, label: "Bookings" },
-  { path: "/rooms", icon: Bed, label: "Rooms" },
-  { path: "/staff", icon: Users, label: "Staff" },
-  { path: "/toiletry", icon: Package, label: "Toiletry" },
-  { path: "/feedback", icon: Star, label: "Feedback", dynamic: true },
-  { path: "/reports", icon: ChartBar, label: "Reports" },
-  { path: "/settings", icon: Gear, label: "Settings" },
+  { path: "/app/dashboard", icon: House, label: "Dashboard" },
+  { path: "/app/bookings", icon: CalendarCheck, label: "Bookings" },
+  { path: "/app/rooms", icon: Bed, label: "Rooms" },
+  { path: "/app/staff", icon: Users, label: "Staff" },
+  { path: "/app/toiletry", icon: Package, label: "Toiletry" },
+  { path: "/app/feedback", icon: Star, label: "Feedback", dynamic: true },
+  { path: "/app/reports", icon: ChartBar, label: "Reports" },
+  { path: "/app/settings", icon: Gear, label: "Settings" },
 ];
 
 const DEFAULT_FMN_1 = "https://images.unsplash.com/photo-1765555648802-53235276a40b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85&w=100";
