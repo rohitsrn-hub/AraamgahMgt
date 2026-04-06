@@ -678,6 +678,38 @@ export default function Bookings() {
 
   const openCheckInDialog = (booking) => {
     setSelectedBooking(booking);
+    
+    // Auto-fill check-in form with booking data (keep fields editable)
+    setActionForm(prev => ({
+      ...prev,
+      // Contact details from booking
+      guest_contact: booking.guest_contact || "",
+      
+      // Bank details from booking (if available)
+      bank_name: booking.bank_name || "",
+      bank_ifsc: booking.bank_ifsc || "",
+      bank_account: booking.bank_account || "",
+      
+      // UPI details from booking (if available)
+      upi_id: booking.upi_id || "",
+      upi_phone: booking.upi_phone || "",
+      
+      // Identity - use Aadhaar from booking if available
+      identity_card_number: booking.aadhaar_number || "",
+      
+      // Reset other fields to empty (will be filled during check-in)
+      staff_id: "",
+      extra_beds: 0,
+      notes: "",
+      guest_age: "",
+      guest_sex: "",
+      guest_address: "",
+      guest_service_status: "",
+      service_type: "",
+      command_hq: "",
+      family_members: []
+    }));
+    
     setShowCheckIn(true);
   };
 
