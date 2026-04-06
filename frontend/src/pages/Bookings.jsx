@@ -522,6 +522,23 @@ export default function Bookings() {
   }));
 
   const handleCheckIn = async () => {
+    // Date validation - Cannot check in before scheduled check-in date
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    const checkInDate = new Date(selectedBooking.check_in_date);
+    checkInDate.setHours(0, 0, 0, 0); // Reset time to start of day
+    
+    if (today < checkInDate) {
+      const checkInDateFormatted = new Date(selectedBooking.check_in_date).toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      });
+      toast.error(`Cannot check in before scheduled date: ${checkInDateFormatted}`);
+      return;
+    }
+    
     // Staff validation
     if (!actionForm.staff_id) { 
       toast.error("Please select staff member"); 
@@ -667,6 +684,16 @@ export default function Bookings() {
   const openCheckOutDialog = (booking) => {
     setSelectedBooking(booking);
     setShowCheckOut(true);
+  };
+
+  const canCheckInToday = (booking) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const checkInDate = new Date(booking.check_in_date);
+    checkInDate.setHours(0, 0, 0, 0);
+    
+    return today >= checkInDate;
   };
 
   const handleCancel = async () => {
@@ -974,7 +1001,9 @@ export default function Bookings() {
                             <>
                               <Button size="sm" variant="outline"
                                 onClick={() => { setSelectedBooking(booking); setShowCheckIn(true); }}
-                                className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                disabled={!canCheckInToday(booking)}
+                                className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title={!canCheckInToday(booking) ? `Check-in available from ${new Date(booking.check_in_date).toLocaleDateString('en-IN')}` : 'Check In'}
                                 data-testid={`checkin-btn-${booking.id}`}>
                                 <SignIn size={16} className="mr-1" />Check In
                               </Button>
