@@ -486,6 +486,46 @@ export default function Settings({ settings, onUpdate }) {
         </CardContent>
       </Card>
 
+      {/* License Fee Breakdown (for Monthly Report) */}
+      <Card className="earms-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Percent size={24} className="text-blue-500" weight="duotone" />
+            License Fee Breakdown
+          </CardTitle>
+          <p className="text-sm text-slate-500">For monthly financial report to calculate license fee payable to maintaining agency</p>
+        </CardHeader>
+        <CardContent>
+          <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 mb-4">
+            <p className="text-xs text-blue-700">Total rate = Room Rent + License Fee. These are used in the monthly financial report to calculate the license fee payable to the maintaining agency.</p>
+          </div>
+          <div className="grid md:grid-cols-3 gap-4">
+            {[
+              { label: "Cat I (JCO)", rentKey: "cat_i_room_rent", feeKey: "cat_i_license_fee", bgClass: "bg-blue-50 border-blue-200", textClass: "text-blue-800", totalClass: "text-blue-700" },
+              { label: "Cat II (OR)", rentKey: "cat_ii_room_rent", feeKey: "cat_ii_license_fee", bgClass: "bg-purple-50 border-purple-200", textClass: "text-purple-800", totalClass: "text-purple-700" },
+              { label: "Def Civ", rentKey: "def_civ_room_rent", feeKey: "def_civ_license_fee", bgClass: "bg-orange-50 border-orange-200", textClass: "text-orange-800", totalClass: "text-orange-700" }
+            ].map(({ label, rentKey, feeKey, bgClass, textClass, totalClass }) => (
+              <div key={rentKey} className={`p-4 rounded-xl border ${bgClass}`}>
+                <h4 className={`font-semibold mb-3 ${textClass}`}>{label}</h4>
+                <div className="space-y-2">
+                  <div>
+                    <Label className="text-xs text-slate-500">Room Rent (₹)</Label>
+                    <Input type="number" value={formData[rentKey]} onChange={(e) => setFormData({...formData, [rentKey]: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid={`input-${rentKey}`} />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-slate-500">License Fee (₹)</Label>
+                    <Input type="number" value={formData[feeKey]} onChange={(e) => setFormData({...formData, [feeKey]: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid={`input-${feeKey}`} />
+                  </div>
+                  <div className={`text-xs font-semibold mt-2 p-2 bg-white rounded ${totalClass}`}>
+                    Total = ₹{(formData[rentKey] || 0) + (formData[feeKey] || 0)}/night
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Ranks Management */}
       <Card className="earms-card" data-testid="ranks-section">
         <CardHeader>
