@@ -2318,7 +2318,7 @@ export default function Bookings() {
 
       {/* ===== CHECK-OUT DIALOG ===== */}
       <Dialog open={showCheckOut} onOpenChange={setShowCheckOut}>
-        <DialogContent data-testid="checkout-dialog">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="checkout-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <SignOut size={24} className="text-blue-500" />
