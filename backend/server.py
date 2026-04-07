@@ -798,7 +798,7 @@ async def check_in(request: CheckInRequest):
     # Get settings for rate calculation
     settings = await db.app_settings.find_one({}, {"_id": 0})
     
-    # Recalculate room charges based on room_guest_mapping (if provided)
+    # Recalculate room charges based on room_guest_mapping (NEW STRUCTURE)
     new_room_rent_total = 0.0
     if request.room_guest_mapping and len(request.room_guest_mapping) > 0:
         # Calculate nights
@@ -869,7 +869,7 @@ async def check_in(request: CheckInRequest):
     if request.family_members:
         update_fields["family_members"] = request.family_members
     if request.room_guest_mapping:
-        update_fields["room_guest_mapping"] = request.room_guest_mapping  # Store the mapping
+        update_fields["room_guest_mapping"] = request.room_guest_mapping  # Store the mapping (NEW STRUCTURE)
     if request.notes:
         update_fields["notes"] = request.notes
 

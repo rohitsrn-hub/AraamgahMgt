@@ -517,81 +517,107 @@ export default function Bookings() {
     family_members: prev.family_members.map((m, i) => i === idx ? { ...m, [field]: value } : m)
   }));
 
-  // Room-Guest Mapping Functions
-  const addGuestToRoom = (roomIndex, guestType, guestIndex = null) => {
+  // Room-Guest Mapping Functions (REDESIGNED for inline family members)
+  const toggleSelfInRoom = (roomIndex) => {
     setRoomGuestMapping(prev => {
       const updated = [...prev];
-      const newGuest = {
-        type: guestType, // "self" or "family_member"
-        index: guestIndex, // null for self, family member index for family
-        has_valid_id: guestType === "self" ? (actionForm.identity_card_number ? true : false) : false
-      };
       
-      // Check if guest already assigned to this room
-      const alreadyAssigned = updated[roomIndex].guests.some(g => 
-        g.type === guestType && (guestType === "self" || g.index === guestIndex)
-      );
-      
-      if (!alreadyAssigned) {
-        updated[roomIndex].guests.push(newGuest);
-        // Recalculate charge category for this room
-        updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
+      // If this room already has Self, remove it
+      if (updated[roomIndex].has_self) {
+        updated[roomIndex].has_self = false;
+      } else {
+        // Remove Self from all other rooms (Self can only be in one room)
+        updated.forEach((room, idx) => {
+          if (idx !== roomIndex) {
+            room.has_self = false;
+          }
+        });
+        // Add Self to this room
+        updated[roomIndex].has_self = true;
       }
       
-      return updated;
+      // Recalculate charge category for all affected rooms
+      return updated.map(room => calculateRoomChargeCategory(room));
     });
   };
 
-  const removeGuestFromRoom = (roomIndex, guestType, guestIndex = null) => {
+  const addFamilyMemberToRoom = (roomIndex) => {
     setRoomGuestMapping(prev => {
       const updated = [...prev];
-      updated[roomIndex].guests = updated[roomIndex].guests.filter(g => 
-        !(g.type === guestType && (guestType === "self" || g.index === guestIndex))
-      );
-      // Recalculate charge category for this room
+      updated[roomIndex].family_members.push({
+        relation: "w/o",
+        name: "",
+        age: "",
+        sex: "F",
+        mobile: "",
+        has_dependent_card: false,  // Default: no dependent card
+        dependent_id: ""
+      });
+      // Recalculate charge category
       updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
       return updated;
     });
   };
 
-  const toggleGuestValidId = (roomIndex, guestType, guestIndex, hasValidId) => {
+  const removeFamilyMemberFromRoom = (roomIndex, memberIndex) => {
     setRoomGuestMapping(prev => {
       const updated = [...prev];
-      updated[roomIndex].guests = updated[roomIndex].guests.map(g => {
-        if (g.type === guestType && (guestType === "self" || g.index === guestIndex)) {
-          return { ...g, has_valid_id: hasValidId };
-        }
-        return g;
-      });
-      // Recalculate charge category for this room
+      updated[roomIndex].family_members = updated[roomIndex].family_members.filter((_, idx) => idx !== memberIndex);
+      // Recalculate charge category
+      updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
+      return updated;
+    });
+  };
+
+  const updateRoomFamilyMember = (roomIndex, memberIndex, field, value) => {
+    setRoomGuestMapping(prev => {
+      const updated = [...prev];
+      updated[roomIndex].family_members[memberIndex] = {
+        ...updated[roomIndex].family_members[memberIndex],
+        [field]: value
+      };
+      // Recalculate charge category
       updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
       return updated;
     });
   };
 
   const calculateRoomChargeCategory = (roomMapping) => {
-    // If any guest in the room lacks valid ID, charge at Def Civ rate
-    const allHaveValidIds = roomMapping.guests.length > 0 && roomMapping.guests.every(g => g.has_valid_id);
+    // Check if any family member lacks dependent card
+    const anyMemberWithoutCard = roomMapping.family_members.some(m => !m.has_dependent_card);
     
+    // If Self is not in this room and there are no family members, keep original category
+    if (!roomMapping.has_self && roomMapping.family_members.length === 0) {
+      return {
+        ...roomMapping,
+        charge_category: roomMapping.room_category
+      };
+    }
+    
+    // If any family member lacks dependent card → Def Civ rate
+    if (anyMemberWithoutCard) {
+      return {
+        ...roomMapping,
+        charge_category: "Def Civ"
+      };
+    }
+    
+    // If Self has valid ID (from identity_card_number field) and all family members have dependent cards
+    const selfHasValidId = actionForm.identity_card_number && actionForm.identity_card_number.trim().length > 0;
+    
+    if (roomMapping.has_self && !selfHasValidId) {
+      // Self lacks valid ID
+      return {
+        ...roomMapping,
+        charge_category: "Def Civ"
+      };
+    }
+    
+    // All conditions met → Original category (Cat I/II)
     return {
       ...roomMapping,
-      charge_category: allHaveValidIds ? roomMapping.room_category : "Def Civ"
+      charge_category: roomMapping.room_category
     };
-  };
-
-  const getGuestDisplayName = (guestType, guestIndex) => {
-    if (guestType === "self") {
-      return `${selectedBooking?.guest_name || "Guest"} (Self)`;
-    } else {
-      const member = actionForm.family_members[guestIndex];
-      return member ? `${member.name || `Member ${guestIndex + 1}`} (${member.relation})` : `Member ${guestIndex + 1}`;
-    }
-  };
-
-  const isGuestAssignedToRoom = (roomIndex, guestType, guestIndex = null) => {
-    return roomGuestMapping[roomIndex]?.guests.some(g => 
-      g.type === guestType && (guestType === "self" || g.index === guestIndex)
-    ) || false;
   };
 
   const handleCheckIn = async () => {
@@ -669,11 +695,30 @@ export default function Bookings() {
     }
     
     // Room-guest assignment validation
-    const totalGuestsAssigned = roomGuestMapping.reduce((sum, room) => sum + room.guests.length, 0);
+    const totalGuestsAssigned = roomGuestMapping.reduce((sum, room) => {
+      return sum + (room.has_self ? 1 : 0) + room.family_members.length;
+    }, 0);
+    
     if (totalGuestsAssigned === 0) {
-      toast.error("Please assign at least one guest to a room");
+      toast.error("Please assign Self or add family members to at least one room");
       return;
     }
+    
+    // Collect all family members from all rooms into a single array for backend
+    const allFamilyMembers = [];
+    roomGuestMapping.forEach(room => {
+      room.family_members.forEach(member => {
+        allFamilyMembers.push({
+          relation: member.relation,
+          name: member.name,
+          age: member.age,
+          sex: member.sex,
+          mobile: member.mobile,
+          has_dependent_card: member.has_dependent_card,
+          dependent_id: member.has_dependent_card ? member.dependent_id : ""  // Only send if card available
+        });
+      });
+    });
     
     try {
       const formattedPhone = "+91 " + cleanPhone.replace(/^\+91/, "");
@@ -695,8 +740,8 @@ export default function Bookings() {
         bank_account: actionForm.bank_account || undefined,
         upi_id: actionForm.upi_id || undefined,
         upi_phone: actionForm.upi_phone || undefined,
-        family_members: actionForm.family_members.length > 0 ? actionForm.family_members : undefined,
-        room_guest_mapping: roomGuestMapping // NEW: Send room-guest mapping
+        family_members: allFamilyMembers.length > 0 ? allFamilyMembers : undefined,
+        room_guest_mapping: roomGuestMapping  // Send room-guest mapping with inline family members
       });
       toast.success("Check-in successful!");
       setShowCheckIn(false);
@@ -795,7 +840,7 @@ export default function Bookings() {
       family_members: []
     }));
     
-    // Initialize room-guest mapping based on booked rooms
+    // Initialize room-guest mapping based on booked rooms (NEW STRUCTURE)
     const roomIds = booking.room_ids || [];
     const roomNumbers = booking.room_numbers || [];
     const roomCategories = booking.room_categories || [];
@@ -804,8 +849,9 @@ export default function Bookings() {
       room_id: roomId,
       room_number: roomNumbers[index] || `Room ${index + 1}`,
       room_category: roomCategories[index] || "Cat I",
-      guests: [], // Will be filled by user
-      charge_category: roomCategories[index] || "Cat I" // Default to original category
+      has_self: false,  // Whether Self is assigned to this room
+      family_members: [],  // Family members directly in this room
+      charge_category: roomCategories[index] || "Cat I" // Will be recalculated
     }));
     
     setRoomGuestMapping(initialMapping);
@@ -1641,168 +1687,177 @@ export default function Bookings() {
                 </div>
               </div>
 
-              {/* Family Members */}
-              <div>
-                <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                  <UserPlus size={16} className="text-blue-500" /> Family Members
-                  <Button type="button" variant="outline" size="sm" onClick={addCheckinFamilyMember} className="ml-auto text-xs" data-testid="add-checkin-family-member">
-                    <Plus size={14} className="mr-1" /> Add
-                  </Button>
-                </h4>
-                {actionForm.family_members.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">No family members — click "Add" to include accompanying family.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {actionForm.family_members.map((m, idx) => (
-                      <div key={idx} className="p-3 bg-slate-50 rounded-xl border border-slate-200" data-testid={`checkin-family-member-${idx}`}>
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-sm font-medium text-slate-700">Member {idx + 1}</span>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => removeCheckinFamilyMember(idx)} className="text-red-400 hover:text-red-600 h-6 w-6 p-0">
-                            <Trash size={14} />
-                          </Button>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div>
-                            <Label className="text-xs">Relation</Label>
-                            <Select value={m.relation} onValueChange={(v) => updateCheckinFamilyMember(idx, "relation", v)}>
-                              <SelectTrigger className="earms-input mt-1 text-xs h-8"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="w/o">Wife (w/o)</SelectItem>
-                                <SelectItem value="s/o">Son (s/o)</SelectItem>
-                                <SelectItem value="d/o">Daughter (d/o)</SelectItem>
-                                <SelectItem value="other">Other</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="text-xs">Name</Label>
-                            <Input value={m.name} onChange={(e) => updateCheckinFamilyMember(idx, "name", e.target.value)}
-                              onFocus={(e) => e.target.select()} className="earms-input mt-1 text-xs h-8" placeholder="Full name" />
-                          </div>
-                          <div>
-                            <Label className="text-xs">Age</Label>
-                            <Input type="number" min="0" value={m.age} onChange={(e) => updateCheckinFamilyMember(idx, "age", e.target.value)}
-                              onFocus={(e) => e.target.select()} className="earms-input mt-1 text-xs h-8" />
-                          </div>
-                          <div>
-                            <Label className="text-xs">Sex</Label>
-                            <Select value={m.sex} onValueChange={(v) => updateCheckinFamilyMember(idx, "sex", v)}>
-                              <SelectTrigger className="earms-input mt-1 text-xs h-8"><SelectValue /></SelectTrigger>
-                              <SelectContent><SelectItem value="M">M</SelectItem><SelectItem value="F">F</SelectItem></SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <Label className="text-xs">Dependent ID Ser No</Label>
-                            <Input value={m.dependent_id || ""} onChange={(e) => updateCheckinFamilyMember(idx, "dependent_id", e.target.value)}
-                              onFocus={(e) => e.target.select()} className="earms-input mt-1 text-xs h-8" placeholder="ID Serial No" />
-                          </div>
-                          <div>
-                            <Label className="text-xs">Mobile</Label>
-                            <Input value={m.mobile} onChange={(e) => updateCheckinFamilyMember(idx, "mobile", e.target.value)}
-                              onFocus={(e) => e.target.select()} className="earms-input mt-1 text-xs h-8" placeholder="10-digit" />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Room Assignment - NEW SECTION */}
+              {/* Room Assignment - REDESIGNED with inline family members */}
               <div className="p-4 bg-blue-50 border-2 border-blue-300 rounded-xl">
                 <h4 className="font-semibold text-blue-800 mb-3 flex items-center gap-2">
                   <Bed size={18} className="text-blue-600" weight="fill" /> Room-Wise Guest Assignment
                 </h4>
                 <p className="text-xs text-blue-700 mb-4 bg-blue-100 p-2 rounded-md">
                   <WarningCircle size={14} className="inline mr-1" weight="fill" />
-                  Assign guests to each room. If <strong>any guest</strong> in a room lacks a valid Defense/Dependent ID, that room will be charged at <strong>Def Civ rates</strong>.
+                  Assign <strong>Self</strong> to one room and add family members to each room. If any family member lacks a <strong>Dependent Card</strong>, that room will be charged at <strong>Def Civ rates</strong>.
                 </p>
                 
-                {roomGuestMapping.map((room, roomIdx) => (
-                  <div key={roomIdx} className="mb-4 p-3 bg-white rounded-lg border border-blue-200">
-                    <div className="flex justify-between items-center mb-3">
-                      <div>
-                        <h5 className="font-bold text-slate-800">Room {room.room_number}</h5>
-                        <p className="text-xs text-slate-600">{room.room_category} → Charging at: <span className={room.charge_category === "Def Civ" ? "text-red-600 font-bold" : "text-emerald-600 font-bold"}>{room.charge_category}</span></p>
+                {roomGuestMapping.map((room, roomIdx) => {
+                  const guestCount = (room.has_self ? 1 : 0) + room.family_members.length;
+                  
+                  return (
+                    <div key={roomIdx} className="mb-4 p-4 bg-white rounded-lg border border-blue-200">
+                      <div className="flex justify-between items-center mb-3">
+                        <div>
+                          <h5 className="font-bold text-slate-800">Room {room.room_number}</h5>
+                          <p className="text-xs text-slate-600">
+                            {room.room_category} → Charging at: 
+                            <span className={room.charge_category === "Def Civ" ? "text-red-600 font-bold ml-1" : "text-emerald-600 font-bold ml-1"}>
+                              {room.charge_category}
+                            </span>
+                          </p>
+                        </div>
+                        <Badge variant={room.charge_category === "Def Civ" ? "destructive" : "default"}>
+                          {guestCount} Guest{guestCount !== 1 ? "s" : ""}
+                        </Badge>
                       </div>
-                      <Badge variant={room.charge_category === "Def Civ" ? "destructive" : "default"}>
-                        {room.guests.length} Guest{room.guests.length !== 1 ? "s" : ""}
-                      </Badge>
-                    </div>
 
-                    {/* Guest Assignment List */}
-                    <div className="space-y-2">
-                      {/* Self Option */}
-                      <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
-                        <div className="flex items-center gap-2">
+                      {/* Self Assignment (Checkbox) */}
+                      <div className="mb-3 p-2 bg-slate-50 rounded border border-slate-200">
+                        <label className="flex items-center gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={isGuestAssignedToRoom(roomIdx, "self")}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                addGuestToRoom(roomIdx, "self");
-                              } else {
-                                removeGuestFromRoom(roomIdx, "self");
-                              }
-                            }}
+                            checked={room.has_self}
+                            onChange={() => toggleSelfInRoom(roomIdx)}
                             className="h-4 w-4"
                           />
-                          <span className="text-sm font-medium text-slate-700">{selectedBooking?.guest_name || "Guest"} (Self)</span>
-                        </div>
-                        {isGuestAssignedToRoom(roomIdx, "self") && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-600">Valid ID?</span>
-                            <input
-                              type="checkbox"
-                              checked={room.guests.find(g => g.type === "self")?.has_valid_id || false}
-                              onChange={(e) => toggleGuestValidId(roomIdx, "self", null, e.target.checked)}
-                              className="h-4 w-4"
-                            />
-                          </div>
+                          <span className="text-sm font-medium text-slate-700">
+                            {selectedBooking?.guest_name || "Guest"} (Self)
+                          </span>
+                        </label>
+                        {room.has_self && !actionForm.identity_card_number && (
+                          <p className="text-xs text-red-500 mt-1 ml-6">⚠️ Enter Identity Card No in Personal Details section above</p>
                         )}
                       </div>
 
-                      {/* Family Members */}
-                      {actionForm.family_members.map((member, memberIdx) => (
-                        <div key={memberIdx} className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={isGuestAssignedToRoom(roomIdx, "family_member", memberIdx)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  addGuestToRoom(roomIdx, "family_member", memberIdx);
-                                } else {
-                                  removeGuestFromRoom(roomIdx, "family_member", memberIdx);
-                                }
-                              }}
-                              className="h-4 w-4"
-                            />
-                            <span className="text-sm text-slate-700">
-                              {member.name || `Member ${memberIdx + 1}`} ({member.relation})
-                              {member.dependent_id && <span className="ml-1 text-xs text-emerald-600">• ID: {member.dependent_id}</span>}
-                            </span>
-                          </div>
-                          {isGuestAssignedToRoom(roomIdx, "family_member", memberIdx) && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-slate-600">Valid Dependent ID?</span>
+                      {/* Family Members in this room */}
+                      <div className="space-y-3">
+                        {room.family_members.map((member, memberIdx) => (
+                          <div key={memberIdx} className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-sm font-medium text-slate-700">Family Member {memberIdx + 1}</span>
+                              <Button 
+                                type="button" 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={() => removeFamilyMemberFromRoom(roomIdx, memberIdx)} 
+                                className="text-red-400 hover:text-red-600 h-6 w-6 p-0"
+                              >
+                                <Trash size={14} />
+                              </Button>
+                            </div>
+                            
+                            <div className="grid grid-cols-3 gap-2 mb-2">
+                              <div>
+                                <Label className="text-xs">Relation</Label>
+                                <Select 
+                                  value={member.relation} 
+                                  onValueChange={(v) => updateRoomFamilyMember(roomIdx, memberIdx, "relation", v)}
+                                >
+                                  <SelectTrigger className="earms-input mt-1 text-xs h-8"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="w/o">Wife (w/o)</SelectItem>
+                                    <SelectItem value="s/o">Son (s/o)</SelectItem>
+                                    <SelectItem value="d/o">Daughter (d/o)</SelectItem>
+                                    <SelectItem value="other">Other</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-xs">Name</Label>
+                                <Input 
+                                  value={member.name} 
+                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "name", e.target.value)}
+                                  onFocus={(e) => e.target.select()} 
+                                  className="earms-input mt-1 text-xs h-8" 
+                                  placeholder="Full name" 
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Age</Label>
+                                <Input 
+                                  type="number" 
+                                  min="0" 
+                                  value={member.age} 
+                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "age", e.target.value)}
+                                  onFocus={(e) => e.target.select()} 
+                                  className="earms-input mt-1 text-xs h-8" 
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs">Sex</Label>
+                                <Select 
+                                  value={member.sex} 
+                                  onValueChange={(v) => updateRoomFamilyMember(roomIdx, memberIdx, "sex", v)}
+                                >
+                                  <SelectTrigger className="earms-input mt-1 text-xs h-8"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="M">M</SelectItem>
+                                    <SelectItem value="F">F</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-xs">Mobile</Label>
+                                <Input 
+                                  value={member.mobile} 
+                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "mobile", e.target.value)}
+                                  onFocus={(e) => e.target.select()} 
+                                  className="earms-input mt-1 text-xs h-8" 
+                                  placeholder="10-digit" 
+                                />
+                              </div>
+                            </div>
+
+                            {/* Dependent Card Checkbox */}
+                            <div className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                               <input
                                 type="checkbox"
-                                checked={room.guests.find(g => g.type === "family_member" && g.index === memberIdx)?.has_valid_id || false}
-                                onChange={(e) => toggleGuestValidId(roomIdx, "family_member", memberIdx, e.target.checked)}
+                                checked={member.has_dependent_card}
+                                onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "has_dependent_card", e.target.checked)}
                                 className="h-4 w-4"
+                                id={`dep-card-${roomIdx}-${memberIdx}`}
                               />
+                              <label htmlFor={`dep-card-${roomIdx}-${memberIdx}`} className="text-xs font-medium text-slate-700 cursor-pointer">
+                                Dependent Card Available?
+                              </label>
                             </div>
-                          )}
-                        </div>
-                      ))}
 
-                      {actionForm.family_members.length === 0 && (
-                        <p className="text-xs text-slate-400 italic p-2">Add family members above to assign them to rooms</p>
-                      )}
+                            {/* Conditional Dependent ID Field */}
+                            {member.has_dependent_card && (
+                              <div className="mt-2">
+                                <Label className="text-xs">Dependent ID Ser No</Label>
+                                <Input 
+                                  value={member.dependent_id || ""} 
+                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "dependent_id", e.target.value)}
+                                  onFocus={(e) => e.target.select()} 
+                                  className="earms-input mt-1 text-xs h-8" 
+                                  placeholder="Enter ID Serial Number" 
+                                />
+                              </div>
+                            )}
+                          </div>
+                        ))}
+
+                        {/* Add Family Member Button */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => addFamilyMemberToRoom(roomIdx)}
+                          className="w-full text-xs"
+                        >
+                          <Plus size={14} className="mr-1" /> Add Family Member to Room {room.room_number}
+                        </Button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Bank / UPI Details */}
