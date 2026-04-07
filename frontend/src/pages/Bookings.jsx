@@ -178,6 +178,7 @@ export default function Bookings() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const action = params.get('action');
+    const bookingId = params.get('bookingId');
     
     if (!action) return;
     
@@ -186,32 +187,77 @@ export default function Bookings() {
     } else if (action === 'checkin') {
       // Only process if bookings are loaded
       if (bookings.length === 0) return;
-      // Find first confirmed booking and open check-in dialog
-      const confirmedBooking = bookings.find(b => b.status === 'confirmed');
-      if (confirmedBooking) {
-        openCheckInDialog(confirmedBooking);
+      
+      // If bookingId is provided, find and open that specific booking
+      if (bookingId) {
+        const targetBooking = bookings.find(b => b.id === bookingId);
+        if (targetBooking) {
+          if (targetBooking.status === 'confirmed') {
+            openCheckInDialog(targetBooking);
+          } else {
+            toast.error(`Booking cannot be checked in (status: ${targetBooking.status})`);
+          }
+        } else {
+          toast.error("Booking not found");
+        }
       } else {
-        toast.info("No confirmed bookings available for check-in");
+        // Fallback: Find first confirmed booking
+        const confirmedBooking = bookings.find(b => b.status === 'confirmed');
+        if (confirmedBooking) {
+          openCheckInDialog(confirmedBooking);
+        } else {
+          toast.info("No confirmed bookings available for check-in");
+        }
       }
     } else if (action === 'checkout') {
       // Only process if bookings are loaded
       if (bookings.length === 0) return;
-      // Find first checked-in booking and open check-out dialog
-      const checkedInBooking = bookings.find(b => b.status === 'checked_in');
-      if (checkedInBooking) {
-        openCheckOutDialog(checkedInBooking);
+      
+      // If bookingId is provided, find and open that specific booking
+      if (bookingId) {
+        const targetBooking = bookings.find(b => b.id === bookingId);
+        if (targetBooking) {
+          if (targetBooking.status === 'checked_in') {
+            openCheckOutDialog(targetBooking);
+          } else {
+            toast.error(`Booking cannot be checked out (status: ${targetBooking.status})`);
+          }
+        } else {
+          toast.error("Booking not found");
+        }
       } else {
-        toast.info("No checked-in bookings available for check-out");
+        // Fallback: Find first checked-in booking
+        const checkedInBooking = bookings.find(b => b.status === 'checked_in');
+        if (checkedInBooking) {
+          openCheckOutDialog(checkedInBooking);
+        } else {
+          toast.info("No checked-in bookings available for check-out");
+        }
       }
     } else if (action === 'cancel') {
       // Only process if bookings are loaded
       if (bookings.length === 0) return;
-      // Find first confirmed or checked-in booking and open cancel dialog
-      const cancelableBooking = bookings.find(b => b.status === 'confirmed' || b.status === 'checked_in');
-      if (cancelableBooking) {
-        openCancelDialog(cancelableBooking);
+      
+      // If bookingId is provided, find and open that specific booking
+      if (bookingId) {
+        const targetBooking = bookings.find(b => b.id === bookingId);
+        if (targetBooking) {
+          if (targetBooking.status === 'confirmed' || targetBooking.status === 'checked_in') {
+            openCancelDialog(targetBooking);
+          } else {
+            toast.error(`Booking cannot be cancelled (status: ${targetBooking.status})`);
+          }
+        } else {
+          toast.error("Booking not found");
+        }
       } else {
-        toast.info("No bookings available for cancellation");
+        // Fallback: Find first cancelable booking
+        const cancelableBooking = bookings.find(b => b.status === 'confirmed' || b.status === 'checked_in');
+        if (cancelableBooking) {
+          openCancelDialog(cancelableBooking);
+        } else {
+          toast.info("No bookings available for cancellation");
+        }
       }
     }
   }, [location, bookings]);

@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { generateCheckoutReceipt } from "@/utils/pdfUtils";
 import FeedbackForm from "@/components/FeedbackForm";
+import BookingSelectionModal from "@/components/BookingSelectionModal";
 import { 
   Bed, 
   CalendarCheck, 
@@ -82,6 +83,7 @@ const getRoomCategories = (booking) => {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [occupancy, setOccupancy] = useState(null);
   const [bookings, setBookings] = useState({ today: [], upcoming: [] });
   const [analytics, setAnalytics] = useState(null);
@@ -109,6 +111,9 @@ export default function Dashboard() {
   const [showPendingRefundsModal, setShowPendingRefundsModal] = useState(false);
   const [pendingRefunds, setPendingRefunds] = useState([]);
   const [pendingRefundsLoading, setPendingRefundsLoading] = useState(false);
+  
+  // New: Booking selection modals (lightweight - just for selecting, then navigate to Bookings page)
+  const [showBookingSelectionAction, setShowBookingSelectionAction] = useState(null); // "checkin" | "checkout" | null
   
   // Action form
   const [actionForm, setActionForm] = useState({
@@ -169,6 +174,26 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
+
+  // Handle URL query params for action triggers (from CommandCenter)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const action = params.get('action');
+    
+    if (action === 'checkin') {
+      setShowBookingSelectionAction('checkin');
+      // Clear URL param after triggering
+      window.history.replaceState({}, '', '/app/dashboard');
+    } else if (action === 'checkout') {
+      setShowBookingSelectionAction('checkout');
+      // Clear URL param after triggering
+      window.history.replaceState({}, '', '/app/dashboard');
+    } else if (action === 'cancel') {
+      setShowCancelModal(true);
+      // Clear URL param after triggering
+      window.history.replaceState({}, '', '/app/dashboard');
+    }
+  }, [location]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -362,7 +387,7 @@ export default function Dashboard() {
           </Button>
           
           <Button 
-            onClick={() => setShowCheckInModal(true)}
+            onClick={() => setShowBookingSelectionAction("checkin")}
             className="h-16 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
             data-testid="quick-checkin-btn"
           >
@@ -371,7 +396,7 @@ export default function Dashboard() {
           </Button>
           
           <Button 
-            onClick={() => setShowCheckOutModal(true)}
+            onClick={() => setShowBookingSelectionAction("checkout")}
             className="h-16 px-5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
             data-testid="quick-checkout-btn"
           >
@@ -989,6 +1014,13 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* ===== NEW: Booking Selection Modal (Lightweight - redirects to Bookings page) ===== */}
+      <BookingSelectionModal 
+        open={showBookingSelectionAction !== null}
+        onOpenChange={(open) => !open && setShowBookingSelectionAction(null)}
+        action={showBookingSelectionAction || "checkin"}
+      />
 
       {/* Check-In Modal */}
       <Dialog open={showCheckInModal} onOpenChange={setShowCheckInModal}>
