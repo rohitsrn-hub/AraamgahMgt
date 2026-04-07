@@ -133,7 +133,8 @@ class AppSettings(BaseModel):
             "rate": 500.0,
             "def_civ_rate": 600.0,
             "room_count": 6,
-            "prefix": "C1"
+            "prefix": "C1",
+            "capacity": 2  # Number of people per room
         },
         {
             "id": "cat-ii",
@@ -141,7 +142,8 @@ class AppSettings(BaseModel):
             "rate": 400.0,
             "def_civ_rate": 600.0,
             "room_count": 9,
-            "prefix": "C2"
+            "prefix": "C2",
+            "capacity": 2
         }
     ])
 
@@ -628,8 +630,8 @@ async def update_room_categories(categories: List[dict]):
     """P4: Update room categories configuration"""
     # Validate categories
     for cat in categories:
-        if not all(k in cat for k in ["id", "name", "rate", "def_civ_rate", "room_count", "prefix"]):
-            raise HTTPException(status_code=400, detail="Invalid category structure")
+        if not all(k in cat for k in ["id", "name", "rate", "def_civ_rate", "room_count", "prefix", "capacity"]):
+            raise HTTPException(status_code=400, detail="Invalid category structure - missing required fields")
     
     # Update settings
     result = await db.app_settings.update_one(

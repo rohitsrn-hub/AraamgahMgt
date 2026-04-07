@@ -60,8 +60,8 @@ export default function Settings({ settings, onUpdate }) {
   // P4: Room Categories Management
   const [categories, setCategories] = useState(
     settings?.room_categories || [
-      { id: "cat-i", name: "Cat I", rate: 500, def_civ_rate: 600, room_count: 6, prefix: "C1" },
-      { id: "cat-ii", name: "Cat II", rate: 400, def_civ_rate: 600, room_count: 9, prefix: "C2" }
+      { id: "cat-i", name: "Cat I", rate: 500, def_civ_rate: 600, room_count: 6, prefix: "C1", capacity: 2 },
+      { id: "cat-ii", name: "Cat II", rate: 400, def_civ_rate: 600, room_count: 9, prefix: "C2", capacity: 2 }
     ]
   );
 
@@ -115,7 +115,7 @@ export default function Settings({ settings, onUpdate }) {
     const newId = `cat-${Date.now()}`;
     setCategories([
       ...categories,
-      { id: newId, name: "", rate: 0, def_civ_rate: 0, room_count: 0, prefix: "" }
+      { id: newId, name: "", rate: 0, def_civ_rate: 0, room_count: 0, prefix: "", capacity: 2 }
     ]);
   };
 
@@ -142,6 +142,10 @@ export default function Settings({ settings, onUpdate }) {
       }
       if (cat.rate <= 0 || cat.def_civ_rate <= 0) {
         toast.error("Rates must be greater than 0");
+        return;
+      }
+      if (!cat.capacity || cat.capacity <= 0) {
+        toast.error("Room capacity must be greater than 0");
         return;
       }
     }
@@ -387,7 +391,19 @@ export default function Settings({ settings, onUpdate }) {
                       className="earms-input mt-1"
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div>
+                    <Label className="text-xs">Room Capacity (persons) *</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={cat.capacity || 2}
+                      onChange={(e) => updateCategory(idx, "capacity", parseInt(e.target.value) || 2)}
+                      onFocus={(e) => e.target.select()}
+                      className="earms-input mt-1"
+                      placeholder="e.g., 2"
+                    />
+                  </div>
+                  <div>
                     <Label className="text-xs">Number of Rooms *</Label>
                     <Input
                       type="number"
@@ -426,100 +442,47 @@ export default function Settings({ settings, onUpdate }) {
         </CardContent>
       </Card>
 
-      {/* Room Rates */}
+      {/* Room Rates Summary (Read-Only) */}
       <Card className="earms-card" data-testid="room-rates-section">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CurrencyInr size={24} className="text-emerald-500" weight="duotone" />
-            Room Rates
+            Room Rates Summary
           </CardTitle>
+          <p className="text-sm text-slate-500">Current room category rates (edit in Room Categories section above)</p>
         </CardHeader>
         <CardContent>
-          {/* Regular Rates */}
-          <p className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">Standard Rates (Mil Pers & Family)</p>
-          <div className="grid md:grid-cols-2 gap-6 mb-6">
-            <div className="p-6 bg-blue-50 rounded-2xl">
-              <h3 className="font-semibold text-blue-800 mb-4">Cat I Daily Rate</h3>
-              <div className="flex items-center gap-2">
-                <span className="text-2xl text-blue-600">₹</span>
-                <Input
-                  type="number"
-                  value={formData.cat_i_rate}
-                  onChange={(e) => setFormData({...formData, cat_i_rate: parseFloat(e.target.value) || 0})}
-                  onFocus={(e) => e.target.select()}
-                  className="earms-input text-2xl font-bold"
-                  data-testid="input-cat-i-rate"
-                />
-              </div>
-              <p className="text-sm text-blue-600 mt-2">per night</p>
-            </div>
-            <div className="p-6 bg-purple-50 rounded-2xl">
-              <h3 className="font-semibold text-purple-800 mb-4">Cat II Daily Rate</h3>
-              <div className="flex items-center gap-2">
-                <span className="text-2xl text-purple-600">₹</span>
-                <Input
-                  type="number"
-                  value={formData.cat_ii_rate}
-                  onChange={(e) => setFormData({...formData, cat_ii_rate: parseFloat(e.target.value) || 0})}
-                  onFocus={(e) => e.target.select()}
-                  className="earms-input text-2xl font-bold"
-                  data-testid="input-cat-ii-rate"
-                />
-              </div>
-              <p className="text-sm text-purple-600 mt-2">per night</p>
-            </div>
-          </div>
-
-          {/* Def Civ Rates */}
-          <p className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">Def Civ Rates</p>
-          <div className="grid md:grid-cols-2 gap-6 mb-6">
-            <div className="p-6 bg-orange-50 rounded-2xl border-2 border-orange-200">
-              <h3 className="font-semibold text-orange-800 mb-1">Def Civ — Cat I Daily Rate</h3>
-              <p className="text-xs text-orange-600 mb-3">Applied when guest rank is "Def Civ"</p>
-              <div className="flex items-center gap-2">
-                <span className="text-2xl text-orange-600">₹</span>
-                <Input type="number" value={formData.def_civ_cat_i_rate} onChange={(e) => setFormData({...formData, def_civ_cat_i_rate: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input text-2xl font-bold" data-testid="input-def-civ-cat-i-rate" />
-              </div>
-            </div>
-            <div className="p-6 bg-orange-50 rounded-2xl border-2 border-orange-200">
-              <h3 className="font-semibold text-orange-800 mb-1">Def Civ — Cat II Daily Rate</h3>
-              <p className="text-xs text-orange-600 mb-3">Applied when guest rank is "Def Civ"</p>
-              <div className="flex items-center gap-2">
-                <span className="text-2xl text-orange-600">₹</span>
-                <Input type="number" value={formData.def_civ_cat_ii_rate} onChange={(e) => setFormData({...formData, def_civ_cat_ii_rate: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input text-2xl font-bold" data-testid="input-def-civ-cat-ii-rate" />
-              </div>
-            </div>
-          </div>
-
-          {/* License Fee Breakdown */}
-          <p className="text-sm font-semibold text-slate-600 mb-3 uppercase tracking-wide">License Fee Breakdown (for Monthly Report)</p>
-          <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 mb-4">
-            <p className="text-xs text-blue-700">Total rate = Room Rent + License Fee. These are used in the monthly financial report to calculate the license fee payable to the maintaining agency.</p>
-          </div>
-          <div className="grid md:grid-cols-3 gap-4">
-            {[
-              { label: "Cat I (JCO)", rentKey: "cat_i_room_rent", feeKey: "cat_i_license_fee", bgClass: "bg-blue-50 border-blue-200", textClass: "text-blue-800", totalClass: "text-blue-700" },
-              { label: "Cat II (OR)", rentKey: "cat_ii_room_rent", feeKey: "cat_ii_license_fee", bgClass: "bg-purple-50 border-purple-200", textClass: "text-purple-800", totalClass: "text-purple-700" },
-              { label: "Def Civ", rentKey: "def_civ_room_rent", feeKey: "def_civ_license_fee", bgClass: "bg-orange-50 border-orange-200", textClass: "text-orange-800", totalClass: "text-orange-700" }
-            ].map(({ label, rentKey, feeKey, bgClass, textClass, totalClass }) => (
-              <div key={rentKey} className={`p-4 rounded-xl border ${bgClass}`}>
-                <h4 className={`font-semibold mb-3 ${textClass}`}>{label}</h4>
-                <div className="space-y-2">
+          <div className="space-y-4">
+            {categories.map((cat, idx) => (
+              <div key={cat.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="flex justify-between items-start mb-3">
                   <div>
-                    <Label className="text-xs text-slate-500">Room Rent (₹)</Label>
-                    <Input type="number" value={formData[rentKey]} onChange={(e) => setFormData({...formData, [rentKey]: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid={`input-${rentKey}`} />
+                    <h3 className="font-semibold text-slate-800 text-lg">{cat.name}</h3>
+                    <p className="text-xs text-slate-500">Prefix: {cat.prefix} • {cat.room_count} rooms • Capacity: {cat.capacity} person{cat.capacity > 1 ? 's' : ''}</p>
                   </div>
-                  <div>
-                    <Label className="text-xs text-slate-500">License Fee (₹)</Label>
-                    <Input type="number" value={formData[feeKey]} onChange={(e) => setFormData({...formData, [feeKey]: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid={`input-${feeKey}`} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-blue-50 rounded-lg">
+                    <p className="text-xs text-blue-600 font-medium mb-1">Standard Rate</p>
+                    <p className="text-2xl font-bold text-blue-700">₹{cat.rate}</p>
+                    <p className="text-xs text-blue-600">per night</p>
                   </div>
-                  <div className={`text-xs font-semibold mt-2 p-2 bg-white rounded ${totalClass}`}>
-                    Total = ₹{(formData[rentKey] || 0) + (formData[feeKey] || 0)}/night
+                  <div className="p-3 bg-orange-50 rounded-lg">
+                    <p className="text-xs text-orange-600 font-medium mb-1">Def Civ Rate</p>
+                    <p className="text-2xl font-bold text-orange-700">₹{cat.def_civ_rate}</p>
+                    <p className="text-xs text-orange-600">per night</p>
                   </div>
                 </div>
               </div>
             ))}
           </div>
+          
+          {categories.length === 0 && (
+            <div className="text-center py-8 text-slate-400">
+              <p>No room categories configured yet.</p>
+              <p className="text-sm mt-2">Add categories in the Room Categories section above.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
