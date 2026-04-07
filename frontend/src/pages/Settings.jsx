@@ -17,11 +17,12 @@ import {
   Trash,
   Plus,
   User,
-  Star
+  Star,
+  Rocket
 } from "@phosphor-icons/react";
 
-const DEFAULT_FMN_1 = "https://images.unsplash.com/photo-1765555648802-53235276a40b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85";
-const DEFAULT_FMN_2 = "https://images.unsplash.com/photo-1771456915291-58f0dee5b404?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwxfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85";
+const DEFAULT_FMN_1 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/7i02eeq8_Eastern_Command%2C_Indian_Army.png";
+const DEFAULT_FMN_2 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/ltoeqxal_101_Area%2C_Indian_Army.svg.png";
 
 const DEFAULT_RANKS = [
   "Sep/Dfr/Swr", "Nk", "Hav", "Sgt", "PO", "Nb Sub", "JWO", "CPO",
@@ -109,6 +110,68 @@ export default function Settings({ settings, onUpdate }) {
           Settings
         </h1>
         <p className="text-slate-500 mt-1">Configure E-ARMS system settings</p>
+      </div>
+
+      {/* P3: System Actions */}
+      <div className="grid grid-cols-2 gap-4">
+        {/* Run Setup */}
+        <Card className="earms-card border-2 border-blue-300">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Rocket size={20} className="text-blue-600" weight="fill" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-800">Run Setup</h3>
+                <p className="text-xs text-slate-500">Reconfigure rooms and rates</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => window.location.href = "/app/setup"}
+              className="w-full bg-blue-500 hover:bg-blue-600"
+              size="sm"
+            >
+              Launch Setup Wizard
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Migration Mode */}
+        <Card className="earms-card border-2 border-amber-300">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-amber-100 rounded-lg">
+                <Info size={20} className="text-amber-600" weight="fill" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-800">Migration Mode</h3>
+                <p className="text-xs text-slate-500">Allow past-dated entries</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-700">
+                {localStorage.getItem("migration_mode") === "true" ? "Enabled" : "Disabled"}
+              </span>
+              <Button
+                onClick={() => {
+                  const currentMode = localStorage.getItem("migration_mode") === "true";
+                  localStorage.setItem("migration_mode", (!currentMode).toString());
+                  toast.success(`Migration mode ${!currentMode ? "enabled" : "disabled"}`);
+                  window.location.reload();
+                }}
+                variant={localStorage.getItem("migration_mode") === "true" ? "destructive" : "default"}
+                size="sm"
+              >
+                {localStorage.getItem("migration_mode") === "true" ? "Disable" : "Enable"}
+              </Button>
+            </div>
+            {localStorage.getItem("migration_mode") === "true" && (
+              <p className="text-xs text-amber-700 mt-2 bg-amber-50 p-2 rounded">
+                ⚠️ You can now create bookings and check-ins with past dates for data migration.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Formation Signs */}

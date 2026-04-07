@@ -1,0 +1,66 @@
+{
+  "summary": "P3 Setup + Migration Support Testing: Migration Mode toggle works correctly (localStorage persistence, date picker behavior). Settings page shows 'Run Setup' and 'Migration Mode' cards with correct icons. Found 2 issues: 1) Formation signs in Settings page still show OLD Unsplash URLs (database has old values), 2) 'Launch Setup Wizard' button redirects to /app/setup which doesn't exist as a route, causing redirect to home page.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Settings.jsx - Launch Setup Wizard",
+        "issue": "Button redirects to /app/setup which is not a valid route. Falls through to catch-all route and redirects to home page instead of showing setup wizard.",
+        "selector": "button:has-text('Launch Setup Wizard')",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Formation Signs Display",
+        "issue": "Settings page shows OLD Unsplash placeholder URLs for formation signs because the database still has old values. The DEFAULT_FMN_1/2 constants in Settings.jsx were updated but only affect fallback when settings.fmn_sign_1_url is empty.",
+        "affected_selectors": ["[data-testid='input-fmn-1']", "[data-testid='input-fmn-2']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_14.json"
+  ],
+  "action_items": [
+    "Add /app/setup route to App.js that shows SetupWizard component (or modify the 'Launch Setup Wizard' button to reset is_setup_complete flag)",
+    "Update formation sign URLs in database via backend API or add a migration script to update existing settings with new URLs"
+  ],
+  "critical_code_review_comments": [
+    "Settings.jsx line 130: window.location.href = '/app/setup' navigates to non-existent route",
+    "Formation sign URLs in database need to be updated - the DEFAULT_FMN constants only work as fallbacks when URL is empty"
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Settings.jsx - Updated DEFAULT_FMN_1 and DEFAULT_FMN_2 constants to use customer-assets URLs"
+  ],
+  "success_rate": {
+    "backend": "N/A (frontend-only testing)",
+    "frontend": "80% (Migration Mode works, Run Setup redirect broken)"
+  },
+  "test_credentials": "",
+  "seed_data_creation": "",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "P3 Migration Mode feature fully working: 1) Settings page shows 'Run Setup' card with Rocket icon and 'Migration Mode' card with Info icon, 2) Migration Mode toggle updates localStorage and page reloads, 3) Warning message appears when migration mode enabled, 4) Date picker in booking form correctly allows/blocks past dates based on migration mode. Issues found: 1) /app/setup route doesn't exist - need to add route or change button behavior, 2) Formation sign URLs in database still have old Unsplash values.",
+  "feature_test_results": {
+    "settings_run_setup_card_visible": "PASS - Card with Rocket icon visible",
+    "settings_migration_mode_card_visible": "PASS - Card with Info icon visible",
+    "migration_mode_default_disabled": "PASS - Shows 'Disabled' by default",
+    "migration_mode_enable_button": "PASS - 'Enable' button toggles mode ON",
+    "migration_mode_warning_message": "PASS - Warning appears when enabled",
+    "migration_mode_disable_button": "PASS - 'Disable' button toggles mode OFF",
+    "migration_mode_localstorage_persistence": "PASS - Value persists in localStorage",
+    "date_picker_blocks_past_dates_when_off": "PASS - Days 1-6 disabled when migration OFF",
+    "date_picker_allows_past_dates_when_on": "PASS - All dates enabled when migration ON",
+    "launch_setup_wizard_redirect": "FAIL - Redirects to home page instead of setup wizard",
+    "formation_signs_updated_urls": "FAIL - Database still has old Unsplash URLs"
+  },
+  "playwright_test_evidence": {
+    "migration_mode_off_calendar": "Days 1-6 disabled: True, Day 7 disabled: False",
+    "migration_mode_on_calendar": "Days 1-6 disabled: False, Day 7 disabled: False",
+    "past_date_selection": "Successfully selected 31 Mar 2026 (past date) when migration ON"
+  }
+}

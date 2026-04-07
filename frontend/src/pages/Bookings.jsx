@@ -374,14 +374,17 @@ export default function Bookings() {
       return;
     }
     
-    // Check-in date must be today or future
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const checkInDate = new Date(bookingForm.check_in_date);
-    checkInDate.setHours(0, 0, 0, 0);
-    if (checkInDate < today) {
-      toast.error("Check-in date must be today or a future date");
-      return;
+    // P3: Check-in date must be today or future (unless migration mode enabled)
+    const migrationMode = localStorage.getItem("migration_mode") === "true";
+    if (!migrationMode) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const checkInDate = new Date(bookingForm.check_in_date);
+      checkInDate.setHours(0, 0, 0, 0);
+      if (checkInDate < today) {
+        toast.error("Check-in date must be today or a future date");
+        return;
+      }
     }
     
     // Check-out must be after check-in
@@ -1411,7 +1414,12 @@ export default function Bookings() {
                           setBookingForm({...bookingForm, check_in_date: date, check_out_date: null, room_ids: []});
                           setCheckInOpen(false);
                         }}
-                        disabled={(date) => date < new Date(new Date().setHours(0,0,0,0))}
+                        disabled={(date) => {
+                          // P3: Allow past dates in migration mode
+                          const migrationMode = localStorage.getItem("migration_mode") === "true";
+                          if (migrationMode) return false; // No restriction in migration mode
+                          return date < new Date(new Date().setHours(0,0,0,0));
+                        }}
                       />
                     </PopoverContent>
                   </Popover>
