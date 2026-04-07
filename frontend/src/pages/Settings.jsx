@@ -56,6 +56,14 @@ export default function Settings({ settings, onUpdate }) {
   });
   const [saving, setSaving] = useState(false);
   const [newRank, setNewRank] = useState("");
+  
+  // P4: Room Categories Management
+  const [categories, setCategories] = useState(
+    settings?.room_categories || [
+      { id: "cat-i", name: "Cat I", rate: 500, def_civ_rate: 600, room_count: 6, prefix: "C1" },
+      { id: "cat-ii", name: "Cat II", rate: 400, def_civ_rate: 600, room_count: 9, prefix: "C2" }
+    ]
+  );
 
   const handleSave = async () => {
     setSaving(true);
@@ -100,6 +108,55 @@ export default function Settings({ settings, onUpdate }) {
 
   const resetRanks = () => {
     setFormData({ ...formData, ranks: [...DEFAULT_RANKS] });
+  };
+
+  // P4: Category Management Functions
+  const addCategory = () => {
+    const newId = `cat-${Date.now()}`;
+    setCategories([
+      ...categories,
+      { id: newId, name: "", rate: 0, def_civ_rate: 0, room_count: 0, prefix: "" }
+    ]);
+  };
+
+  const updateCategory = (index, field, value) => {
+    const updated = [...categories];
+    updated[index] = { ...updated[index], [field]: value };
+    setCategories(updated);
+  };
+
+  const removeCategory = (index) => {
+    if (categories.length <= 1) {
+      toast.error("At least one category is required");
+      return;
+    }
+    setCategories(categories.filter((_, i) => i !== index));
+  };
+
+  const saveCategories = async () => {
+    // Validate categories
+    for (const cat of categories) {
+      if (!cat.name || !cat.prefix) {
+        toast.error("All categories must have a name and prefix");
+        return;
+      }
+      if (cat.rate <= 0 || cat.def_civ_rate <= 0) {
+        toast.error("Rates must be greater than 0");
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      await axios.put(`${API}/settings/categories`, categories);
+      toast.success("Room categories updated successfully!");
+      onUpdate();
+    } catch (error) {
+      console.error("Error saving categories:", error);
+      toast.error("Failed to save categories");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -246,6 +303,125 @@ export default function Settings({ settings, onUpdate }) {
                 Reset to Official Signs
               </Button>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* P4: Room Categories Configuration */}
+      <Card className="earms-card" data-testid="room-categories-section">
+        <CardContent className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Buildings size={20} className="text-blue-600" weight="duotone" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800">Room Categories</h2>
+                <p className="text-sm text-slate-500">Configure room types, rates, and capacities</p>
+              </div>
+            </div>
+            <Button type="button" onClick={addCategory} variant="outline" size="sm">
+              <Plus size={16} className="mr-1" /> Add Category
+            </Button>
+          </div>
+
+          <div className="space-y-3">
+            {categories.map((cat, idx) => (
+              <div key={cat.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="font-semibold text-slate-700">Category {idx + 1}</h3>
+                  {categories.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeCategory(idx)}
+                      className="text-red-500 hover:text-red-700 h-8 w-8 p-0"
+                    >
+                      <Trash size={16} />
+                    </Button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Category Name *</Label>
+                    <Input
+                      value={cat.name}
+                      onChange={(e) => updateCategory(idx, "name", e.target.value)}
+                      onFocus={(e) => e.target.select()}
+                      placeholder="e.g., Cat I, VIP Suite"
+                      className="earms-input mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Prefix (for room numbers) *</Label>
+                    <Input
+                      value={cat.prefix}
+                      onChange={(e) => updateCategory(idx, "prefix", e.target.value.toUpperCase())}
+                      onFocus={(e) => e.target.select()}
+                      placeholder="e.g., C1, VIP"
+                      className="earms-input mt-1"
+                      maxLength={3}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Standard Rate (₹/night) *</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={cat.rate}
+                      onChange={(e) => updateCategory(idx, "rate", parseFloat(e.target.value) || 0)}
+                      onFocus={(e) => e.target.select()}
+                      className="earms-input mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Def Civ Rate (₹/night) *</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={cat.def_civ_rate}
+                      onChange={(e) => updateCategory(idx, "def_civ_rate", parseFloat(e.target.value) || 0)}
+                      onFocus={(e) => e.target.select()}
+                      className="earms-input mt-1"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Label className="text-xs">Number of Rooms *</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={cat.room_count}
+                      onChange={(e) => updateCategory(idx, "room_count", parseInt(e.target.value) || 0)}
+                      onFocus={(e) => e.target.select()}
+                      className="earms-input mt-1"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      {cat.room_count > 0 && cat.prefix && `Will create rooms: ${cat.prefix}-01 to ${cat.prefix}-${String(cat.room_count).padStart(2, '0')}`}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCategories(settings?.room_categories || categories)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={saveCategories}
+              disabled={saving}
+              className="bg-blue-500 hover:bg-blue-600"
+            >
+              {saving ? "Saving..." : "Save Categories"}
+            </Button>
           </div>
         </CardContent>
       </Card>

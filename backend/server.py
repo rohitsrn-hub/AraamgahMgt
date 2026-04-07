@@ -125,6 +125,25 @@ class AppSettings(BaseModel):
     ])
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # P4: Dynamic room categories
+    room_categories: List[dict] = Field(default_factory=lambda: [
+        {
+            "id": "cat-i",
+            "name": "Cat I",
+            "rate": 500.0,
+            "def_civ_rate": 600.0,
+            "room_count": 6,
+            "prefix": "C1"
+        },
+        {
+            "id": "cat-ii",
+            "name": "Cat II",
+            "rate": 400.0,
+            "def_civ_rate": 600.0,
+            "room_count": 9,
+            "prefix": "C2"
+        }
+    ])
 
 class AppSettingsUpdate(BaseModel):
     fmn_sign_1_url: Optional[str] = None
@@ -603,6 +622,28 @@ async def reset_setup():
         raise HTTPException(status_code=404, detail="Settings not found")
     
     return {"message": "Setup reset successfully. Please reload the page."}
+
+@api_router.put("/settings/categories")
+async def update_room_categories(categories: List[dict]):
+    """P4: Update room categories configuration"""
+    # Validate categories
+    for cat in categories:
+        if not all(k in cat for k in ["id", "name", "rate", "def_civ_rate", "room_count", "prefix"]):
+            raise HTTPException(status_code=400, detail="Invalid category structure")
+    
+    # Update settings
+    result = await db.app_settings.update_one(
+        {},
+        {"$set": {
+            "room_categories": categories,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Settings not found")
+    
+    return {"message": "Room categories updated successfully", "categories": categories}
 
 # ============= ROOMS =============
 
