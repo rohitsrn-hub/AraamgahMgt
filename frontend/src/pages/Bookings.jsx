@@ -126,6 +126,8 @@ export default function Bookings() {
     reason: "",
     refund_amount: 0,
     extra_beds: 0,
+    extra_beds_checkout: 0,  // Extra beds used at checkout
+    extra_bed_days: 0,        // Days extra beds were used
     // Check-in personal details
     guest_contact: "",
     guest_age: "",
@@ -636,7 +638,9 @@ export default function Bookings() {
         staff_id: form.staff_id,
         final_payment: form.final_payment,
         payment_mode: form.payment_mode,
-        notes: form.notes
+        notes: form.notes,
+        extra_beds_checkout: form.extra_beds_checkout || 0,
+        extra_bed_days: form.extra_bed_days || 0
       });
       toast.success("Check-out successful!");
       // Generate receipt with enhanced notification
@@ -645,6 +649,7 @@ export default function Bookings() {
       setPendingCheckoutBooking(null);
       setSelectedBooking(null);
       setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
+        extra_beds_checkout: 0, extra_bed_days: 0,
         guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", identity_card_number: "",
         guest_service_status: "", service_type: "", command_hq: "",
         bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: [] });
@@ -731,6 +736,7 @@ export default function Bookings() {
       setSelectedBooking(null);
       setRefundInfo(null);
       setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
+        extra_beds_checkout: 0, extra_bed_days: 0,
         guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", identity_card_number: "",
         guest_service_status: "", service_type: "", command_hq: "",
         bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: [] });
@@ -1705,9 +1711,61 @@ export default function Bookings() {
                 <p className="font-medium">{selectedBooking.guest_name}</p>
                 <p className="text-sm text-slate-500">Room {getRoomDisplay(selectedBooking)}</p>
                 {selectedBooking.extra_beds > 0 && (
-                  <p className="text-xs text-amber-600">Extra Beds: {selectedBooking.extra_beds} × ₹75 = ₹{selectedBooking.extra_bed_charge}</p>
+                  <p className="text-xs text-amber-600">Extra Beds (at check-in): {selectedBooking.extra_beds} × ₹75 = ₹{selectedBooking.extra_bed_charge}</p>
                 )}
                 <p className="text-sm font-medium text-amber-600 mt-2">Balance Due: ₹{selectedBooking.balance_amount}</p>
+              </div>
+              
+              {/* Extra Bed Usage During Stay */}
+              <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
+                <h4 className="font-semibold text-blue-800 mb-3">Extra Bed Usage (If any additional beds used)</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Extra Beds Used</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="5"
+                      value={actionForm.extra_beds_checkout || 0}
+                      onChange={(e) => {
+                        const beds = parseInt(e.target.value) || 0;
+                        setActionForm({...actionForm, extra_beds_checkout: beds});
+                      }}
+                      onFocus={(e) => e.target.select()}
+                      placeholder="0"
+                      className="earms-input mt-1"
+                      data-testid="input-extra-beds-checkout"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">Number of extra beds (0-5)</p>
+                  </div>
+                  <div>
+                    <Label>Days Used</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={actionForm.extra_bed_days || 0}
+                      onChange={(e) => {
+                        const days = parseInt(e.target.value) || 0;
+                        setActionForm({...actionForm, extra_bed_days: days});
+                      }}
+                      onFocus={(e) => e.target.select()}
+                      placeholder="0"
+                      className="earms-input mt-1"
+                      data-testid="input-extra-bed-days"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">How many days used</p>
+                  </div>
+                </div>
+                {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
+                  <div className="mt-3 p-2 bg-white rounded border border-blue-300">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm text-slate-600">Extra Bed Charges:</span>
+                      <span className="font-semibold text-blue-700">
+                        {actionForm.extra_beds_checkout} beds × {actionForm.extra_bed_days} days × ₹75 = ₹{actionForm.extra_beds_checkout * actionForm.extra_bed_days * 75}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <Label>Staff Member *</Label>
@@ -1724,15 +1782,30 @@ export default function Bookings() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Final Payment</Label>
+                  <Label>Final Payment *</Label>
                   <Input
                     type="number"
-                    value={actionForm.final_payment}
+                    value={(() => {
+                      const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
+                      const totalDue = (selectedBooking.balance_amount || 0) + extraBedCharge;
+                      return actionForm.final_payment !== undefined ? actionForm.final_payment : totalDue;
+                    })()}
                     onChange={(e) => setActionForm({...actionForm, final_payment: parseFloat(e.target.value) || 0})}
-                    onFocus={(e) => e.target.select()}
+                    onFocus={(e) => {
+                      // Auto-fill with calculated total on first focus
+                      const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
+                      const totalDue = (selectedBooking.balance_amount || 0) + extraBedCharge;
+                      if (actionForm.final_payment === 0 || actionForm.final_payment === undefined) {
+                        setActionForm({...actionForm, final_payment: totalDue});
+                      }
+                      e.target.select();
+                    }}
                     className="earms-input mt-1"
                     data-testid="input-final-payment"
                   />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Balance (₹{selectedBooking.balance_amount}) + Extra Beds (₹{(actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75})
+                  </p>
                 </div>
                 <div>
                   <Label>Payment Mode</Label>
