@@ -41,7 +41,7 @@ import {
   WarningCircle
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 // Validation helpers (copied from Bookings.jsx for consistency)
 const validateIndianPhone = (phone) => {
