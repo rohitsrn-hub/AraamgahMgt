@@ -1,0 +1,58 @@
+{
+  "summary": "Tested new check-in pricing logic with room-guest mapping. Fixed critical bug where room assignment section was not rendering (check-in button was not calling openCheckInDialog). All backend tests pass (8/8). Frontend UI verified working with room assignment, Valid ID toggles, and Def Civ rate calculation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Bookings.jsx - Check-in button",
+        "issue": "Check-in button was directly setting showCheckIn state instead of calling openCheckInDialog, causing roomGuestMapping to not be initialized",
+        "selector": "button:has-text('Check In')",
+        "priority": "HIGH",
+        "status": "FIXED"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_checkin_pricing_logic.py",
+    "/app/test_reports/pytest/test_checkin_pricing.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fixed: Line 1135 in Bookings.jsx - Changed onClick handler from direct state setting to openCheckInDialog(booking) to properly initialize roomGuestMapping"
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Bookings.jsx",
+    "/app/backend/tests/test_checkin_pricing_logic.py"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New check-in pricing logic fully implemented and tested. Key features: 1) Dependent ID Ser No field in Family Members section, 2) Room-Wise Guest Assignment section with per-room guest checkboxes, 3) Valid ID/Valid Dependent ID toggles that affect charge category, 4) Def Civ rates applied when any guest in a room lacks valid ID, 5) Bill Summary shows per-room charges breakdown. Backend correctly recalculates room_rent_total based on room_guest_mapping during check-in.",
+  "seed_data_creation": "Created test bookings: BK0012 (TEST_UI_CheckIn) for UI testing, plus multiple TEST_Pricing_* bookings for backend API testing",
+  "feature_test_results": {
+    "dependent_id_field": "PASS - 'Dependent ID Ser No' field visible in Family Members section",
+    "room_assignment_section": "PASS - Room-Wise Guest Assignment section displays each booked room",
+    "self_checkbox": "PASS - Can assign 'Self' to a room via checkbox",
+    "valid_id_toggle": "PASS - 'Valid ID?' checkbox appears when guest is assigned",
+    "family_member_assignment": "PASS - Family members can be assigned to rooms with 'Valid Dependent ID?' toggle",
+    "def_civ_rate_trigger": "PASS - Room charge category changes to 'Def Civ' when guest lacks valid ID",
+    "bill_summary_breakdown": "PASS - Bill Summary shows per-room charges with correct rates",
+    "backend_room_guest_mapping": "PASS - /api/bookings/check-in accepts room_guest_mapping field",
+    "backend_rate_calculation": "PASS - Backend recalculates room charges based on charge_category (Cat I/II vs Def Civ)",
+    "backend_data_persistence": "PASS - room_guest_mapping stored in booking document"
+  },
+  "rates_verified": {
+    "cat_i_rate": 500,
+    "cat_ii_rate": 400,
+    "def_civ_cat_i_rate": 600,
+    "def_civ_cat_ii_rate": 600
+  }
+}

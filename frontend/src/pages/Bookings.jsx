@@ -147,6 +147,9 @@ export default function Bookings() {
 
   const [phoneError, setPhoneError] = useState("");
   const [bookingPhoneError, setBookingPhoneError] = useState("");
+  
+  // Room-Guest Mapping for new pricing logic
+  const [roomGuestMapping, setRoomGuestMapping] = useState([]);
 
   const location = useLocation();
 
@@ -501,7 +504,7 @@ export default function Bookings() {
 
   const addCheckinFamilyMember = () => setActionForm(prev => ({
     ...prev,
-    family_members: [...prev.family_members, { relation: "w/o", name: "", age: "", sex: "F", aadhaar: "", mobile: "" }]
+    family_members: [...prev.family_members, { relation: "w/o", name: "", age: "", sex: "F", aadhaar: "", mobile: "", dependent_id: "" }]
   }));
 
   const removeCheckinFamilyMember = (idx) => setActionForm(prev => ({
@@ -513,6 +516,83 @@ export default function Bookings() {
     ...prev,
     family_members: prev.family_members.map((m, i) => i === idx ? { ...m, [field]: value } : m)
   }));
+
+  // Room-Guest Mapping Functions
+  const addGuestToRoom = (roomIndex, guestType, guestIndex = null) => {
+    setRoomGuestMapping(prev => {
+      const updated = [...prev];
+      const newGuest = {
+        type: guestType, // "self" or "family_member"
+        index: guestIndex, // null for self, family member index for family
+        has_valid_id: guestType === "self" ? (actionForm.identity_card_number ? true : false) : false
+      };
+      
+      // Check if guest already assigned to this room
+      const alreadyAssigned = updated[roomIndex].guests.some(g => 
+        g.type === guestType && (guestType === "self" || g.index === guestIndex)
+      );
+      
+      if (!alreadyAssigned) {
+        updated[roomIndex].guests.push(newGuest);
+        // Recalculate charge category for this room
+        updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
+      }
+      
+      return updated;
+    });
+  };
+
+  const removeGuestFromRoom = (roomIndex, guestType, guestIndex = null) => {
+    setRoomGuestMapping(prev => {
+      const updated = [...prev];
+      updated[roomIndex].guests = updated[roomIndex].guests.filter(g => 
+        !(g.type === guestType && (guestType === "self" || g.index === guestIndex))
+      );
+      // Recalculate charge category for this room
+      updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
+      return updated;
+    });
+  };
+
+  const toggleGuestValidId = (roomIndex, guestType, guestIndex, hasValidId) => {
+    setRoomGuestMapping(prev => {
+      const updated = [...prev];
+      updated[roomIndex].guests = updated[roomIndex].guests.map(g => {
+        if (g.type === guestType && (guestType === "self" || g.index === guestIndex)) {
+          return { ...g, has_valid_id: hasValidId };
+        }
+        return g;
+      });
+      // Recalculate charge category for this room
+      updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
+      return updated;
+    });
+  };
+
+  const calculateRoomChargeCategory = (roomMapping) => {
+    // If any guest in the room lacks valid ID, charge at Def Civ rate
+    const allHaveValidIds = roomMapping.guests.length > 0 && roomMapping.guests.every(g => g.has_valid_id);
+    
+    return {
+      ...roomMapping,
+      charge_category: allHaveValidIds ? roomMapping.room_category : "Def Civ"
+    };
+  };
+
+  const getGuestDisplayName = (guestType, guestIndex) => {
+    if (guestType === "self") {
+      return `${selectedBooking?.guest_name || "Guest"} (Self)`;
+    } else {
+      const member = actionForm.family_members[guestIndex];
+      return member ? `${member.name || `Member ${guestIndex + 1}`} (${member.relation})` : `Member ${guestIndex + 1}`;
+    }
+  };
+
+  const isGuestAssignedToRoom = (roomIndex, guestType, guestIndex = null) => {
+    return roomGuestMapping[roomIndex]?.guests.some(g => 
+      g.type === guestType && (guestType === "self" || g.index === guestIndex)
+    ) || false;
+  };
 
   const handleCheckIn = async () => {
     // Date validation - Cannot check in before scheduled check-in date
@@ -588,6 +668,13 @@ export default function Bookings() {
       return;
     }
     
+    // Room-guest assignment validation
+    const totalGuestsAssigned = roomGuestMapping.reduce((sum, room) => sum + room.guests.length, 0);
+    if (totalGuestsAssigned === 0) {
+      toast.error("Please assign at least one guest to a room");
+      return;
+    }
+    
     try {
       const formattedPhone = "+91 " + cleanPhone.replace(/^\+91/, "");
       await axios.post(`${API}/bookings/check-in`, {
@@ -608,13 +695,15 @@ export default function Bookings() {
         bank_account: actionForm.bank_account || undefined,
         upi_id: actionForm.upi_id || undefined,
         upi_phone: actionForm.upi_phone || undefined,
-        family_members: actionForm.family_members.length > 0 ? actionForm.family_members : undefined
+        family_members: actionForm.family_members.length > 0 ? actionForm.family_members : undefined,
+        room_guest_mapping: roomGuestMapping // NEW: Send room-guest mapping
       });
       toast.success("Check-in successful!");
       setShowCheckIn(false);
       setSelectedBooking(null);
       resetActionForm();
       setPhoneError("");
+      setRoomGuestMapping([]); // Reset room-guest mapping
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Check-in failed");
@@ -706,6 +795,20 @@ export default function Bookings() {
       family_members: []
     }));
     
+    // Initialize room-guest mapping based on booked rooms
+    const roomIds = booking.room_ids || [];
+    const roomNumbers = booking.room_numbers || [];
+    const roomCategories = booking.room_categories || [];
+    
+    const initialMapping = roomIds.map((roomId, index) => ({
+      room_id: roomId,
+      room_number: roomNumbers[index] || `Room ${index + 1}`,
+      room_category: roomCategories[index] || "Cat I",
+      guests: [], // Will be filled by user
+      charge_category: roomCategories[index] || "Cat I" // Default to original category
+    }));
+    
+    setRoomGuestMapping(initialMapping);
     setShowCheckIn(true);
   };
 
@@ -1029,7 +1132,7 @@ export default function Bookings() {
                           {booking.status === "confirmed" && (
                             <>
                               <Button size="sm" variant="outline"
-                                onClick={() => { setSelectedBooking(booking); setShowCheckIn(true); }}
+                                onClick={() => openCheckInDialog(booking)}
                                 disabled={!canCheckInToday(booking)}
                                 className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
                                 title={!canCheckInToday(booking) ? `Check-in available from ${new Date(booking.check_in_date).toLocaleDateString('en-IN')}` : 'Check In'}
@@ -1589,9 +1692,9 @@ export default function Bookings() {
                             </Select>
                           </div>
                           <div>
-                            <Label className="text-xs">Aadhaar No</Label>
-                            <Input value={m.aadhaar} onChange={(e) => updateCheckinFamilyMember(idx, "aadhaar", e.target.value.replace(/\D/g,"").slice(0,12))}
-                              onFocus={(e) => e.target.select()} className="earms-input mt-1 text-xs h-8" placeholder="12-digit" maxLength={12} />
+                            <Label className="text-xs">Dependent ID Ser No</Label>
+                            <Input value={m.dependent_id || ""} onChange={(e) => updateCheckinFamilyMember(idx, "dependent_id", e.target.value)}
+                              onFocus={(e) => e.target.select()} className="earms-input mt-1 text-xs h-8" placeholder="ID Serial No" />
                           </div>
                           <div>
                             <Label className="text-xs">Mobile</Label>
@@ -1603,6 +1706,103 @@ export default function Bookings() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* Room Assignment - NEW SECTION */}
+              <div className="p-4 bg-blue-50 border-2 border-blue-300 rounded-xl">
+                <h4 className="font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                  <Bed size={18} className="text-blue-600" weight="fill" /> Room-Wise Guest Assignment
+                </h4>
+                <p className="text-xs text-blue-700 mb-4 bg-blue-100 p-2 rounded-md">
+                  <WarningCircle size={14} className="inline mr-1" weight="fill" />
+                  Assign guests to each room. If <strong>any guest</strong> in a room lacks a valid Defense/Dependent ID, that room will be charged at <strong>Def Civ rates</strong>.
+                </p>
+                
+                {roomGuestMapping.map((room, roomIdx) => (
+                  <div key={roomIdx} className="mb-4 p-3 bg-white rounded-lg border border-blue-200">
+                    <div className="flex justify-between items-center mb-3">
+                      <div>
+                        <h5 className="font-bold text-slate-800">Room {room.room_number}</h5>
+                        <p className="text-xs text-slate-600">{room.room_category} → Charging at: <span className={room.charge_category === "Def Civ" ? "text-red-600 font-bold" : "text-emerald-600 font-bold"}>{room.charge_category}</span></p>
+                      </div>
+                      <Badge variant={room.charge_category === "Def Civ" ? "destructive" : "default"}>
+                        {room.guests.length} Guest{room.guests.length !== 1 ? "s" : ""}
+                      </Badge>
+                    </div>
+
+                    {/* Guest Assignment List */}
+                    <div className="space-y-2">
+                      {/* Self Option */}
+                      <div className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isGuestAssignedToRoom(roomIdx, "self")}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                addGuestToRoom(roomIdx, "self");
+                              } else {
+                                removeGuestFromRoom(roomIdx, "self");
+                              }
+                            }}
+                            className="h-4 w-4"
+                          />
+                          <span className="text-sm font-medium text-slate-700">{selectedBooking?.guest_name || "Guest"} (Self)</span>
+                        </div>
+                        {isGuestAssignedToRoom(roomIdx, "self") && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-600">Valid ID?</span>
+                            <input
+                              type="checkbox"
+                              checked={room.guests.find(g => g.type === "self")?.has_valid_id || false}
+                              onChange={(e) => toggleGuestValidId(roomIdx, "self", null, e.target.checked)}
+                              className="h-4 w-4"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Family Members */}
+                      {actionForm.family_members.map((member, memberIdx) => (
+                        <div key={memberIdx} className="flex items-center justify-between p-2 bg-slate-50 rounded border border-slate-200">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isGuestAssignedToRoom(roomIdx, "family_member", memberIdx)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  addGuestToRoom(roomIdx, "family_member", memberIdx);
+                                } else {
+                                  removeGuestFromRoom(roomIdx, "family_member", memberIdx);
+                                }
+                              }}
+                              className="h-4 w-4"
+                            />
+                            <span className="text-sm text-slate-700">
+                              {member.name || `Member ${memberIdx + 1}`} ({member.relation})
+                              {member.dependent_id && <span className="ml-1 text-xs text-emerald-600">• ID: {member.dependent_id}</span>}
+                            </span>
+                          </div>
+                          {isGuestAssignedToRoom(roomIdx, "family_member", memberIdx) && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-slate-600">Valid Dependent ID?</span>
+                              <input
+                                type="checkbox"
+                                checked={room.guests.find(g => g.type === "family_member" && g.index === memberIdx)?.has_valid_id || false}
+                                onChange={(e) => toggleGuestValidId(roomIdx, "family_member", memberIdx, e.target.checked)}
+                                className="h-4 w-4"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      {actionForm.family_members.length === 0 && (
+                        <p className="text-xs text-slate-400 italic p-2">Add family members above to assign them to rooms</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
 
               {/* Bank / UPI Details */}
@@ -1643,21 +1843,71 @@ export default function Bookings() {
               {selectedBooking && (
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
                   <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                    <CurrencyInr size={16} className="text-blue-500" /> Bill Summary
+                    <CurrencyInr size={16} className="text-blue-500" /> Bill Summary (Updated with Room Assignments)
                   </h4>
                   {(() => {
                     const nights = Math.ceil(
                       (new Date(selectedBooking.check_out_date) - new Date(selectedBooking.check_in_date)) / 86400000
                     );
+                    
+                    // Calculate per-room charges based on room-guest mapping
+                    let roomChargesTotal = 0;
+                    const roomChargesBreakdown = roomGuestMapping.map(room => {
+                      let ratePerNight = 0;
+                      
+                      // Determine rate based on charge category
+                      if (room.charge_category === "Def Civ") {
+                        // Defense Civilian rates
+                        ratePerNight = room.room_category === "Cat I" 
+                          ? (settings?.def_civ_cat_i_rate || 600)
+                          : (settings?.def_civ_cat_ii_rate || 600);
+                      } else {
+                        // Regular Cat I/II rates
+                        ratePerNight = room.room_category === "Cat I"
+                          ? (settings?.cat_i_rate || 500)
+                          : (settings?.cat_ii_rate || 400);
+                      }
+                      
+                      const roomTotal = ratePerNight * nights;
+                      roomChargesTotal += roomTotal;
+                      
+                      return {
+                        room_number: room.room_number,
+                        room_category: room.room_category,
+                        charge_category: room.charge_category,
+                        rate_per_night: ratePerNight,
+                        total: roomTotal
+                      };
+                    });
+                    
                     const extraBedCharge = actionForm.extra_beds * 75;
-                    const totalWithExtra = (selectedBooking.total_amount || 0) + extraBedCharge;
+                    const totalWithExtra = roomChargesTotal + extraBedCharge;
                     const balance = totalWithExtra - (selectedBooking.advance_paid || 0);
+                    
                     return (
                       <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-slate-600">Room Charges ({nights} night{nights > 1 ? "s" : ""}):</span>
-                          <span className="font-medium">₹{(selectedBooking.total_amount || 0).toFixed(2)}</span>
+                        {/* Per-Room Breakdown */}
+                        {roomChargesBreakdown.length > 0 && (
+                          <div className="mb-2 p-2 bg-white rounded border border-slate-200">
+                            <p className="text-xs font-semibold text-slate-700 mb-1">Per-Room Charges ({nights} night{nights > 1 ? "s" : ""}):</p>
+                            {roomChargesBreakdown.map((rc, idx) => (
+                              <div key={idx} className="flex justify-between text-xs">
+                                <span className="text-slate-600">
+                                  Room {rc.room_number} ({rc.room_category})
+                                  {rc.charge_category === "Def Civ" && <span className="text-red-600 font-bold ml-1">→ Def Civ</span>}
+                                  : ₹{rc.rate_per_night} × {nights}
+                                </span>
+                                <span className="font-medium">₹{rc.total.toFixed(2)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-between font-semibold">
+                          <span className="text-slate-700">Total Room Charges:</span>
+                          <span className="font-bold">₹{roomChargesTotal.toFixed(2)}</span>
                         </div>
+                        
                         {actionForm.extra_beds > 0 && (
                           <div className="flex justify-between text-amber-700">
                             <span>Extra Beds ({actionForm.extra_beds} × ₹75):</span>
@@ -1688,7 +1938,7 @@ export default function Bookings() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCheckIn(false); setSelectedBooking(null); resetActionForm(); setPhoneError(""); }}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setShowCheckIn(false); setSelectedBooking(null); resetActionForm(); setPhoneError(""); setRoomGuestMapping([]); }}>Cancel</Button>
             <Button onClick={handleCheckIn} className="bg-emerald-500 hover:bg-emerald-600" disabled={!actionForm.staff_id} data-testid="confirm-checkin">
               Confirm Check-In
             </Button>

@@ -253,6 +253,7 @@ class Booking(BaseModel):
     wife_count: int = 0
     children_count: int = 0
     family_members: List[dict] = Field(default_factory=list)
+    room_guest_mapping: List[dict] = Field(default_factory=list)  # NEW: Room-wise guest assignments
     room_rent_total: float = 0.0
     license_fee_total: float = 0.0
     notes: Optional[str] = None
@@ -315,6 +316,7 @@ class CheckInRequest(BaseModel):
     upi_id: Optional[str] = None
     upi_phone: Optional[str] = None
     family_members: List[dict] = Field(default_factory=list)
+    room_guest_mapping: List[dict] = Field(default_factory=list)  # NEW: Room-wise guest assignments
 
 class CheckOutRequest(BaseModel):
     booking_id: str
@@ -793,9 +795,46 @@ async def check_in(request: CheckInRequest):
     
     now = datetime.now(timezone.utc).isoformat()
     
+    # Get settings for rate calculation
+    settings = await db.app_settings.find_one({}, {"_id": 0})
+    
+    # Recalculate room charges based on room_guest_mapping (if provided)
+    new_room_rent_total = 0.0
+    if request.room_guest_mapping and len(request.room_guest_mapping) > 0:
+        # Calculate nights
+        check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
+        check_out_date = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
+        nights = (check_out_date - check_in_date).days
+        
+        for room in request.room_guest_mapping:
+            room_category = room.get("room_category", "Cat I")
+            charge_category = room.get("charge_category", room_category)
+            
+            # Determine rate per night based on charge category
+            if charge_category == "Def Civ":
+                # Defense Civilian rates
+                if room_category == "Cat I":
+                    rate_per_night = settings.get("def_civ_cat_i_rate", 600.0)
+                else:
+                    rate_per_night = settings.get("def_civ_cat_ii_rate", 600.0)
+            else:
+                # Regular Cat I/II rates
+                if room_category == "Cat I":
+                    rate_per_night = settings.get("cat_i_rate", 500.0)
+                else:
+                    rate_per_night = settings.get("cat_ii_rate", 400.0)
+            
+            new_room_rent_total += rate_per_night * nights
+    else:
+        # Fallback to original total if no mapping provided (backward compatibility)
+        new_room_rent_total = booking.get("room_rent_total", 0.0)
+    
     # Calculate extra bed charge
     extra_bed_charge = request.extra_beds * 75.0
-    new_balance = booking["balance_amount"] + extra_bed_charge
+    
+    # Recalculate total and balance
+    new_total_amount = new_room_rent_total + booking.get("license_fee_total", 0.0)
+    new_balance = new_total_amount + extra_bed_charge - booking.get("advance_paid", 0.0)
 
     # Build update fields — only overwrite non-None values
     update_fields = {
@@ -804,7 +843,9 @@ async def check_in(request: CheckInRequest):
         "checked_in_by": request.staff_id,
         "extra_beds": request.extra_beds,
         "extra_bed_charge": extra_bed_charge,
-        "balance_amount": new_balance,
+        "room_rent_total": new_room_rent_total,  # Update room rent based on new pricing
+        "total_amount": new_total_amount,  # Update total amount
+        "balance_amount": new_balance,  # Update balance
         "updated_at": now
     }
     optional_fields = {
@@ -827,6 +868,8 @@ async def check_in(request: CheckInRequest):
             update_fields[k] = v
     if request.family_members:
         update_fields["family_members"] = request.family_members
+    if request.room_guest_mapping:
+        update_fields["room_guest_mapping"] = request.room_guest_mapping  # Store the mapping
     if request.notes:
         update_fields["notes"] = request.notes
 
