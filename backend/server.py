@@ -608,6 +608,45 @@ async def get_rooms(category: Optional[RoomCategory] = None, status: Optional[Ro
     rooms = await db.rooms.find(query, {"_id": 0}).to_list(100)
     return rooms
 
+@api_router.get("/rooms/available")
+async def get_available_rooms(
+    check_in: str = Query(..., description="Check-in date (YYYY-MM-DD)"),
+    check_out: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
+    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check")
+):
+    """P2: Get available rooms for given date range, optionally excluding a specific booking"""
+    # Get all rooms
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    
+    # Get bookings that overlap with requested dates
+    booking_query = {
+        "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+        "check_in_date": {"$lt": check_out},
+        "check_out_date": {"$gt": check_in}
+    }
+    
+    # Exclude the specified booking if provided (for room modification during check-in)
+    if exclude_booking_id:
+        booking_query["id"] = {"$ne": exclude_booking_id}
+    
+    overlapping_bookings = await db.bookings.find(booking_query, {"_id": 0}).to_list(1000)
+    
+    # Collect all booked room IDs
+    booked_room_ids = set()
+    for b in overlapping_bookings:
+        for rid in b.get("room_ids", []):
+            booked_room_ids.add(rid)
+        if b.get("room_id"):
+            booked_room_ids.add(b["room_id"])
+    
+    # Filter available rooms (not booked and not under maintenance)
+    available_rooms = [
+        r for r in all_rooms 
+        if r["id"] not in booked_room_ids and r["status"] != RoomStatus.MAINTENANCE.value
+    ]
+    
+    return available_rooms
+
 @api_router.get("/rooms/{room_id}")
 async def get_room(room_id: str):
     room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
@@ -892,6 +931,47 @@ async def check_in(request: CheckInRequest):
     
     updated_booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     return {"message": "Check-in successful", "booking_id": request.booking_id, "booking": updated_booking}
+
+@api_router.put("/bookings/{booking_id}/update-rooms")
+async def update_booking_rooms(booking_id: str, request: dict):
+    """P2: Update room assignments for a confirmed booking before check-in"""
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    if booking["status"] != BookingStatus.CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="Can only modify rooms for confirmed bookings")
+    
+    new_room_ids = request.get("room_ids", [])
+    if not new_room_ids or len(new_room_ids) != len(booking.get("room_ids", [])):
+        raise HTTPException(status_code=400, detail="Invalid room_ids - must match number of originally booked rooms")
+    
+    # Get new room details
+    new_rooms = []
+    for room_id in new_room_ids:
+        room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
+        if not room:
+            raise HTTPException(status_code=404, detail=f"Room {room_id} not found")
+        new_rooms.append(room)
+    
+    # Extract room details for booking
+    room_numbers = [r["room_number"] for r in new_rooms]
+    room_categories = [r["category"] for r in new_rooms]
+    
+    # Update booking with new room assignments
+    now = datetime.now(timezone.utc).isoformat()
+    await db.bookings.update_one(
+        {"id": booking_id},
+        {"$set": {
+            "room_ids": new_room_ids,
+            "room_numbers": room_numbers,
+            "room_categories": room_categories,
+            "updated_at": now
+        }}
+    )
+    
+    updated_booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    return {"message": "Room assignments updated", "booking": updated_booking}
 
 @api_router.post("/bookings/check-out")
 async def check_out(request: CheckOutRequest):

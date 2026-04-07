@@ -30,6 +30,7 @@ import {
   CheckSquare,
   Bank,
   ArrowCounterClockwise,
+  ArrowsClockwise,
   FilePdf,
   UserPlus,
   Trash,
@@ -152,6 +153,11 @@ export default function Bookings() {
   
   // Room-Guest Mapping for new pricing logic
   const [roomGuestMapping, setRoomGuestMapping] = useState([]);
+  
+  // P2: Room modification during check-in
+  const [showRoomModification, setShowRoomModification] = useState(false);
+  const [availableRoomsForCheckIn, setAvailableRoomsForCheckIn] = useState([]);
+  const [modifiedRoomIds, setModifiedRoomIds] = useState([]);
 
   const location = useLocation();
 
@@ -857,7 +863,92 @@ export default function Bookings() {
     }));
     
     setRoomGuestMapping(initialMapping);
+    
+    // P2: Initialize room modification state
+    setModifiedRoomIds(roomIds);
+    setShowRoomModification(false);
+    
+    // Fetch available rooms for potential room change
+    fetchAvailableRoomsForCheckIn(booking);
+    
     setShowCheckIn(true);
+  };
+
+  // P2: Fetch available rooms for check-in (for room modification)
+  const fetchAvailableRoomsForCheckIn = async (booking) => {
+    try {
+      const response = await axios.get(`${API}/rooms/available`, {
+        params: {
+          check_in: booking.check_in_date,
+          check_out: booking.check_out_date,
+          exclude_booking_id: booking.id  // Exclude current booking to show currently assigned rooms
+        }
+      });
+      
+      // Combine available rooms with currently assigned rooms
+      const currentRooms = rooms.filter(r => booking.room_ids.includes(r.id));
+      const availableRooms = response.data;
+      
+      // Merge and deduplicate
+      const allAvailableRooms = [...currentRooms, ...availableRooms].reduce((acc, room) => {
+        if (!acc.find(r => r.id === room.id)) {
+          acc.push(room);
+        }
+        return acc;
+      }, []);
+      
+      setAvailableRoomsForCheckIn(allAvailableRooms);
+    } catch (error) {
+      console.error("Failed to fetch available rooms:", error);
+      toast.error("Could not load available rooms");
+    }
+  };
+
+  // P2: Toggle room modification mode
+  const toggleRoomModification = () => {
+    setShowRoomModification(!showRoomModification);
+  };
+
+  // P2: Update modified room selection
+  const handleRoomChange = (oldRoomId, newRoomId) => {
+    const newRoomIds = modifiedRoomIds.map(id => id === oldRoomId ? newRoomId : id);
+    setModifiedRoomIds(newRoomIds);
+    
+    // Update room-guest mapping to reflect new room
+    const newRoom = availableRoomsForCheckIn.find(r => r.id === newRoomId);
+    if (newRoom) {
+      setRoomGuestMapping(prev => prev.map(room => {
+        if (room.room_id === oldRoomId) {
+          return {
+            ...room,
+            room_id: newRoom.id,
+            room_number: newRoom.room_number,
+            room_category: newRoom.category,
+            charge_category: room.charge_category === "Def Civ" ? "Def Civ" : newRoom.category
+          };
+        }
+        return room;
+      }));
+    }
+  };
+
+  // P2: Apply room changes to booking before check-in
+  const applyRoomChanges = async () => {
+    try {
+      // Update booking with new room assignments
+      await axios.put(`${API}/bookings/${selectedBooking.id}/update-rooms`, {
+        room_ids: modifiedRoomIds
+      });
+      
+      toast.success("Room assignments updated");
+      setShowRoomModification(false);
+      
+      // Refresh booking data
+      const updatedBooking = await axios.get(`${API}/bookings/${selectedBooking.id}`);
+      setSelectedBooking(updatedBooking.data);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to update room assignments");
+    }
   };
 
   const openCheckOutDialog = (booking) => {
@@ -1707,6 +1798,88 @@ export default function Bookings() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* P2: Room Assignment Modification */}
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-300">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-semibold text-amber-800 flex items-center gap-2">
+                    <ArrowsClockwise size={18} className="text-amber-600" weight="fill" /> Room Assignments
+                  </h4>
+                  <Button
+                    type="button"
+                    variant={showRoomModification ? "default" : "outline"}
+                    size="sm"
+                    onClick={toggleRoomModification}
+                    className="text-xs"
+                  >
+                    {showRoomModification ? "Cancel Changes" : "Modify Rooms"}
+                  </Button>
+                </div>
+
+                {!showRoomModification ? (
+                  // Show current room assignments
+                  <div className="space-y-2">
+                    <p className="text-xs text-amber-700 mb-2">Current room assignments for this booking:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {roomGuestMapping.map((room, idx) => (
+                        <div key={idx} className="p-2 bg-white rounded border border-amber-200 text-sm">
+                          <span className="font-semibold">Room {room.room_number}</span>
+                          <span className="text-slate-500 ml-2">({room.room_category})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  // Show room modification interface
+                  <div className="space-y-3">
+                    <p className="text-xs text-amber-700 mb-2">
+                      <WarningCircle size={14} className="inline mr-1" weight="fill" />
+                      Select new rooms from available options. Only vacant rooms for the booking dates are shown.
+                    </p>
+                    
+                    {roomGuestMapping.map((room, idx) => {
+                      const currentRoomId = modifiedRoomIds[idx] || room.room_id;
+                      const isChanged = currentRoomId !== selectedBooking.room_ids[idx];
+                      
+                      return (
+                        <div key={idx} className={`p-3 rounded-lg border ${isChanged ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200'}`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <Label className="text-xs font-semibold">
+                                Room {idx + 1} Assignment {isChanged && <span className="text-emerald-600 ml-1">(Changed)</span>}
+                              </Label>
+                              <Select 
+                                value={currentRoomId} 
+                                onValueChange={(newRoomId) => handleRoomChange(currentRoomId, newRoomId)}
+                              >
+                                <SelectTrigger className="earms-input mt-1 text-sm h-9">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {availableRoomsForCheckIn.map(r => (
+                                    <SelectItem key={r.id} value={r.id}>
+                                      Room {r.room_number} ({r.category}) - {r.status === "AVAILABLE" ? "✓ Available" : "Currently Assigned"}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                    <Button
+                      type="button"
+                      onClick={applyRoomChanges}
+                      className="w-full bg-emerald-500 hover:bg-emerald-600 text-sm"
+                      disabled={JSON.stringify(modifiedRoomIds) === JSON.stringify(selectedBooking.room_ids)}
+                    >
+                      Apply Room Changes
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* Room Assignment - REDESIGNED with inline family members */}
