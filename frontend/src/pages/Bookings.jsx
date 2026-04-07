@@ -115,7 +115,9 @@ export default function Bookings() {
     payment_id: "",
     bank_name: "",
     bank_ifsc: "",
-    bank_account: ""
+    bank_account: "",
+    upi_id: "",        // NEW: UPI ID for refunds
+    upi_phone: ""      // NEW: UPI Phone for refunds
   });
 
   const [actionForm, setActionForm] = useState({
@@ -1429,6 +1431,43 @@ export default function Bookings() {
                   <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-sm flex items-center justify-center">4</div>
                   <CurrencyInr size={18} /> Advance Payment
                 </h3>
+
+                {/* Bank / UPI Details - ALWAYS VISIBLE (for refunds if cancelled) */}
+                <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 mb-4">
+                  <h4 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
+                    <Bank size={16} className="text-blue-600" /> Bank / UPI Details (for refund if cancelled)
+                  </h4>
+                  <p className="text-xs text-blue-700 mb-3">These details will be used for refunds in case of cancellation</p>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Bank Name</Label>
+                      <Input value={bookingForm.bank_name} onChange={(e) => setBookingForm({...bookingForm, bank_name: e.target.value})}
+                        onFocus={(e) => e.target.select()} placeholder="e.g., State Bank of India" className="earms-input mt-1 bg-white" data-testid="input-booking-bank-name" />
+                    </div>
+                    <div>
+                      <Label>IFSC Code</Label>
+                      <Input value={bookingForm.bank_ifsc} onChange={(e) => setBookingForm({...bookingForm, bank_ifsc: e.target.value.toUpperCase()})}
+                        onFocus={(e) => e.target.select()} placeholder="e.g., SBIN0001234" className="earms-input mt-1 bg-white" data-testid="input-booking-bank-ifsc" />
+                    </div>
+                    <div>
+                      <Label>Account Number</Label>
+                      <Input value={bookingForm.bank_account} onChange={(e) => setBookingForm({...bookingForm, bank_account: e.target.value})}
+                        onFocus={(e) => e.target.select()} placeholder="Bank account number" className="earms-input mt-1 bg-white" data-testid="input-booking-bank-account" />
+                    </div>
+                    <div>
+                      <Label>UPI ID</Label>
+                      <Input value={bookingForm.upi_id} onChange={(e) => setBookingForm({...bookingForm, upi_id: e.target.value})}
+                        onFocus={(e) => e.target.select()} placeholder="e.g., name@upi" className="earms-input mt-1 bg-white" data-testid="input-booking-upi-id" />
+                    </div>
+                    <div>
+                      <Label>UPI Phone</Label>
+                      <Input value={bookingForm.upi_phone} onChange={(e) => setBookingForm({...bookingForm, upi_phone: e.target.value})}
+                        onFocus={(e) => e.target.select()} placeholder="10-digit mobile" className="earms-input mt-1 bg-white" data-testid="input-booking-upi-phone" />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>Advance Paid (₹)</Label>
@@ -1444,7 +1483,7 @@ export default function Bookings() {
                   </div>
                   <div>
                     <Label>Payment Mode *</Label>
-                    <Select value={bookingForm.payment_mode} onValueChange={(v) => setBookingForm({...bookingForm, payment_mode: v, payment_id: "", bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: ""})}>
+                    <Select value={bookingForm.payment_mode} onValueChange={(v) => setBookingForm({...bookingForm, payment_mode: v, payment_id: ""})}>
                       <SelectTrigger className="earms-input mt-1" data-testid="select-payment-mode">
                         <SelectValue placeholder="Select mode" />
                       </SelectTrigger>
@@ -1458,7 +1497,7 @@ export default function Bookings() {
                   </div>
                 </div>
 
-                {/* Conditional payment detail fields */}
+                {/* Simplified payment detail fields (bank details already captured above) */}
                 {bookingForm.payment_mode === "cash" && (
                   <div className="mt-3">
                     <Label>Cash Receipt Number *</Label>
@@ -1477,34 +1516,17 @@ export default function Bookings() {
 
                 {bookingForm.payment_mode === "upi" && (
                   <div className="mt-3">
-                    <Label>Transaction ID *</Label>
+                    <Label>UPI Transaction ID *</Label>
                     <Input value={bookingForm.payment_id} onChange={(e) => setBookingForm({...bookingForm, payment_id: e.target.value})}
                       onFocus={(e) => e.target.select()} placeholder="UPI Transaction/Reference ID" className="earms-input mt-1" data-testid="input-upi-transaction-id" />
                   </div>
                 )}
 
                 {bookingForm.payment_mode === "bank_transfer" && (
-                  <div className="grid grid-cols-2 gap-3 mt-3">
-                    <div>
-                      <Label>Bank Name *</Label>
-                      <Input value={bookingForm.bank_name} onChange={(e) => setBookingForm({...bookingForm, bank_name: e.target.value})}
-                        onFocus={(e) => e.target.select()} placeholder="e.g., State Bank of India" className="earms-input mt-1" data-testid="input-bank-name" />
-                    </div>
-                    <div>
-                      <Label>IFSC Code</Label>
-                      <Input value={bookingForm.bank_ifsc} onChange={(e) => setBookingForm({...bookingForm, bank_ifsc: e.target.value.toUpperCase()})}
-                        onFocus={(e) => e.target.select()} placeholder="e.g., SBIN0001234" className="earms-input mt-1" data-testid="input-bank-ifsc" />
-                    </div>
-                    <div>
-                      <Label>Account Number *</Label>
-                      <Input value={bookingForm.bank_account} onChange={(e) => setBookingForm({...bookingForm, bank_account: e.target.value})}
-                        onFocus={(e) => e.target.select()} placeholder="Bank account number" className="earms-input mt-1" data-testid="input-bank-account" />
-                    </div>
-                    <div>
-                      <Label>Transaction Reference</Label>
-                      <Input value={bookingForm.payment_id} onChange={(e) => setBookingForm({...bookingForm, payment_id: e.target.value})}
-                        onFocus={(e) => e.target.select()} placeholder="NEFT/IMPS reference" className="earms-input mt-1" data-testid="input-payment-id" />
-                    </div>
+                  <div className="mt-3">
+                    <Label>Bank Transfer Reference *</Label>
+                    <Input value={bookingForm.payment_id} onChange={(e) => setBookingForm({...bookingForm, payment_id: e.target.value})}
+                      onFocus={(e) => e.target.select()} placeholder="NEFT/IMPS/RTGS reference" className="earms-input mt-1" data-testid="input-payment-id" />
                   </div>
                 )}
 
