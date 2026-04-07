@@ -28,10 +28,41 @@ import {
   SpinnerGap,
   CalendarBlank,
   Star,
-  ChartBar
+  ChartBar,
+  User,
+  Phone,
+  CheckSquare,
+  Bank,
+  ArrowCounterClockwise,
+  ArrowsClockwise,
+  Plus,
+  Trash,
+  WarningCircle
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
+
+// Validation helpers (copied from Bookings.jsx for consistency)
+const validateIndianPhone = (phone) => {
+  const cleaned = phone.replace(/\s+/g, "").replace(/^\+91/, "");
+  return /^[6-9]\d{9}$/.test(cleaned);
+};
+
+const formatIndianPhone = (value) => {
+  let digits = value.replace(/[^\d]/g, "");
+  if (digits.startsWith("91") && digits.length > 10) digits = digits.slice(2);
+  digits = digits.slice(0, 10);
+  if (digits.length <= 5) return digits;
+  return digits.slice(0, 5) + " " + digits.slice(5);
+};
+
+const validateIFSC = (ifsc) => {
+  return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc);
+};
+
+const toUpperCase = (value) => {
+  return value.toUpperCase();
+};
 
 // Helper to display room numbers from a booking (handles old and new format)
 const getRoomDisplay = (booking) => {
@@ -86,8 +117,31 @@ export default function Dashboard() {
     final_payment: 0,
     payment_mode: "",
     reason: "",
-    extra_beds: 0
+    extra_beds: 0,
+    // Check-in personal details
+    guest_contact: "",
+    guest_age: "",
+    guest_sex: "",
+    guest_address: "",
+    identity_card_number: "",
+    guest_service_status: "",
+    service_type: "",
+    command_hq: "",
+    bank_name: "",
+    bank_ifsc: "",
+    bank_account: "",
+    upi_id: "",
+    upi_phone: "",
+    family_members: []
   });
+  
+  // Validation error states
+  const [phoneError, setPhoneError] = useState("");
+  const [checkinIfscError, setCheckinIfscError] = useState("");
+  const [checkinUpiPhoneError, setCheckinUpiPhoneError] = useState("");
+  
+  // Room-guest mapping for check-in pricing
+  const [roomGuestMapping, setRoomGuestMapping] = useState([]);
 
   const fetchDashboardData = async () => {
     try {
@@ -487,20 +541,88 @@ export default function Dashboard() {
       {/* Monthly Calendar Planner Toggle */}
       <Card className="earms-card bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200 shadow-md" data-testid="calendar-planner-card">
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-2">
               <CalendarBlank size={22} className="text-indigo-500" weight="fill" />
-              Room Planner - {months.find(m => m.value === selectedMonth)?.label} {selectedYear}
+              Room Planner
             </CardTitle>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => setShowCalendar(!showCalendar)}
-              className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
-              data-testid="toggle-calendar-btn"
-            >
-              {showCalendar ? "Hide Planner" : "Show Planner"}
-            </Button>
+            
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Month Navigation */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedMonth === 1) {
+                      setSelectedMonth(12);
+                      setSelectedYear(selectedYear - 1);
+                    } else {
+                      setSelectedMonth(selectedMonth - 1);
+                    }
+                  }}
+                  className="h-8 w-8 p-0 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                  title="Previous Month"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"></path></svg>
+                </Button>
+                
+                <div className="flex items-center gap-2">
+                  <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+                    <SelectTrigger className="w-32 h-8 text-sm border-indigo-200" data-testid="planner-month-selector">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {months.map((m) => (
+                        <SelectItem key={m.value} value={m.value.toString()}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  
+                  <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+                    <SelectTrigger className="w-24 h-8 text-sm border-indigo-200" data-testid="planner-year-selector">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[2024, 2025, 2026, 2027].map((y) => (
+                        <SelectItem key={y} value={y.toString()}>
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedMonth === 12) {
+                      setSelectedMonth(1);
+                      setSelectedYear(selectedYear + 1);
+                    } else {
+                      setSelectedMonth(selectedMonth + 1);
+                    }
+                  }}
+                  className="h-8 w-8 p-0 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                  title="Next Month"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"></path></svg>
+                </Button>
+              </div>
+              
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setShowCalendar(!showCalendar)}
+                className="h-8 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                data-testid="toggle-calendar-btn"
+              >
+                {showCalendar ? "Hide" : "Show"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         {showCalendar && calendarData && (
