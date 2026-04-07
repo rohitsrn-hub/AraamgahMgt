@@ -136,11 +136,20 @@ export default function Bookings() {
     notes: "",
     final_payment: 0,
     payment_mode: "",
+    payment_id: "",  // Transaction/receipt ID
     reason: "",
     refund_amount: 0,
     extra_beds: 0,
     extra_beds_checkout: 0,  // Extra beds used at checkout
     extra_bed_days: 0,        // Days extra beds were used
+    // Payment details
+    card_last4: "",
+    card_type: "",
+    upi_id: "",
+    upi_phone: "",
+    bank_name: "",
+    bank_ifsc: "",
+    bank_account: "",
     // Check-in personal details
     guest_contact: "",
     guest_age: "",
@@ -828,6 +837,19 @@ export default function Bookings() {
 
   const handleProceedToFeedback = () => {
     if (!actionForm.staff_id) { toast.error("Please select staff member"); return; }
+    
+    // Validate payment details based on payment mode
+    if (actionForm.payment_mode) {
+      if (!actionForm.payment_id) {
+        const modeLabel = actionForm.payment_mode === "cash" ? "Receipt Number" : 
+                         actionForm.payment_mode === "card" ? "Card Transaction Reference" :
+                         actionForm.payment_mode === "upi" ? "UPI Transaction ID" :
+                         "Bank Transfer Reference";
+        toast.error(`Please enter ${modeLabel}`);
+        return;
+      }
+    }
+    
     setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm } });
     setShowCheckOut(false);
     setShowFeedback(true);
@@ -843,9 +865,18 @@ export default function Bookings() {
         staff_id: form.staff_id,
         final_payment: form.final_payment,
         payment_mode: form.payment_mode,
+        payment_id: form.payment_id,
         notes: form.notes,
         extra_beds_checkout: form.extra_beds_checkout || 0,
-        extra_bed_days: form.extra_bed_days || 0
+        extra_bed_days: form.extra_bed_days || 0,
+        // Include payment details
+        card_last4: form.card_last4 || undefined,
+        card_type: form.card_type || undefined,
+        upi_id: form.upi_id || undefined,
+        upi_phone: form.upi_phone || undefined,
+        bank_name: form.bank_name || undefined,
+        bank_ifsc: form.bank_ifsc || undefined,
+        bank_account: form.bank_account || undefined
       });
       toast.success("Check-out successful!");
       // Generate receipt with enhanced notification
@@ -853,11 +884,16 @@ export default function Bookings() {
       showPDFNotification(result, "Checkout Receipt Generated");
       setPendingCheckoutBooking(null);
       setSelectedBooking(null);
-      setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
+      setActionForm({ 
+        staff_id: "", notes: "", final_payment: 0, payment_mode: "", payment_id: "",
+        reason: "", refund_amount: 0, extra_beds: 0,
         extra_beds_checkout: 0, extra_bed_days: 0,
+        card_last4: "", card_type: "", upi_id: "", upi_phone: "",
+        bank_name: "", bank_ifsc: "", bank_account: "",
         guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", identity_card_number: "",
         guest_service_status: "", service_type: "", command_hq: "",
-        bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: [] });
+        family_members: [] 
+      });
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Check-out failed");
@@ -2428,8 +2464,8 @@ export default function Bookings() {
                   </p>
                 </div>
                 <div>
-                  <Label>Payment Mode</Label>
-                  <Select value={actionForm.payment_mode} onValueChange={(v) => setActionForm({...actionForm, payment_mode: v})}>
+                  <Label>Payment Mode *</Label>
+                  <Select value={actionForm.payment_mode} onValueChange={(v) => setActionForm({...actionForm, payment_mode: v, payment_id: ""})}>
                     <SelectTrigger className="earms-input mt-1" data-testid="select-payment-mode-checkout">
                       <SelectValue placeholder="Mode" />
                     </SelectTrigger>
@@ -2437,10 +2473,182 @@ export default function Bookings() {
                       <SelectItem value="cash">Cash</SelectItem>
                       <SelectItem value="upi">UPI</SelectItem>
                       <SelectItem value="card">Card</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
+
+              {/* Payment Details Fields Based on Mode */}
+              {actionForm.payment_mode === "cash" && (
+                <div>
+                  <Label>Cash Receipt Number *</Label>
+                  <Input 
+                    value={actionForm.payment_id || ""} 
+                    onChange={(e) => setActionForm({...actionForm, payment_id: e.target.value})}
+                    onFocus={(e) => e.target.select()} 
+                    placeholder="Receipt / Voucher number" 
+                    className="earms-input mt-1" 
+                    data-testid="input-cash-receipt-checkout" 
+                  />
+                </div>
+              )}
+
+              {actionForm.payment_mode === "card" && (
+                <div className="space-y-3">
+                  <div>
+                    <Label>Card Transaction Reference *</Label>
+                    <Input 
+                      value={actionForm.payment_id || ""} 
+                      onChange={(e) => setActionForm({...actionForm, payment_id: e.target.value})}
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="Card approval / transaction ID" 
+                      className="earms-input mt-1" 
+                      data-testid="input-card-transaction-checkout" 
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Last 4 Digits of Card</Label>
+                      <Input 
+                        value={actionForm.card_last4 || ""} 
+                        onChange={(e) => setActionForm({...actionForm, card_last4: e.target.value.slice(0, 4)})}
+                        onFocus={(e) => e.target.select()} 
+                        placeholder="XXXX" 
+                        className="earms-input mt-1" 
+                        maxLength={4}
+                        data-testid="input-card-last4-checkout" 
+                      />
+                    </div>
+                    <div>
+                      <Label>Card Type</Label>
+                      <Select 
+                        value={actionForm.card_type || ""} 
+                        onValueChange={(v) => setActionForm({...actionForm, card_type: v})}
+                      >
+                        <SelectTrigger className="earms-input mt-1">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="visa">Visa</SelectItem>
+                          <SelectItem value="mastercard">Mastercard</SelectItem>
+                          <SelectItem value="rupay">RuPay</SelectItem>
+                          <SelectItem value="amex">Amex</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {actionForm.payment_mode === "upi" && (
+                <div className="space-y-3">
+                  <div>
+                    <Label>UPI Transaction ID *</Label>
+                    <Input 
+                      value={actionForm.payment_id || ""} 
+                      onChange={(e) => setActionForm({...actionForm, payment_id: e.target.value})}
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="UPI Transaction/Reference ID" 
+                      className="earms-input mt-1" 
+                      data-testid="input-upi-transaction-checkout" 
+                    />
+                    <p className="text-xs text-amber-600 mt-1">⚠️ Transaction ID is unique for each payment</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>UPI ID (Optional)</Label>
+                      <Input 
+                        value={actionForm.upi_id || (selectedBooking.upi_id || "")} 
+                        onChange={(e) => setActionForm({...actionForm, upi_id: e.target.value})}
+                        onFocus={(e) => e.target.select()} 
+                        placeholder="example@upi" 
+                        className="earms-input mt-1 bg-slate-50" 
+                        data-testid="input-upi-id-checkout" 
+                      />
+                      {selectedBooking.upi_id && (
+                        <p className="text-xs text-green-600 mt-1">✓ Auto-filled from booking</p>
+                      )}
+                    </div>
+                    <div>
+                      <Label>UPI Phone (Optional)</Label>
+                      <Input 
+                        value={actionForm.upi_phone || (selectedBooking.upi_phone || "")} 
+                        onChange={(e) => setActionForm({...actionForm, upi_phone: formatIndianPhone(e.target.value)})}
+                        onFocus={(e) => e.target.select()} 
+                        placeholder="10-digit mobile" 
+                        className="earms-input mt-1 bg-slate-50" 
+                        maxLength={11}
+                        data-testid="input-upi-phone-checkout" 
+                      />
+                      {selectedBooking.upi_phone && (
+                        <p className="text-xs text-green-600 mt-1">✓ Auto-filled from booking</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {actionForm.payment_mode === "bank_transfer" && (
+                <div className="space-y-3">
+                  <div>
+                    <Label>Bank Transfer Reference *</Label>
+                    <Input 
+                      value={actionForm.payment_id || ""} 
+                      onChange={(e) => setActionForm({...actionForm, payment_id: e.target.value})}
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="NEFT/IMPS/RTGS reference" 
+                      className="earms-input mt-1" 
+                      data-testid="input-bank-transfer-checkout" 
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label>Bank Name</Label>
+                      <Input 
+                        value={actionForm.bank_name || (selectedBooking.bank_name || "")} 
+                        onChange={(e) => setActionForm({...actionForm, bank_name: e.target.value})}
+                        onFocus={(e) => e.target.select()} 
+                        placeholder="Bank name" 
+                        className="earms-input mt-1 bg-slate-50" 
+                        data-testid="input-bank-name-checkout" 
+                      />
+                      {selectedBooking.bank_name && (
+                        <p className="text-xs text-green-600 mt-1">✓ Auto-filled from booking</p>
+                      )}
+                    </div>
+                    <div>
+                      <Label>IFSC Code</Label>
+                      <Input 
+                        value={actionForm.bank_ifsc || (selectedBooking.bank_ifsc || "")} 
+                        onChange={(e) => setActionForm({...actionForm, bank_ifsc: toUpperCase(e.target.value)})}
+                        onFocus={(e) => e.target.select()} 
+                        placeholder="e.g., SBIN0001234" 
+                        className="earms-input mt-1 bg-slate-50" 
+                        maxLength={11}
+                        data-testid="input-bank-ifsc-checkout" 
+                      />
+                      {selectedBooking.bank_ifsc && (
+                        <p className="text-xs text-green-600 mt-1">✓ Auto-filled from booking</p>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <Label>Account Number</Label>
+                    <Input 
+                      value={actionForm.bank_account || (selectedBooking.bank_account || "")} 
+                      onChange={(e) => setActionForm({...actionForm, bank_account: e.target.value})}
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="Account number" 
+                      className="earms-input mt-1 bg-slate-50" 
+                      data-testid="input-bank-account-checkout" 
+                    />
+                    {selectedBooking.bank_account && (
+                      <p className="text-xs text-green-600 mt-1">✓ Auto-filled from booking</p>
+                    )}
+                  </div>
+                </div>
+              )}
               <div>
                 <Label>Notes</Label>
                 <Textarea
