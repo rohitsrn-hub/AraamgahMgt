@@ -595,6 +595,15 @@ async def update_settings(request: AppSettingsUpdate):
     
     return await get_settings()
 
+@api_router.post("/settings/reset-setup")
+async def reset_setup():
+    """P3: Reset is_setup_complete flag to show setup wizard again"""
+    result = await db.app_settings.update_one({}, {"$set": {"is_setup_complete": False}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Settings not found")
+    
+    return {"message": "Setup reset successfully. Please reload the page."}
+
 # ============= ROOMS =============
 
 @api_router.get("/rooms", response_model=List[dict])

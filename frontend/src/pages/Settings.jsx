@@ -127,7 +127,17 @@ export default function Settings({ settings, onUpdate }) {
               </div>
             </div>
             <Button
-              onClick={() => window.location.href = "/app/setup"}
+              onClick={async () => {
+                if (window.confirm("This will reset your configuration and show the setup wizard. Continue?")) {
+                  try {
+                    await axios.post(`${API}/settings/reset-setup`);
+                    toast.success("Setup reset. Redirecting to setup wizard...");
+                    setTimeout(() => window.location.reload(), 1000);
+                  } catch (error) {
+                    toast.error("Failed to reset setup");
+                  }
+                }
+              }}
               className="w-full bg-blue-500 hover:bg-blue-600"
               size="sm"
             >
@@ -217,7 +227,25 @@ export default function Settings({ settings, onUpdate }) {
           </div>
           <div className="p-4 bg-blue-50 rounded-xl flex items-start gap-3">
             <Info size={20} className="text-blue-500 mt-0.5" />
-            <p className="text-sm text-blue-700">Upload your formation sign images to a hosting service and paste the URLs here.</p>
+            <div className="flex-1">
+              <p className="text-sm text-blue-700">Upload your formation sign images to a hosting service and paste the URLs here.</p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  setFormData({
+                    ...formData,
+                    fmn_sign_1_url: DEFAULT_FMN_1,
+                    fmn_sign_2_url: DEFAULT_FMN_2
+                  });
+                  toast.success("Formation signs reset to official Eastern Command & 101 Area insignia");
+                }}
+              >
+                Reset to Official Signs
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
