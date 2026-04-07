@@ -105,7 +105,6 @@ export default function Bookings() {
     guest_contact: "",
     guest_rank: "",
     army_number: "",
-    aadhaar_number: "",
     guest_unit: "",
     num_rooms: 1,
     room_ids: [],
@@ -116,9 +115,7 @@ export default function Bookings() {
     payment_id: "",
     bank_name: "",
     bank_ifsc: "",
-    bank_account: "",
-    upi_id: "",
-    upi_phone: ""
+    bank_account: ""
   });
 
   const [actionForm, setActionForm] = useState({
@@ -296,7 +293,6 @@ export default function Bookings() {
       guest_contact: "",
       guest_rank: "",
       army_number: "",
-      aadhaar_number: "",
       guest_unit: "",
       num_rooms: 1,
       room_ids: [],
@@ -307,9 +303,7 @@ export default function Bookings() {
       payment_id: "",
       bank_name: "",
       bank_ifsc: "",
-      bank_account: "",
-      upi_id: "",
-      upi_phone: ""
+      bank_account: ""
     });
     setAvailableRooms([]);
     setBookingPhoneError("");
@@ -359,12 +353,6 @@ export default function Bookings() {
         toast.error("Enter valid 10-digit Indian mobile number");
         return;
       }
-    }
-    
-    // Aadhaar validation (if provided)
-    if (bookingForm.aadhaar_number && !/^\d{12}$/.test(bookingForm.aadhaar_number)) {
-      toast.error("Aadhaar must be exactly 12 digits");
-      return;
     }
     
     // Date and room validation
@@ -467,6 +455,9 @@ export default function Bookings() {
       setShowNewBooking(false);
       setShowNightConfirmation(false);
       setPendingBookingData(null);
+      
+      // Clear URL parameters to prevent auto-reopen
+      window.history.replaceState({}, '', '/app/bookings');
       
       // Show WhatsApp message modal with booking details
       setCreatedBookingData(createdBooking);
@@ -1138,10 +1129,6 @@ export default function Bookings() {
                   <Input value={bookingForm.army_number} onChange={(e) => setBookingForm({...bookingForm, army_number: e.target.value})} onFocus={(e) => e.target.select()} placeholder="e.g., 15814432-F" className="earms-input mt-1" data-testid="input-army-number" />
                 </div>
                 <div>
-                  <Label>Aadhaar Number</Label>
-                  <Input value={bookingForm.aadhaar_number} onChange={(e) => setBookingForm({...bookingForm, aadhaar_number: e.target.value.replace(/\D/g,"").slice(0,12)})} onFocus={(e) => e.target.select()} placeholder="12-digit Aadhaar" className="earms-input mt-1" data-testid="input-aadhaar" maxLength={12} />
-                </div>
-                <div>
                   <Label>Unit Name</Label>
                   <Input value={bookingForm.guest_unit} onChange={(e) => setBookingForm({...bookingForm, guest_unit: e.target.value})} onFocus={(e) => e.target.select()} placeholder="e.g., 2 PARA" className="earms-input mt-1" data-testid="input-guest-unit" />
                 </div>
@@ -1334,17 +1321,10 @@ export default function Bookings() {
                 )}
 
                 {bookingForm.payment_mode === "upi" && (
-                  <div className="grid grid-cols-2 gap-3 mt-3">
-                    <div>
-                      <Label>UPI ID *</Label>
-                      <Input value={bookingForm.upi_id} onChange={(e) => setBookingForm({...bookingForm, upi_id: e.target.value})}
-                        onFocus={(e) => e.target.select()} placeholder="e.g., name@upi" className="earms-input mt-1" data-testid="input-upi-id" />
-                    </div>
-                    <div>
-                      <Label>Transaction ID *</Label>
-                      <Input value={bookingForm.payment_id} onChange={(e) => setBookingForm({...bookingForm, payment_id: e.target.value})}
-                        onFocus={(e) => e.target.select()} placeholder="UPI Transaction/Reference ID" className="earms-input mt-1" data-testid="input-upi-transaction-id" />
-                    </div>
+                  <div className="mt-3">
+                    <Label>Transaction ID *</Label>
+                    <Input value={bookingForm.payment_id} onChange={(e) => setBookingForm({...bookingForm, payment_id: e.target.value})}
+                      onFocus={(e) => e.target.select()} placeholder="UPI Transaction/Reference ID" className="earms-input mt-1" data-testid="input-upi-transaction-id" />
                   </div>
                 )}
 
@@ -2287,18 +2267,25 @@ ${createdBookingData.guest_unit ? `• Unit: ${createdBookingData.guest_unit}` :
 • Category: ${(createdBookingData.room_categories || []).filter((v, i, arr) => arr.indexOf(v) === i).join(", ")}
 
 📅 *Stay Period:*
-• Check-in: ${format(parseISO(createdBookingData.check_in_date), "dd MMM yyyy")}
-• Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")}
+• Check-in: ${format(parseISO(createdBookingData.check_in_date), "dd MMM yyyy")} - 1300h
+• Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")} - 0800h
 
 💰 *Payment:*
 • Total Amount: ₹${createdBookingData.total_amount}
 • Advance Paid: ₹${createdBookingData.advance_paid}
 • Balance Due: ₹${createdBookingData.balance_amount}
 
-Please arrive by check-in time. Looking forward to serving you!
+*Guidelines for guests pl*
+1. Pl carry aadhar card as ID proof for smooth check in. *Non Dependent and Unaccompanied Civil Guest* are not allowed without serving pers. Dependent Card & Aadhar card reqd for verification.
+2. Max 4 days res at a time.
+3. Extra bed charges is Rs 75/- per day.
+4. Cancellation- 100% Adv booking will be refunded only if indl info the JCO I/C ECSAG regarding cancellation 04 days before the date of booking. 50% booking amt will be refunded if informed within 2-4 days of booking. No refund will be given if informed within 2 days of booking date.
+5. Only alloted rooms will be opened by the incharge.
+6. Pets are not allowed.
 
-🙏 Thank you
-*ECSAG Shillong*`}
+Have A comfortable stay,
+Regards
+ECSAG Shillong`}
                     className="mt-2 font-mono text-sm min-h-[400px] bg-slate-50"
                     onClick={(e) => e.target.select()}
                   />
@@ -2320,18 +2307,25 @@ ${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}\n`
 • Category: ${(createdBookingData.room_categories || []).filter((v, i, arr) => arr.indexOf(v) === i).join(", ")}
 
 📅 *Stay Period:*
-• Check-in: ${format(parseISO(createdBookingData.check_in_date), "dd MMM yyyy")}
-• Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")}
+• Check-in: ${format(parseISO(createdBookingData.check_in_date), "dd MMM yyyy")} - 1300h
+• Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")} - 0800h
 
 💰 *Payment:*
 • Total Amount: ₹${createdBookingData.total_amount}
 • Advance Paid: ₹${createdBookingData.advance_paid}
 • Balance Due: ₹${createdBookingData.balance_amount}
 
-Please arrive by check-in time. Looking forward to serving you!
+*Guidelines for guests pl*
+1. Pl carry aadhar card as ID proof for smooth check in. *Non Dependent and Unaccompanied Civil Guest* are not allowed without serving pers. Dependent Card & Aadhar card reqd for verification.
+2. Max 4 days res at a time.
+3. Extra bed charges is Rs 75/- per day.
+4. Cancellation- 100% Adv booking will be refunded only if indl info the JCO I/C ECSAG regarding cancellation 04 days before the date of booking. 50% booking amt will be refunded if informed within 2-4 days of booking. No refund will be given if informed within 2 days of booking date.
+5. Only alloted rooms will be opened by the incharge.
+6. Pets are not allowed.
 
-🙏 Thank you
-*ECSAG Shillong*`;
+Have A comfortable stay,
+Regards
+ECSAG Shillong`;
                       navigator.clipboard.writeText(message);
                       toast.success("Message copied to clipboard!");
                     }}
