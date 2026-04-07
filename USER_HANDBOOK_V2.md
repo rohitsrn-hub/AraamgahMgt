@@ -18,18 +18,33 @@
 
 **💰 Improved Financial Management**
 - Bank/UPI details captured during booking for faster refunds
+- Comprehensive payment details at check-out (transaction IDs, card details, bank references)
+- Auto-population of payment details from booking data
 - Simplified payment fields
-- Read-only room rates summary in Settings
 
 **🔧 Operational Flexibility**
+- **NEW:** Context-aware check-in/check-out from Dashboard and Command Center
+- **NEW:** Booking selection modal for streamlined operations
 - Modify room assignments during check-in
 - Conflict detection prevents double-booking
 - Migration mode for historical data import
+
+**📅 Enhanced Planning & Navigation**
+- **NEW:** Month/year navigation in Room Planner
+- Previous/Next month buttons for quick browsing
+- Dropdown selectors for any month/year
+- Visual calendar with occupancy tracking
 
 **⚙️ Dynamic Configuration**
 - Custom room categories with capacity management
 - "Run Setup" option to reconfigure system
 - Formation signs with official military insignia
+
+**🔐 Data Validation & Consistency**
+- Uniform mobile number validation across all forms
+- Auto-uppercase for Service/Defence/Dependent IDs
+- IFSC code validation (11-character format)
+- Real-time validation feedback
 
 ---
 
@@ -108,26 +123,66 @@ E-ARMS (AraamgahMgt - Automated Room Management System) is a comprehensive milit
 
 ## 3. Command Center
 
-The Command Center is your home screen with quick access to common tasks.
+### Overview
 
-### Quick Actions
+The **Command Center** is your central hub for quick actions. It features a military-inspired interface with large, color-coded buttons for instant access to core functions.
 
-**📅 New Booking**
-- Opens booking form
-- For creating new reservations
+### Available Actions
 
-**✅ Check In**
-- Goes to Bookings page with confirmed bookings
-- Quick access to check-in process
+#### 🟢 New Booking
+- **Action:** Creates a new booking
+- **Navigation:** Opens Bookings page with new booking form
+- **Use Case:** Guest calls to reserve a room
 
-**✈️ Check Out**
-- Goes to Bookings page with checked-in guests
-- Quick access to checkout process
+#### 🔵 Check In
+- **Action:** Opens booking selection modal
+- **Process:**
+  1. Click "Check In" button
+  2. System shows all **confirmed** bookings
+  3. Select the booking from dropdown
+  4. Click "Proceed"
+  5. Full check-in form opens with guest details pre-populated
+- **Use Case:** Guest arrives at facility
 
-**📊 Dashboard**
-- View occupancy statistics
-- Today's arrivals and departures
-- Monthly analytics
+**NEW Feature:** Context-aware booking selection ensures you check in the right guest.
+
+#### 🟠 Check Out
+- **Action:** Opens booking selection modal
+- **Process:**
+  1. Click "Check Out" button
+  2. System shows all **checked-in** bookings
+  3. Select the booking from dropdown
+  4. Click "Proceed"
+  5. Full check-out form opens with payment details
+- **Use Case:** Guest departs from facility
+
+**NEW Feature:** Payment details auto-populate from booking data for faster processing.
+
+#### 🔴 Cancel
+- **Action:** Opens booking cancellation flow
+- **Navigation:** Opens Dashboard with cancel dialog
+- **Use Case:** Booking needs to be cancelled
+
+#### 🟣 Dashboard
+- **Action:** Opens main dashboard
+- **Features:** Occupancy stats, analytics, room planner
+- **Use Case:** View current facility status
+
+### Best Practices
+
+✅ **Use Command Center for:**
+- Quick check-in/check-out during busy hours
+- Fast access to booking form
+- Visual navigation for new users
+
+✅ **Booking Selection Tips:**
+- Use dropdown search to find specific guest by name
+- Booking info shows: Guest Name, Booking #, Room, Dates
+- Selected booking preview appears before proceeding
+
+❌ **Avoid:**
+- Skipping booking selection - always verify correct guest
+- Proceeding without reviewing booking summary
 
 ---
 
@@ -155,6 +210,73 @@ The Command Center is your home screen with quick access to common tasks.
 - **Occupancy Trend** - Daily occupancy over time
 - **Revenue Analysis** - Monthly revenue breakdown
 - **Category Distribution** - Bookings by room category
+
+### Room Planner (NEW ENHANCED 📅)
+
+**Purpose:** Visual calendar showing room occupancy by date
+
+**NEW Navigation Features:**
+- **Month Dropdown:** Select any month (January - December)
+- **Year Dropdown:** Select year (2024-2027)
+- **Previous Month Button (◀):** Go back one month
+- **Next Month Button (▶):** Go forward one month
+- **Show/Hide Toggle:** Collapse planner to save screen space
+
+**How to Navigate:**
+
+1. **Quick Navigation:**
+   - Click ◀ to go to previous month
+   - Click ▶ to go to next month
+   - Year automatically adjusts (Dec → Jan increments year)
+
+2. **Direct Selection:**
+   - Click month dropdown → Select any month
+   - Click year dropdown → Select any year
+   - Planner updates immediately
+
+**Calendar Display:**
+
+Each day shows:
+- Date number
+- Booking count (e.g., "3 bookings")
+- Color coding:
+  - **Green:** Available days
+  - **Amber:** Partially booked
+  - **Red:** Fully booked
+
+**Use Cases:**
+- Check availability for future dates
+- Review past occupancy patterns
+- Plan maintenance during low occupancy periods
+- Identify peak booking periods
+
+**Tips:**
+✅ Use month navigation to check seasonal trends
+✅ Show planner during guest calls to confirm availability
+✅ Hide planner when not needed to reduce clutter
+
+### Quick Action Buttons (NEW ✨)
+
+The Dashboard now includes quick access buttons:
+
+**Check In Button:**
+1. Click "Check In"
+2. Booking selection modal opens
+3. Shows only **confirmed** bookings
+4. Select guest from dropdown
+5. Click "Proceed" → Full check-in form opens
+
+**Check Out Button:**
+1. Click "Check Out"  
+2. Booking selection modal opens
+3. Shows only **checked-in** bookings
+4. Select guest from dropdown
+5. Click "Proceed" → Full check-out form opens
+
+**Benefits:**
+- Context-aware booking selection
+- No wrong guest selection
+- Faster operations during busy times
 
 ---
 
@@ -456,11 +578,62 @@ Advance Paid: ₹500
 Balance Due: ₹1950
 ```
 
-### Payment Collection
+### Payment Collection (NEW ENHANCED 💳)
+
+**Payment Mode Selection:**
+Choose from:
+- Cash
+- UPI
+- Card
+- Bank Transfer
+
+**Based on Payment Mode, Required Details:**
+
+#### Cash Payment
+- **Cash Receipt Number** (required)
+  - Enter voucher/receipt number
+
+#### Card Payment
+- **Card Transaction Reference** (required)
+  - Approval/transaction ID
+- **Last 4 Digits of Card** (optional)
+- **Card Type** (optional): Visa, Mastercard, RuPay, Amex
+
+#### UPI Payment
+- **UPI Transaction ID** (required)
+  - ⚠️ Unique for each transaction - must enter fresh ID
+- **UPI ID** (optional)
+  - Auto-filled from booking data
+  - Can be updated if needed
+- **UPI Phone** (optional)
+  - Auto-filled from booking data
+  - Format: XXXXX XXXXX
+
+#### Bank Transfer
+- **Bank Transfer Reference** (required)
+  - NEFT/IMPS/RTGS reference number
+- **Bank Name** (optional)
+  - Auto-filled from booking data
+- **IFSC Code** (optional)
+  - Auto-filled from booking data
+  - 11-character format: ABCD0123456
+- **Account Number** (optional)
+  - Auto-filled from booking data
+
+**Auto-Population Feature:**
+✅ Fields auto-fill from booking/check-in data when available
+✅ Green checkmark (✓) indicates auto-filled fields
+✅ Light background highlights pre-filled fields
+✅ All fields remain editable
+
+**Validation:**
+- Payment mode selected → Transaction ID/Reference required
+- System prevents checkout without payment details
+- Clear error messages guide data entry
 
 **Amount to Collect:**
 - Displayed clearly
-- Can be paid via Cash/UPI/Card/Bank Transfer
+- Balance Due + Extra Bed Charges = Final Payment
 
 **Checkout Confirmation:**
 - Generates final PDF bill
@@ -888,7 +1061,86 @@ Migration mode is stored in browser localStorage and persists across sessions un
 
 ---
 
-## 15. Troubleshooting
+## 15. Data Validation & Consistency (NEW 🔐)
+
+### Uniform Mobile Number Validation
+
+**All mobile number fields use consistent validation:**
+
+**Format:** XXXXX XXXXX (10 digits with space)
+**Rules:**
+- Must start with 6, 7, 8, or 9
+- Exactly 10 digits
+- Auto-formatted as you type
+
+**Fields Validated:**
+- Guest Contact (Booking)
+- Guest Contact (Check-in)
+- Family Member Mobile
+- UPI Phone (Booking)
+- UPI Phone (Check-out)
+- Guest History Search
+
+**Visual Feedback:**
+- ✅ Valid number: Normal border
+- ❌ Invalid number: Red border + error message
+- Message: "Enter a valid 10-digit Indian mobile number"
+
+---
+
+### Auto-Uppercase for IDs
+
+**All ID fields automatically convert to UPPERCASE as you type:**
+
+**Fields Affected:**
+- Army/Service Number
+- Defence ID
+- Dependent ID Serial Number
+
+**Benefits:**
+- Consistent data format
+- Easier searching
+- Prevents duplicate entries due to case differences
+
+**Example:**
+- You type: `abc123def`
+- System shows: `ABC123DEF`
+- Real-time conversion - no need to retype
+
+---
+
+### IFSC Code Validation
+
+**Format:** ABCD0123456 (11 characters)
+
+**Rules:**
+- First 4 characters: Letters (bank code)
+- 5th character: Must be `0`
+- Last 6 characters: Alphanumeric (branch code)
+- Auto-converts to uppercase
+
+**Visual Feedback:**
+- ❌ Invalid format: Red border
+- Error message: "Invalid IFSC format (e.g., SBIN0001234)"
+
+**Fields Validated:**
+- Bank IFSC (Booking)
+- Bank IFSC (Check-in)
+- Bank IFSC (Check-out)
+
+---
+
+### Backend Safety Checks
+
+**Even if frontend validation is bypassed, backend ensures:**
+- All IDs stored in uppercase
+- Mobile numbers match 10-digit format
+- IFSC codes follow standard format
+- Invalid data rejected with clear error messages
+
+---
+
+## 16. Troubleshooting
 
 ### Common Issues
 
@@ -926,6 +1178,44 @@ When reporting errors, provide:
 - Error message (if any)
 - Screenshot of the screen
 - Booking number (if applicable)
+
+---
+
+## 17. Latest Features Summary (v2.0) ✨
+
+### 🎯 Quick Reference: What's New
+
+**Faster Operations:**
+1. **Booking Selection Modals**
+   - Check-in/check-out from Dashboard/Command Center
+   - Context-aware - only shows eligible bookings
+   - No more wrong guest selection
+
+2. **Enhanced Payment Tracking**
+   - Comprehensive payment details at check-out
+   - Auto-population from booking data
+   - Transaction IDs, card details, bank references
+
+3. **Improved Navigation**
+   - Month/year dropdown in Room Planner
+   - Previous/Next month buttons
+   - Browse any month/year quickly
+
+**Better Data Quality:**
+4. **Uniform Validation**
+   - All mobile numbers validated consistently
+   - Auto-uppercase for Service/Defence/Dependent IDs
+   - IFSC code format validation
+
+5. **Scrollable Check-Out Form**
+   - No more cut-off fields
+   - Smooth scrolling for all content
+
+**Production-Ready Architecture:**
+- Zero code duplication (single source of truth)
+- Context-aware workflows
+- Backend safety validations
+- Real-time error feedback
 
 ---
 
@@ -981,6 +1271,12 @@ Settings → Room Categories = Main configuration
 ## Version History
 
 **v2.0 (April 2026)**
+- ✨ **NEW:** Booking selection modals for context-aware check-in/check-out
+- ✨ **NEW:** Enhanced payment details at check-out with auto-population
+- ✨ **NEW:** Month/year navigation in Room Planner (dropdown + prev/next buttons)
+- ✨ **NEW:** Uniform validation rules (mobile, IFSC, IDs)
+- ✨ **NEW:** Auto-uppercase for Service/Defence/Dependent IDs
+- ✨ **NEW:** Scrollable check-out form
 - Added room-wise pricing with dependent card validation
 - Inline family member addition per room
 - Bank/UPI details capture during booking
