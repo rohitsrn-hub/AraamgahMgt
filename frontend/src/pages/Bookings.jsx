@@ -53,6 +53,16 @@ const formatIndianPhone = (value) => {
   return digits.slice(0, 5) + " " + digits.slice(5);
 };
 
+// IFSC Code validation (11 characters: 4 letters + 0 + 6 alphanumeric)
+const validateIFSC = (ifsc) => {
+  return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc);
+};
+
+// Force uppercase for ID fields
+const toUpperCase = (value) => {
+  return value.toUpperCase();
+};
+
 export default function Bookings() {
   const [bookings, setBookings] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -150,6 +160,10 @@ export default function Bookings() {
 
   const [phoneError, setPhoneError] = useState("");
   const [bookingPhoneError, setBookingPhoneError] = useState("");
+  const [bookingIfscError, setBookingIfscError] = useState("");
+  const [checkinIfscError, setCheckinIfscError] = useState("");
+  const [upiPhoneError, setUpiPhoneError] = useState("");
+  const [checkinUpiPhoneError, setCheckinUpiPhoneError] = useState("");
   
   // Room-Guest Mapping for new pricing logic
   const [roomGuestMapping, setRoomGuestMapping] = useState([]);
@@ -1377,7 +1391,7 @@ export default function Bookings() {
                 </div>
                 <div>
                   <Label>Army / Service Number</Label>
-                  <Input value={bookingForm.army_number} onChange={(e) => setBookingForm({...bookingForm, army_number: e.target.value})} onFocus={(e) => e.target.select()} placeholder="e.g., 15814432-F" className="earms-input mt-1" data-testid="input-army-number" />
+                  <Input value={bookingForm.army_number} onChange={(e) => setBookingForm({...bookingForm, army_number: toUpperCase(e.target.value)})} onFocus={(e) => e.target.select()} placeholder="e.g., 15814432-F" className="earms-input mt-1" data-testid="input-army-number" />
                 </div>
                 <div>
                   <Label>Unit Name</Label>
@@ -1546,8 +1560,20 @@ export default function Bookings() {
                     </div>
                     <div>
                       <Label>IFSC Code</Label>
-                      <Input value={bookingForm.bank_ifsc} onChange={(e) => setBookingForm({...bookingForm, bank_ifsc: e.target.value.toUpperCase()})}
-                        onFocus={(e) => e.target.select()} placeholder="e.g., SBIN0001234" className="earms-input mt-1 bg-white" data-testid="input-booking-bank-ifsc" />
+                      <Input 
+                        value={bookingForm.bank_ifsc} 
+                        onChange={(e) => {
+                          const value = toUpperCase(e.target.value);
+                          setBookingForm({...bookingForm, bank_ifsc: value});
+                          setBookingIfscError(value && !validateIFSC(value) ? "Invalid IFSC format (e.g., SBIN0001234)" : "");
+                        }}
+                        onFocus={(e) => e.target.select()} 
+                        placeholder="e.g., SBIN0001234" 
+                        className={`earms-input mt-1 bg-white ${bookingIfscError ? 'border-red-500' : ''}`}
+                        data-testid="input-booking-bank-ifsc" 
+                        maxLength={11}
+                      />
+                      {bookingIfscError && <p className="text-xs text-red-500 mt-1">{bookingIfscError}</p>}
                     </div>
                     <div>
                       <Label>Account Number</Label>
@@ -1561,8 +1587,20 @@ export default function Bookings() {
                     </div>
                     <div>
                       <Label>UPI Phone</Label>
-                      <Input value={bookingForm.upi_phone} onChange={(e) => setBookingForm({...bookingForm, upi_phone: e.target.value})}
-                        onFocus={(e) => e.target.select()} placeholder="10-digit mobile" className="earms-input mt-1 bg-white" data-testid="input-booking-upi-phone" />
+                      <Input 
+                        value={bookingForm.upi_phone} 
+                        onChange={(e) => {
+                          const formatted = formatIndianPhone(e.target.value);
+                          setBookingForm({...bookingForm, upi_phone: formatted});
+                          setUpiPhoneError(formatted && !validateIndianPhone(formatted) ? "Enter a valid 10-digit Indian mobile number" : "");
+                        }}
+                        onFocus={(e) => e.target.select()} 
+                        placeholder="10-digit mobile" 
+                        className={`earms-input mt-1 bg-white ${upiPhoneError ? 'border-red-500' : ''}`}
+                        data-testid="input-booking-upi-phone" 
+                        maxLength={11}
+                      />
+                      {upiPhoneError && <p className="text-xs text-red-500 mt-1">{upiPhoneError}</p>}
                     </div>
                   </div>
                 </div>
@@ -2009,10 +2047,14 @@ export default function Bookings() {
                                 <Label className="text-xs">Mobile</Label>
                                 <Input 
                                   value={member.mobile} 
-                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "mobile", e.target.value)}
+                                  onChange={(e) => {
+                                    const formatted = formatIndianPhone(e.target.value);
+                                    updateRoomFamilyMember(roomIdx, memberIdx, "mobile", formatted);
+                                  }}
                                   onFocus={(e) => e.target.select()} 
                                   className="earms-input mt-1 text-xs h-8" 
                                   placeholder="10-digit" 
+                                  maxLength={11}
                                 />
                               </div>
                             </div>
@@ -2037,7 +2079,7 @@ export default function Bookings() {
                                 <Label className="text-xs">Dependent ID Ser No</Label>
                                 <Input 
                                   value={member.dependent_id || ""} 
-                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "dependent_id", e.target.value)}
+                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "dependent_id", toUpperCase(e.target.value))}
                                   onFocus={(e) => e.target.select()} 
                                   className="earms-input mt-1 text-xs h-8" 
                                   placeholder="Enter ID Serial Number" 
@@ -2076,8 +2118,20 @@ export default function Bookings() {
                   </div>
                   <div>
                     <Label>IFSC Code</Label>
-                    <Input value={actionForm.bank_ifsc} onChange={(e) => setActionForm({...actionForm, bank_ifsc: e.target.value.toUpperCase()})}
-                      onFocus={(e) => e.target.select()} placeholder="e.g., SBIN0001234" className="earms-input mt-1" data-testid="input-checkin-bank-ifsc" />
+                    <Input 
+                      value={actionForm.bank_ifsc} 
+                      onChange={(e) => {
+                        const value = toUpperCase(e.target.value);
+                        setActionForm({...actionForm, bank_ifsc: value});
+                        setCheckinIfscError(value && !validateIFSC(value) ? "Invalid IFSC format (e.g., SBIN0001234)" : "");
+                      }}
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="e.g., SBIN0001234" 
+                      className={`earms-input mt-1 ${checkinIfscError ? 'border-red-500' : ''}`}
+                      data-testid="input-checkin-bank-ifsc" 
+                      maxLength={11}
+                    />
+                    {checkinIfscError && <p className="text-xs text-red-500 mt-1">{checkinIfscError}</p>}
                   </div>
                   <div>
                     <Label>Account Number</Label>
@@ -2091,8 +2145,20 @@ export default function Bookings() {
                   </div>
                   <div>
                     <Label>UPI Phone</Label>
-                    <Input value={actionForm.upi_phone} onChange={(e) => setActionForm({...actionForm, upi_phone: e.target.value})}
-                      onFocus={(e) => e.target.select()} placeholder="10-digit mobile" className="earms-input mt-1" data-testid="input-checkin-upi-phone" />
+                    <Input 
+                      value={actionForm.upi_phone} 
+                      onChange={(e) => {
+                        const formatted = formatIndianPhone(e.target.value);
+                        setActionForm({...actionForm, upi_phone: formatted});
+                        setCheckinUpiPhoneError(formatted && !validateIndianPhone(formatted) ? "Enter a valid 10-digit Indian mobile number" : "");
+                      }}
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="10-digit mobile" 
+                      className={`earms-input mt-1 ${checkinUpiPhoneError ? 'border-red-500' : ''}`}
+                      data-testid="input-checkin-upi-phone" 
+                      maxLength={11}
+                    />
+                    {checkinUpiPhoneError && <p className="text-xs text-red-500 mt-1">{checkinUpiPhoneError}</p>}
                   </div>
                 </div>
               </div>
@@ -2577,19 +2643,19 @@ export default function Bookings() {
                   <Label>Phone Number</Label>
                   <Input
                     value={guestHistorySearch.phone}
-                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, phone: e.target.value }))}
+                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, phone: formatIndianPhone(e.target.value) }))}
                     onFocus={(e) => e.target.select()}
                     placeholder="10-digit mobile number"
                     className="earms-input mt-1"
                     data-testid="history-phone-input"
-                    maxLength={10}
+                    maxLength={11}
                   />
                 </div>
                 <div>
                   <Label>Army / Service Number</Label>
                   <Input
                     value={guestHistorySearch.army_number}
-                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, army_number: e.target.value }))}
+                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, army_number: toUpperCase(e.target.value) }))}
                     onFocus={(e) => e.target.select()}
                     placeholder="e.g., 15814432-F"
                     className="earms-input mt-1"

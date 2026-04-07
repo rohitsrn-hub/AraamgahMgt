@@ -102,23 +102,20 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "E-ARMS military rest house booking system with phone capture, WhatsApp confirmation, dashboard improvements, guest history, booking slip PDFs, and validation rules. Recent blocker: Bookings page crash due to function scoping issue."
+user_problem_statement: "E-ARMS military rest house booking system with uniform validation rules for mobile numbers, uppercase enforcement for Service/Defence/Dependent IDs, and IFSC code validation across all forms."
 
 backend:
-  - task: "Fix MongoDB ObjectId serialization in setup endpoint"
+  - task: "Implement uniform validation helpers and backend safety checks"
     implemented: true
-    working: true
+    working: "NA"
     file: "/app/backend/server.py"
     stuck_count: 0
-    priority: "high"
-    needs_retesting: false
+    priority: "critical"
+    needs_retesting: true
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Fixed /api/settings/setup endpoint to exclude _id from response. Changed return to fetch settings with {_id: 0} projection instead of returning raw doc."
-      - working: true
-        agent: "testing"
-        comment: "Backend test PASSED: POST /api/settings/setup returns 200 without ObjectId serialization error. GET /api/settings also returns 200 without _id field."
+        comment: "Added validation helpers: validateIFSC (11-char format), validateIndianMobile (10 digits 6-9), normalizeUppercaseFields (army_number, dependent_id, bank_ifsc). Added validation to create_booking and check_in endpoints to enforce IFSC format, mobile format, and uppercase IDs. Backend safety layer ensures data integrity even if frontend validation is bypassed."
 
 frontend:
   - task: "Fix Bookings page crash (handlePrintBookingSlips scoping error)"
@@ -177,16 +174,14 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Fix Bookings page crash (handlePrintBookingSlips scoping error)"
-    - "Bulk Booking Slip PDF generation"
-    - "Enhanced form validation rules"
-    - "Fix MongoDB ObjectId serialization in setup endpoint"
+    - "Uniform validation rules across all mobile number fields"
+    - "Uppercase enforcement for Army/Service/Dependent ID fields"
+    - "IFSC code validation (11-character format)"
+    - "Backend validation safety checks"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
   - agent: "main"
-    message: "Fixed P0 blocker (Bookings page crash) and P1 issue (MongoDB ObjectId error). Enhanced validation per VALIDATION_RULES.md. All changes tested with screenshot tool - page loads correctly, modal opens, linting passes. Ready for comprehensive E2E testing. Test credentials: Check /app/memory/test_credentials.md for any existing test accounts."
-  - agent: "testing"
-    message: "COMPREHENSIVE TESTING COMPLETE - ALL TESTS PASSED ✅ Backend: 11 tests passed, 4 skipped (100% success rate). Frontend: All critical features verified working. Bookings page crash fixed, PDF generation working, validations implemented correctly, ObjectId serialization issue resolved. No action items, no bugs found. Ready for production use."
+    message: "Implemented UNIFORM VALIDATION RULES. Frontend: Added validateIFSC, toUpperCase helpers, updated 10 input fields with real-time validation and uppercase transformation. Backend: Added validate_ifsc, validate_indian_mobile, normalize_uppercase_fields helpers to POST /api/bookings and /api/bookings/check-in endpoints. All IDs auto-convert to uppercase before storage. Linting passed. Ready for E2E testing."

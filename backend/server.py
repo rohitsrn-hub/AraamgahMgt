@@ -32,6 +32,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============= VALIDATION HELPERS =============
+import re
+
+def validate_ifsc(ifsc: str) -> bool:
+    """Validate IFSC code format: 4 letters + 0 + 6 alphanumeric"""
+    if not ifsc:
+        return True  # Optional field
+    return bool(re.match(r'^[A-Z]{4}0[A-Z0-9]{6}$', ifsc))
+
+def validate_indian_mobile(mobile: str) -> bool:
+    """Validate Indian mobile number (10 digits starting with 6-9)"""
+    if not mobile:
+        return True  # Optional field
+    cleaned = mobile.replace(" ", "").replace("+91", "").replace("-", "")
+    return bool(re.match(r'^[6-9]\d{9}$', cleaned))
+
+def normalize_uppercase_fields(data: dict) -> dict:
+    """Force uppercase on ID fields (army_number, dependent_id, bank_ifsc)"""
+    if "army_number" in data and data["army_number"]:
+        data["army_number"] = data["army_number"].upper()
+    if "bank_ifsc" in data and data["bank_ifsc"]:
+        data["bank_ifsc"] = data["bank_ifsc"].upper()
+    if "dependent_id" in data and data["dependent_id"]:
+        data["dependent_id"] = data["dependent_id"].upper()
+    # For family members in check-in
+    if "family_members" in data:
+        for member in data["family_members"]:
+            if "dependent_id" in member and member["dependent_id"]:
+                member["dependent_id"] = member["dependent_id"].upper()
+    return data
+
 # ============= HELPER FUNCTIONS =============
 async def generate_booking_number():
     """Generate sequential booking number starting from BK0001"""
@@ -765,6 +796,21 @@ async def get_booking(booking_id: str):
 
 @api_router.post("/bookings")
 async def create_booking(booking: BookingCreate):
+    # Normalize uppercase fields FIRST (army_number, bank_ifsc)
+    booking_data = booking.model_dump()
+    booking_data = normalize_uppercase_fields(booking_data)
+    booking = BookingCreate(**booking_data)
+    
+    # Validate IFSC code format (after uppercase conversion)
+    if booking.bank_ifsc and not validate_ifsc(booking.bank_ifsc):
+        raise HTTPException(status_code=400, detail="Invalid IFSC code format. Expected format: ABCD0123456 (4 letters + 0 + 6 alphanumeric)")
+    
+    # Validate mobile numbers
+    if booking.guest_contact and not validate_indian_mobile(booking.guest_contact):
+        raise HTTPException(status_code=400, detail="Invalid mobile number. Must be 10 digits starting with 6-9")
+    if booking.upi_phone and not validate_indian_mobile(booking.upi_phone):
+        raise HTTPException(status_code=400, detail="Invalid UPI phone number. Must be 10 digits starting with 6-9")
+    
     if not booking.room_ids or len(booking.room_ids) == 0:
         raise HTTPException(status_code=400, detail="At least one room must be selected")
 
@@ -877,6 +923,27 @@ async def create_booking(booking: BookingCreate):
 
 @api_router.post("/bookings/check-in")
 async def check_in(request: CheckInRequest):
+    # Normalize uppercase fields FIRST (dependent_id in family members, bank_ifsc)
+    request_data = request.model_dump()
+    request_data = normalize_uppercase_fields(request_data)
+    request = CheckInRequest(**request_data)
+    
+    # Validate IFSC code format (after uppercase conversion)
+    if request.bank_ifsc and not validate_ifsc(request.bank_ifsc):
+        raise HTTPException(status_code=400, detail="Invalid IFSC code format. Expected format: ABCD0123456 (4 letters + 0 + 6 alphanumeric)")
+    
+    # Validate mobile numbers
+    if request.guest_contact and not validate_indian_mobile(request.guest_contact):
+        raise HTTPException(status_code=400, detail="Invalid mobile number. Must be 10 digits starting with 6-9")
+    if request.upi_phone and not validate_indian_mobile(request.upi_phone):
+        raise HTTPException(status_code=400, detail="Invalid UPI phone number. Must be 10 digits starting with 6-9")
+    
+    # Validate family member mobiles
+    if request.family_members:
+        for member in request.family_members:
+            if member.get("mobile") and not validate_indian_mobile(member["mobile"]):
+                raise HTTPException(status_code=400, detail=f"Invalid mobile number for family member {member.get('name', 'Unknown')}")
+    
     booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
