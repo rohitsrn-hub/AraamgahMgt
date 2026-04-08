@@ -717,19 +717,29 @@ export default function Dashboard() {
                     let dotClass = "";
                     
                     if (status === "confirmed") {
-                      cellClass = "bg-blue-400";
+                      if (isCheckinDate || isCheckoutDate) {
+                        // Gradient from lighter blue to darker blue
+                        cellClass = "bg-gradient-to-r from-blue-300 to-blue-500";
+                      } else {
+                        cellClass = "bg-blue-400";
+                      }
                       dotClass = "text-white";
                     } else if (status === "checked_in") {
-                      cellClass = "bg-amber-400";
+                      if (isCheckinDate || isCheckoutDate) {
+                        // Gradient from lighter amber to darker amber
+                        cellClass = "bg-gradient-to-r from-amber-300 to-amber-500";
+                      } else {
+                        cellClass = "bg-amber-400";
+                      }
                       dotClass = "text-white";
                     } else if (status === "checked_out") {
-                      cellClass = "bg-slate-300";
+                      if (isCheckinDate || isCheckoutDate) {
+                        // Gradient from lighter grey to darker grey
+                        cellClass = "bg-gradient-to-r from-slate-200 to-slate-400";
+                      } else {
+                        cellClass = "bg-slate-300";
+                      }
                       dotClass = "text-slate-600";
-                    }
-                    
-                    // Half-color effect for check-in and check-out dates
-                    if (isCheckinDate || isCheckoutDate) {
-                      cellClass += " bg-gradient-to-r from-white via-white to-current";
                     }
 
                     return (
