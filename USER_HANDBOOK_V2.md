@@ -15,12 +15,19 @@
 - Room-wise guest assignment with inline family member addition
 - Per-room pricing based on dependent card validation
 - Automatic Def Civ rate application when required
+- **NEW:** Expanded family relations (Father, Mother, Brother, Sister)
 
 **💰 Improved Financial Management**
 - Bank/UPI details captured during booking for faster refunds
 - Comprehensive payment details at check-out (transaction IDs, card details, bank references)
 - Auto-population of payment details from booking data
+- **NEW:** Hours-based cancellation policy (96h/48h thresholds)
 - Simplified payment fields
+
+**📋 Enhanced Booking Information**
+- **NEW:** Total members field with individual age capture
+- Better party composition tracking
+- Automatic age-based categorization
 
 **🔧 Operational Flexibility**
 - **NEW:** Context-aware check-in/check-out from Dashboard and Command Center
@@ -31,18 +38,23 @@
 
 **📅 Enhanced Planning & Navigation**
 - **NEW:** Month/year navigation in Room Planner
+- **NEW:** Visual gradient indicators for check-in/check-out dates
+- **NEW:** Same-day availability visualization
 - Previous/Next month buttons for quick browsing
 - Dropdown selectors for any month/year
 - Visual calendar with occupancy tracking
+- Color-coded status (Blue=Confirmed, Amber=Checked-In, Grey=Checked-Out)
 
 **⚙️ Dynamic Configuration**
 - Custom room categories with capacity management
+- **NEW:** Hours-based cancellation policy configuration
 - "Run Setup" option to reconfigure system
 - Formation signs with official military insignia
 
 **🔐 Data Validation & Consistency**
 - Uniform mobile number validation across all forms
 - Auto-uppercase for Service/Defence/Dependent IDs
+- **NEW:** Auto-uppercase for Identity Card numbers
 - IFSC code validation (11-character format)
 - Real-time validation feedback
 
@@ -213,7 +225,7 @@ The **Command Center** is your central hub for quick actions. It features a mili
 
 ### Room Planner (NEW ENHANCED 📅)
 
-**Purpose:** Visual calendar showing room occupancy by date
+**Purpose:** Visual calendar showing room occupancy by date with gradient indicators for same-day availability
 
 **NEW Navigation Features:**
 - **Month Dropdown:** Select any month (January - December)
@@ -236,22 +248,46 @@ The **Command Center** is your central hub for quick actions. It features a mili
 
 **Calendar Display:**
 
+**Status Colors:**
+- **Blue:** Confirmed bookings
+- **Amber:** Checked-in guests
+- **Grey:** Checked-out (historical)
+- **Green:** Available rooms
+
+**NEW: Gradient Indicators** 🎨
+- **Check-in dates:** Show gradient (light → dark blue/amber)
+  - Indicates guest checks in at 13:00
+- **Check-out dates:** Show gradient (light → dark blue/amber)
+  - Indicates room available from 09:00 same day
+- **Middle dates:** Solid color (fully occupied)
+
+**Visual Example:**
+```
+Room C1-01:  [▓▓▓▓▓] [████] [████] [░░░▓]
+             Check-in  Full   Full  Check-out
+             13:00     Day    Day   09:00
+```
+
 Each day shows:
 - Date number
-- Booking count (e.g., "3 bookings")
-- Color coding:
-  - **Green:** Available days
-  - **Amber:** Partially booked
-  - **Red:** Fully booked
+- Booking status (color + gradient)
+- Hover: Guest name, booking number
 
 **Use Cases:**
 - Check availability for future dates
 - Review past occupancy patterns
+- Identify same-day availability (gradient cells)
 - Plan maintenance during low occupancy periods
 - Identify peak booking periods
 
+**Same-Day Turnaround:**
+- Check-out at 08:00 + Cleaning (1 hour) = Available 09:00
+- New check-in at 13:00 (4-hour gap)
+- Gradient visualization shows this availability
+
 **Tips:**
 ✅ Use month navigation to check seasonal trends
+✅ Gradient cells indicate same-day booking opportunities
 ✅ Show planner during guest calls to confirm availability
 ✅ Hide planner when not needed to reduce clutter
 
@@ -286,12 +322,19 @@ The Dashboard now includes quick access buttons:
 
 **Required Information:**
 - Guest Name
-- Guest Contact (10-digit mobile)
+- Guest Contact (10-digit mobile, auto-formatted: XXXXX XXXXX)
 - Rank (select from dropdown)
-- Army Number
-- Unit
+- Army/Service Number (auto-converts to UPPERCASE)
+- Unit Name
 
-**Tip:** Contact number is auto-formatted as "+91 XXXXXXXXXX"
+**NEW: Party Composition** 👥
+
+1. **Total Members (including self):** Enter total people (1-20), includes primary guest
+2. **Ages of All Members:** Auto-generates age fields - M1=Member 1 (guest), M2=Member 2, etc.
+
+**Example:** Total: 4 → Ages: M1=45, M2=42, M3=15, M4=12
+
+**Tip:** Mobile numbers auto-format as "XXXXX XXXXX"
 
 ---
 
@@ -454,14 +497,14 @@ For each booked room, you'll see a card like this:
 
 1. Click **"Add Family Member to Room C2-08"**
 2. Fill in details:
-   - Relation (w/o, s/o, d/o, other)
-   - Name
-   - Age
-   - Sex
-   - Mobile
+   - **Relation:** Wife (w/o), Son (s/o), Daughter (d/o), Father, Mother, Brother, Sister, Other
+   - **Name:** Full name
+   - **Age:** Required
+   - **Sex:** M/F/Other
+   - **Mobile:** Optional (10-digit, auto-formatted)
 3. **Dependent Card Available?** checkbox:
    - ☑ **Checked** - Family member has valid dependent card
-     - Dependent ID Ser No field appears
+     - Dependent ID Ser No field appears (auto-converts to UPPERCASE)
      - Enter ID serial number
    - ☐ **Unchecked** - No dependent card
      - Room will be charged at **Def Civ rate**
@@ -990,15 +1033,33 @@ Gen, Lt Gen, Maj Gen, Brig, Col, Lt Col, Maj, Capt, Lt, Sub, JCO, NCO, Def Civ
 
 ---
 
-### Cancellation Policy
+### Cancellation Policy (UPDATED - Hours-Based ⏰)
 
-**Text Field:**
-- Enter cancellation policy terms
-- Displayed to guests
-- Editable rich text
+**NEW: Hours-Based System**
 
-**Example:**
-"Cancellations must be made 48 hours before check-in. Full refund if cancelled 48+ hours before. 50% refund if cancelled within 48 hours."
+The cancellation policy now uses **hours before check-in** for precise refund calculations.
+
+**Default Policy:**
+
+| Notice Period | Charge | Refund |
+|---------------|--------|--------|
+| >96 hours (4+ days) | 0% | 100% ✅ |
+| 48-96 hours (2-4 days) | 50% | 50% ⚠️ |
+| <48 hours (<2 days) | 100% | 0% ❌ |
+
+**Configuration:**
+- Add/edit policy slabs in Settings
+- Set hours_before thresholds (96h, 48h, 0h)
+- Set charge percentages (0%, 50%, 100%)
+- Real-time preview shows refund amounts
+
+**How It Works:**
+System calculates exact hours until check-in (13:00) and applies matching policy slab.
+
+**Examples:**
+- Cancel 120 hours before → 100% refund
+- Cancel 72 hours before → 50% refund
+- Cancel 24 hours before → 0% refund
 
 ---
 
@@ -1274,9 +1335,14 @@ Settings → Room Categories = Main configuration
 - ✨ **NEW:** Booking selection modals for context-aware check-in/check-out
 - ✨ **NEW:** Enhanced payment details at check-out with auto-population
 - ✨ **NEW:** Month/year navigation in Room Planner (dropdown + prev/next buttons)
+- ✨ **NEW:** Gradient visualization for check-in/check-out dates (same-day availability indicator)
 - ✨ **NEW:** Uniform validation rules (mobile, IFSC, IDs)
-- ✨ **NEW:** Auto-uppercase for Service/Defence/Dependent IDs
+- ✨ **NEW:** Auto-uppercase for Service/Defence/Dependent/Identity Card IDs
 - ✨ **NEW:** Scrollable check-out form
+- ✨ **NEW:** Total members field with individual age capture in booking form
+- ✨ **NEW:** Expanded family relations (Father, Mother, Brother, Sister added)
+- ✨ **NEW:** Hours-based cancellation policy (96h/48h thresholds instead of days)
+- ✨ **FIXED:** Room ID mismatch issue - planner now shows all bookings
 - Added room-wise pricing with dependent card validation
 - Inline family member addition per room
 - Bank/UPI details capture during booking
