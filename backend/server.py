@@ -115,7 +115,7 @@ class RefundStatus(str, Enum):
 
 # App Settings
 class CancellationSlab(BaseModel):
-    days_before: int  # Days before check-in
+    hours_before: int  # Hours before check-in
     charge_percent: float  # Percentage of advance to deduct
 
 DEFAULT_RANKS = [
@@ -149,10 +149,9 @@ class AppSettings(BaseModel):
     default_advance_amount: float = 400.0
     ranks: List[str] = Field(default_factory=lambda: DEFAULT_RANKS.copy())
     cancellation_policy: List[dict] = Field(default_factory=lambda: [
-        {"days_before": 7, "charge_percent": 0},
-        {"days_before": 3, "charge_percent": 25},
-        {"days_before": 1, "charge_percent": 50},
-        {"days_before": 0, "charge_percent": 100}
+        {"hours_before": 96, "charge_percent": 0},
+        {"hours_before": 48, "charge_percent": 50},
+        {"hours_before": 0, "charge_percent": 100}
     ])
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -572,11 +571,14 @@ async def complete_setup(request: SetupRequest):
     """Complete first-time setup"""
     existing = await db.app_settings.find_one({})
     
+    # Default cancellation policy (hours-based)
+    # >96 hours (4 days): 100% refund
+    # 48-96 hours (2-4 days): 50% refund
+    # <48 hours (2 days): 0% refund
     default_cancellation_policy = [
-        {"days_before": 7, "charge_percent": 0},
-        {"days_before": 3, "charge_percent": 25},
-        {"days_before": 1, "charge_percent": 50},
-        {"days_before": 0, "charge_percent": 100}
+        {"hours_before": 96, "charge_percent": 0},   # More than 96 hours: 0% charge (100% refund)
+        {"hours_before": 48, "charge_percent": 50},  # 48-96 hours: 50% charge (50% refund)
+        {"hours_before": 0, "charge_percent": 100}   # Less than 48 hours: 100% charge (0% refund)
     ]
     
     settings = AppSettings(
@@ -1164,33 +1166,36 @@ async def check_out(request: CheckOutRequest):
 
 @api_router.get("/bookings/{booking_id}/calculate-refund")
 async def calculate_refund(booking_id: str):
-    """Calculate refund amount based on cancellation policy"""
+    """Calculate refund amount based on cancellation policy (hours-based)
+    
+    Policy:
+    - >96 hours before check-in: 0% charge (100% refund)
+    - 48-96 hours before check-in: 50% charge (50% refund)
+    - <48 hours before check-in: 100% charge (0% refund)
+    """
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
     settings = await db.app_settings.find_one({}, {"_id": 0})
     cancellation_policy = settings.get("cancellation_policy", [
-        {"days_before": 7, "charge_percent": 0},
-        {"days_before": 3, "charge_percent": 25},
-        {"days_before": 1, "charge_percent": 50},
-        {"days_before": 0, "charge_percent": 100}
+        {"hours_before": 96, "charge_percent": 0},
+        {"hours_before": 48, "charge_percent": 50},
+        {"hours_before": 0, "charge_percent": 100}
     ])
     
-    # Calculate days until check-in
+    # Calculate hours until check-in
     check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
     if isinstance(check_in_date, datetime) and check_in_date.tzinfo is None:
         check_in_date = check_in_date.replace(tzinfo=timezone.utc)
     
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    check_in_date = check_in_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    days_until_checkin = (check_in_date - today).days
+    now = datetime.now(timezone.utc)
+    hours_until_checkin = (check_in_date - now).total_seconds() / 3600
     
     # Find applicable charge percent
     charge_percent = 100  # Default: no refund
-    for slab in sorted(cancellation_policy, key=lambda x: x["days_before"], reverse=True):
-        if days_until_checkin >= slab["days_before"]:
+    for slab in sorted(cancellation_policy, key=lambda x: x["hours_before"], reverse=True):
+        if hours_until_checkin >= slab["hours_before"]:
             charge_percent = slab["charge_percent"]
             break
     
@@ -1203,7 +1208,7 @@ async def calculate_refund(booking_id: str):
         "booking_number": booking["booking_number"],
         "guest_name": booking["guest_name"],
         "check_in_date": booking["check_in_date"],
-        "days_until_checkin": days_until_checkin,
+        "hours_until_checkin": round(hours_until_checkin, 1),
         "advance_paid": advance_paid,
         "charge_percent": charge_percent,
         "cancellation_charge": cancellation_charge,
