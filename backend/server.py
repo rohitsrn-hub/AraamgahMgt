@@ -697,11 +697,31 @@ async def get_available_rooms(
     check_out: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
     exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check")
 ):
-    """P2: Get available rooms for given date range, optionally excluding a specific booking"""
+    """Get available rooms for given date range, optionally excluding a specific booking
+    
+    Booking Time Logic:
+    - Check-in: 1300h (1 PM) on check-in date
+    - Check-out: 0800h (8 AM) on check-out date  
+    - Room Available: 0900h (9 AM) on check-out date
+    
+    Availability Logic:
+    - Room is occupied: check-in date through check-out date (inclusive)
+    - Room becomes available: FROM check-out date for NEW bookings
+    - Example: Booking 8-Apr to 9-Apr → Room occupied 8-Apr and 9-Apr until 08:00
+               → Room available for NEW booking starting 9-Apr (from 13:00)
+    """
     # Get all rooms
     all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
     
     # Get bookings that overlap with requested dates
+    # OLD LOGIC: check_out_date > check_in (excludes same-day availability)
+    # NEW LOGIC: check_out_date >= check_in (allows booking on check-out date)
+    # However, we need to think about this carefully:
+    # - Existing booking: 8-Apr to 9-Apr (guest checks out at 08:00 on 9-Apr)
+    # - New booking request: 9-Apr to 10-Apr (guest checks in at 13:00 on 9-Apr)
+    # - These should NOT conflict because check-out is 08:00 and check-in is 13:00
+    # So we keep the original logic where check_out_date > check_in
+    # This way, a booking ending on 9-Apr does NOT block a booking starting on 9-Apr
     booking_query = {
         "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
         "check_in_date": {"$lt": check_out},
@@ -1763,7 +1783,18 @@ async def check_room_availability(
 
 @api_router.get("/dashboard/calendar")
 async def get_calendar_data(month: int, year: int):
-    """Get calendar/planner data for a given month showing room bookings per day"""
+    """Get calendar/planner data for a given month showing room bookings per day
+    
+    Booking Time Logic:
+    - Check-in: 1300h (1 PM) on check-in date
+    - Check-out: 0800h (8 AM) on check-out date
+    - Room Available: 0900h (9 AM) on check-out date
+    
+    Calendar Display:
+    - Room shows as occupied on check-in date
+    - Room shows as occupied on check-out date (until 08:00)
+    - Room becomes available for NEW bookings from check-out date
+    """
     import calendar
     
     days_in_month = calendar.monthrange(year, month)[1]
@@ -1818,7 +1849,10 @@ async def get_calendar_data(month: int, year: int):
             day_status = "available"
             day_info = None
             for bk in rb:
-                if bk["check_in_date"] <= date_str and bk["check_out_date"] > date_str:
+                # UPDATED LOGIC: Show booking on both check-in and check-out date
+                # Room is occupied until check-out date (08:00), available from 09:00 same day
+                # For calendar display, we include the check-out date as occupied
+                if bk["check_in_date"] <= date_str <= bk["check_out_date"]:
                     day_status = bk["status"]
                     day_info = {
                         "booking_id": bk["booking_id"],

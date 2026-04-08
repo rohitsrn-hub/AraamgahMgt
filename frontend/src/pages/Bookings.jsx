@@ -2087,6 +2087,10 @@ export default function Bookings() {
                                     <SelectItem value="w/o">Wife (w/o)</SelectItem>
                                     <SelectItem value="s/o">Son (s/o)</SelectItem>
                                     <SelectItem value="d/o">Daughter (d/o)</SelectItem>
+                                    <SelectItem value="father">Father</SelectItem>
+                                    <SelectItem value="mother">Mother</SelectItem>
+                                    <SelectItem value="brother">Brother</SelectItem>
+                                    <SelectItem value="sister">Sister</SelectItem>
                                     <SelectItem value="other">Other</SelectItem>
                                   </SelectContent>
                                 </Select>
