@@ -128,7 +128,9 @@ export default function Bookings() {
     bank_ifsc: "",
     bank_account: "",
     upi_id: "",        // NEW: UPI ID for refunds
-    upi_phone: ""      // NEW: UPI Phone for refunds
+    upi_phone: "",     // NEW: UPI Phone for refunds
+    total_members: 1,  // NEW: Total number of members including guest
+    member_ages: [0]   // NEW: Array of ages for all members (default 1 member)
   });
 
   const [actionForm, setActionForm] = useState({
@@ -1484,6 +1486,60 @@ export default function Bookings() {
                   <Input type="number" min="1" value={bookingForm.num_rooms} onChange={(e) => setBookingForm({...bookingForm, num_rooms: parseInt(e.target.value) || 1})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid="input-num-rooms" />
                 </div>
               </div>
+
+              {/* NEW: Total Members and Age Fields */}
+              <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 className="font-medium text-blue-800 mb-3 text-sm">👥 Party Composition</h4>
+                <div className="grid grid-cols-2 gap-4 mb-3">
+                  <div>
+                    <Label className="text-sm">Total Members (including self) *</Label>
+                    <Input 
+                      type="number" 
+                      min="1" 
+                      max="20"
+                      value={bookingForm.total_members} 
+                      onChange={(e) => {
+                        const count = parseInt(e.target.value) || 1;
+                        const ages = Array(count).fill(0);
+                        setBookingForm({...bookingForm, total_members: count, member_ages: ages});
+                      }}
+                      onFocus={(e) => e.target.select()} 
+                      className="earms-input mt-1" 
+                      data-testid="input-total-members" 
+                    />
+                    <p className="text-xs text-blue-600 mt-1">Total people in your party</p>
+                  </div>
+                </div>
+                
+                {/* Dynamic Age Fields */}
+                {bookingForm.total_members > 0 && (
+                  <div>
+                    <Label className="text-xs text-slate-700 font-medium">Ages of all members:</Label>
+                    <div className="grid grid-cols-5 gap-2 mt-2">
+                      {bookingForm.member_ages.map((age, idx) => (
+                        <div key={idx}>
+                          <Input 
+                            type="number" 
+                            min="0" 
+                            max="120"
+                            value={age || ""} 
+                            onChange={(e) => {
+                              const newAges = [...bookingForm.member_ages];
+                              newAges[idx] = parseInt(e.target.value) || 0;
+                              setBookingForm({...bookingForm, member_ages: newAges});
+                            }}
+                            onFocus={(e) => e.target.select()} 
+                            placeholder={`M${idx + 1}`}
+                            className="earms-input text-sm h-9 text-center" 
+                            data-testid={`input-age-${idx}`} 
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">M1 = Member 1 (usually the guest), M2 = Member 2, etc.</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Section 2: Stay Dates */}
@@ -1857,8 +1913,14 @@ export default function Bookings() {
                   </div>
                   <div>
                     <Label>Identity Card No</Label>
-                    <Input value={actionForm.identity_card_number} onChange={(e) => setActionForm({...actionForm, identity_card_number: e.target.value})}
-                      onFocus={(e) => e.target.select()} placeholder="e.g., F223529" className="earms-input mt-1" data-testid="input-checkin-identity-card" />
+                    <Input 
+                      value={actionForm.identity_card_number} 
+                      onChange={(e) => setActionForm({...actionForm, identity_card_number: toUpperCase(e.target.value)})}
+                      onFocus={(e) => e.target.select()} 
+                      placeholder="e.g., F223529" 
+                      className="earms-input mt-1" 
+                      data-testid="input-checkin-identity-card" 
+                    />
                   </div>
                   <div>
                     <Label>Age</Label>
