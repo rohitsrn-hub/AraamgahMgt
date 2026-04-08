@@ -1816,12 +1816,29 @@ async def get_calendar_data(month: int, year: int):
     }, {"_id": 0}).to_list(5000)
     
     # Build a mapping: room_id -> list of {date_range, status, guest_name, booking_id}
+    # Also build room_number -> room_id mapping for fallback (handles room ID mismatches)
+    room_number_to_id = {r["room_number"]: r["id"] for r in all_rooms}
+    
     room_bookings = {}
     for b in bookings:
         # Get room IDs (handle both old and new format)
         rids = b.get("room_ids", [])
         if not rids and b.get("room_id"):
             rids = [b["room_id"]]
+        
+        # Also try to get room numbers if available (fallback for ID mismatches)
+        room_numbers = b.get("room_numbers", [])
+        if not room_numbers and b.get("room_number"):
+            room_numbers = [b["room_number"]]
+        
+        # Map room numbers to IDs (fallback mechanism for data migration)
+        if room_numbers:
+            for rnum in room_numbers:
+                if rnum in room_number_to_id:
+                    rid = room_number_to_id[rnum]
+                    if rid not in rids:
+                        rids.append(rid)
+        
         for rid in rids:
             if rid not in room_bookings:
                 room_bookings[rid] = []
@@ -1857,7 +1874,9 @@ async def get_calendar_data(month: int, year: int):
                     day_info = {
                         "booking_id": bk["booking_id"],
                         "booking_number": bk["booking_number"],
-                        "guest_name": bk["guest_name"]
+                        "guest_name": bk["guest_name"],
+                        "is_checkin_date": date_str == bk["check_in_date"],
+                        "is_checkout_date": date_str == bk["check_out_date"]
                     }
                     break
             room_entry["days"][date_str] = {

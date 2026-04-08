@@ -710,9 +710,12 @@ export default function Dashboard() {
                     const dayData = room.days[dateStr];
                     const status = dayData?.status || "available";
                     const booking = dayData?.booking;
+                    const isCheckinDate = booking?.is_checkin_date || false;
+                    const isCheckoutDate = booking?.is_checkout_date || false;
 
                     let cellClass = "bg-emerald-50";
                     let dotClass = "";
+                    
                     if (status === "confirmed") {
                       cellClass = "bg-blue-400";
                       dotClass = "text-white";
@@ -722,6 +725,11 @@ export default function Dashboard() {
                     } else if (status === "checked_out") {
                       cellClass = "bg-slate-300";
                       dotClass = "text-slate-600";
+                    }
+                    
+                    // Half-color effect for check-in and check-out dates
+                    if (isCheckinDate || isCheckoutDate) {
+                      cellClass += " bg-gradient-to-r from-white via-white to-current";
                     }
 
                     return (
