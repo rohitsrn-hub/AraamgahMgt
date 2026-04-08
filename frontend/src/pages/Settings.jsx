@@ -86,7 +86,7 @@ export default function Settings({ settings, onUpdate }) {
   };
 
   const addCancellationSlab = () => {
-    setFormData({ ...formData, cancellation_policy: [...formData.cancellation_policy, { days_before: 0, charge_percent: 0 }] });
+    setFormData({ ...formData, cancellation_policy: [...formData.cancellation_policy, { hours_before: 0, charge_percent: 0 }] });
   };
 
   const removeCancellationSlab = (index) => {
@@ -619,33 +619,42 @@ export default function Settings({ settings, onUpdate }) {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="p-4 bg-amber-50 rounded-xl">
+            <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
               <p className="text-sm text-amber-800">
-                <strong>How it works:</strong> Define cancellation charges based on days before check-in.
+                <strong>📋 How it works:</strong> Define cancellation charges based on <strong>hours</strong> before check-in time (13:00).
+              </p>
+              <p className="text-xs text-amber-700 mt-2">
+                <strong>Current Policy:</strong><br/>
+                • <strong>>96 hours (4+ days):</strong> 100% refund<br/>
+                • <strong>48-96 hours (2-4 days):</strong> 50% refund<br/>
+                • <strong>&lt;48 hours (&lt;2 days):</strong> 0% refund (full charge)
               </p>
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-12 gap-4 text-sm font-medium text-slate-600 px-2">
-                <div className="col-span-5">Days Before Check-in</div>
+                <div className="col-span-5">Hours Before Check-in</div>
                 <div className="col-span-5">Cancellation Charge (%)</div>
                 <div className="col-span-2"></div>
               </div>
               {formData.cancellation_policy
-                .sort((a, b) => b.days_before - a.days_before)
+                .sort((a, b) => b.hours_before - a.hours_before)
                 .map((slab, index) => (
                   <div key={index} className="grid grid-cols-12 gap-4 items-center p-3 bg-slate-50 rounded-xl">
                     <div className="col-span-5">
                       <div className="flex items-center gap-2">
                         <Input
                           type="number" min="0"
-                          value={slab.days_before}
-                          onChange={(e) => updateCancellationSlab(index, 'days_before', e.target.value)}
+                          value={slab.hours_before}
+                          onChange={(e) => updateCancellationSlab(index, 'hours_before', e.target.value)}
                           onFocus={(e) => e.target.select()}
                           className="earms-input"
-                          data-testid={`input-days-${index}`}
+                          data-testid={`input-hours-${index}`}
                         />
-                        <span className="text-sm text-slate-500 whitespace-nowrap">days or more</span>
+                        <span className="text-sm text-slate-500 whitespace-nowrap">hours or more</span>
                       </div>
+                      <p className="text-xs text-slate-400 mt-1 ml-1">
+                        {slab.hours_before >= 24 ? `≈ ${Math.floor(slab.hours_before / 24)} day${Math.floor(slab.hours_before / 24) !== 1 ? 's' : ''}` : '< 1 day'}
+                      </p>
                     </div>
                     <div className="col-span-5">
                       <div className="flex items-center gap-2">
@@ -657,8 +666,11 @@ export default function Settings({ settings, onUpdate }) {
                           className="earms-input"
                           data-testid={`input-charge-${index}`}
                         />
-                        <span className="text-sm text-slate-500">%</span>
+                        <span className="text-sm text-slate-500">% charge</span>
                       </div>
+                      <p className="text-xs text-green-600 mt-1 ml-1">
+                        = {100 - slab.charge_percent}% refund
+                      </p>
                     </div>
                     <div className="col-span-2">
                       <Button size="sm" variant="ghost" onClick={() => removeCancellationSlab(index)}
@@ -678,17 +690,19 @@ export default function Settings({ settings, onUpdate }) {
               <h4 className="font-semibold text-blue-800 mb-2">Policy Preview</h4>
               <div className="space-y-1 text-sm">
                 {formData.cancellation_policy
-                  .sort((a, b) => b.days_before - a.days_before)
+                  .sort((a, b) => b.hours_before - a.hours_before)
                   .map((slab, index, arr) => {
                     const nextSlab = arr[index + 1];
-                    const rangeEnd = nextSlab ? nextSlab.days_before + 1 : 0;
+                    const rangeEnd = nextSlab ? nextSlab.hours_before + 1 : 0;
                     const refundPercent = 100 - slab.charge_percent;
+                    const days = Math.floor(slab.hours_before / 24);
+                    const nextDays = nextSlab ? Math.floor((nextSlab.hours_before + 1) / 24) : 0;
                     return (
                       <div key={index} className="flex justify-between">
                         <span className="text-slate-600">
-                          {slab.days_before === 0 ? "Same day cancellation" :
-                            nextSlab ? `${rangeEnd} - ${slab.days_before} days before` :
-                            `${slab.days_before}+ days before`}
+                          {slab.hours_before === 0 ? "Less than minimum notice" :
+                            nextSlab ? `${rangeEnd}-${slab.hours_before} hours (${nextDays}-${days} days)` :
+                            `${slab.hours_before}+ hours (${days}+ days)`}
                         </span>
                         <span className={refundPercent === 100 ? "text-emerald-600 font-medium" : refundPercent === 0 ? "text-red-600 font-medium" : "text-amber-600 font-medium"}>
                           {refundPercent === 100 ? "Full Refund" : refundPercent === 0 ? "No Refund" : `${refundPercent}% Refund`}
