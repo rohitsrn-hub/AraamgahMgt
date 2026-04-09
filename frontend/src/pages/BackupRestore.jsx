@@ -72,7 +72,9 @@ export default function BackupRestore() {
       }
 
       // Notify parent (App.js) to refresh backup status and clear warnings
-      window.dispatchEvent(new CustomEvent('backupStatusChanged'));
+      if (res.data?.missed_backup_warning?.missed === false) {
+        window.dispatchEvent(new CustomEvent('backupCompleted'));
+      }
     } catch (error) {
       console.error("Error fetching backup status:", error);
       toast.error("Failed to fetch backup status");
@@ -97,6 +99,9 @@ export default function BackupRestore() {
       toast.success("Full backup completed successfully!");
       await fetchBackupStatus();
       await fetchBackupHistory();
+      
+      // Clear warnings immediately after successful backup
+      window.dispatchEvent(new CustomEvent('backupCompleted'));
     } catch (error) {
       toast.error(error.response?.data?.detail || "Backup failed");
     } finally {
@@ -124,6 +129,9 @@ export default function BackupRestore() {
       toast.success("Incremental backup completed successfully!");
       await fetchBackupStatus();
       await fetchBackupHistory();
+      
+      // Clear warnings immediately after successful backup
+      window.dispatchEvent(new CustomEvent('backupCompleted'));
     } catch (error) {
       toast.error(error.response?.data?.detail || "Backup failed");
     } finally {

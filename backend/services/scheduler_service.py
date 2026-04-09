@@ -162,7 +162,13 @@ async def check_missed_backups(db) -> dict:
         if isinstance(last_time, str):
             last_time = datetime.fromisoformat(last_time.replace('Z', '+00:00'))
         
-        hours_since = (datetime.now(timezone.utc) - last_time).total_seconds() / 3600
+        # Ensure last_time is timezone-aware (UTC)
+        if last_time.tzinfo is None:
+            last_time = last_time.replace(tzinfo=timezone.utc)
+        
+        # Calculate hours since last backup (both now timezone-aware)
+        now_utc = datetime.now(timezone.utc)
+        hours_since = (now_utc - last_time).total_seconds() / 3600
         
         # If last backup was more than 26 hours ago, consider it missed
         missed = hours_since > 26

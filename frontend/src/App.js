@@ -71,15 +71,18 @@ function AppContent() {
     fetchSettings();
     checkBackupStatus();
 
-    // Listen for backup status changes from BackupRestore page
-    const handleBackupStatusChange = () => {
-      checkBackupStatus();
+    // Listen for backup completion to clear warnings
+    const handleBackupCompleted = () => {
+      console.log("Backup completed, clearing warnings");
+      setBackupWarning(null);
+      setBackupBannerDismissed(false);
+      setShowBackupModal(false);
     };
     
-    window.addEventListener('backupStatusChanged', handleBackupStatusChange);
+    window.addEventListener('backupCompleted', handleBackupCompleted);
     
     return () => {
-      window.removeEventListener('backupStatusChanged', handleBackupStatusChange);
+      window.removeEventListener('backupCompleted', handleBackupCompleted);
     };
   }, []);
 
