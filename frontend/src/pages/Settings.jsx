@@ -100,10 +100,12 @@ export default function Settings({ settings, onUpdate }) {
     if (formData.ranks.includes(trimmed)) { toast.error("Rank already exists"); return; }
     setFormData({ ...formData, ranks: [...formData.ranks, trimmed] });
     setNewRank("");
+    toast.success(`Rank "${trimmed}" added. Click "Save Settings" below to persist!`, { duration: 5000 });
   };
 
   const removeRank = (rank) => {
     setFormData({ ...formData, ranks: formData.ranks.filter(r => r !== rank) });
+    toast.info(`Rank "${rank}" removed. Click "Save Settings" to persist!`, { duration: 5000 });
   };
 
   const resetRanks = () => {
@@ -569,14 +571,22 @@ export default function Settings({ settings, onUpdate }) {
               <Plus size={18} className="mr-1" /> Add
             </Button>
           </div>
-          <Button
-            variant="outline"
-            onClick={resetRanks}
-            className="text-sm text-slate-500 border-dashed"
-            data-testid="reset-ranks-btn"
-          >
-            Reset to Default Ranks
-          </Button>
+          <div className="flex items-center justify-between">
+            <Button
+              variant="outline"
+              onClick={resetRanks}
+              className="text-sm text-slate-500 border-dashed"
+              data-testid="reset-ranks-btn"
+            >
+              Reset to Default Ranks
+            </Button>
+          </div>
+          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <p className="text-sm text-amber-800 font-medium flex items-center gap-2">
+              <Info size={16} weight="fill" />
+              Remember to click "Save Settings" button at the bottom of the page to persist changes!
+            </p>
+          </div>
         </CardContent>
       </Card>
 
@@ -625,7 +635,7 @@ export default function Settings({ settings, onUpdate }) {
               </p>
               <p className="text-xs text-amber-700 mt-2">
                 <strong>Current Policy:</strong><br/>
-                • <strong>>96 hours (4+ days):</strong> 100% refund<br/>
+                • <strong>&gt;96 hours (4+ days):</strong> 100% refund<br/>
                 • <strong>48-96 hours (2-4 days):</strong> 50% refund<br/>
                 • <strong>&lt;48 hours (&lt;2 days):</strong> 0% refund (full charge)
               </p>
@@ -755,20 +765,31 @@ export default function Settings({ settings, onUpdate }) {
       </Card>
 
       {/* Save Button */}
-      <div className="flex justify-end">
-        <Button
-          onClick={handleSave}
-          disabled={saving}
-          className="earms-btn-primary flex items-center gap-2"
-          data-testid="save-settings-btn"
-        >
-          {saving ? (
-            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <FloppyDisk size={20} weight="fill" />
-          )}
-          Save Settings
-        </Button>
+      <div className="sticky bottom-0 bg-white p-4 border-t-2 border-blue-200 shadow-lg rounded-t-xl">
+        <div className="flex items-center justify-between max-w-4xl mx-auto">
+          <p className="text-sm text-slate-600">
+            <Info size={16} className="inline mr-1" weight="fill" />
+            Make sure to save your changes before leaving this page
+          </p>
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            className="earms-btn-primary flex items-center gap-2 px-6 py-3 text-lg"
+            data-testid="save-settings-btn"
+          >
+            {saving ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <FloppyDisk size={24} weight="fill" />
+                Save Settings
+              </>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );

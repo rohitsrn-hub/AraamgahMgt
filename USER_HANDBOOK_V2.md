@@ -1077,28 +1077,43 @@ These values are used in monthly financial reports to calculate the license fee 
 **Add Rank:**
 1. Enter rank name in text field
 2. Click "Add Rank" button or press Enter
-3. Rank appears in list below
-4. **NEW:** Rank immediately available in New Booking form dropdown
+3. Rank appears in list below as a chip/badge
+4. **Green toast notification appears**: "Rank added. Click 'Save Settings' below to persist!"
+5. Scroll to bottom and click **"Save Settings"** button to persist the change
 
 **Remove Rank:**
-1. Click trash icon (🗑️) next to rank name
-2. Rank removed from list
-3. Removed from booking form dropdown after save
+1. Click × button on rank chip/badge
+2. **Toast notification appears**: "Rank removed. Click 'Save Settings' to persist!"
+3. Scroll to bottom and click **"Save Settings"** button to persist the change
 
 **Reset to Defaults:**
 - Click "Reset to Default Ranks"
 - Restores standard military ranks
 - Confirmation required before reset
+- **Must click "Save Settings"** to persist
 
 **Default Ranks:**
 Sep/Dfr/Swr, Nk, Hav, Sgt, PO, Nb Sub, JWO, CPO, Sub, WO, CA, SM, MCPO, Hony Lt or Eqvt, Hony Capt or Eqvt, Def Civ
 
 **How Dynamic Update Works:**
-1. Add/remove ranks in Settings page
-2. Click "Save Settings" button at bottom
-3. Navigate to Bookings → New Booking
-4. New ranks appear in "Rank" dropdown
-5. Removed ranks disappear from dropdown
+1. Add/remove ranks in Settings page (chips appear/disappear immediately)
+2. **Scroll to bottom** and click "Save Settings" button (sticky button at bottom)
+3. Wait for "Settings saved successfully!" confirmation
+4. Navigate to Bookings → New Booking
+5. New ranks appear in "Rank" dropdown
+6. Removed ranks disappear from dropdown
+
+**⚠️ CRITICAL REMINDER:**
+- Ranks are added to **temporary state** when you click "Add"
+- They will **disappear** if you leave the page without saving
+- **Always click "Save Settings"** button at the bottom after making changes
+- Look for the amber warning box: "Remember to click 'Save Settings' button..."
+- Toast notifications remind you to save
+
+**Visual Indicators:**
+- 🟢 **Green toast**: Shows when rank is added/removed (with save reminder)
+- 🟡 **Amber warning box**: Persistent reminder to save changes
+- 💾 **Sticky Save Button**: Always visible at bottom with reminder text
 
 **Important Notes:**
 - Ranks saved in Settings persist across sessions
