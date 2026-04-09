@@ -625,84 +625,94 @@ export function generateRoomOccupancyPDF(data, settings) {
   doc.text("ROOM-WISE OCCUPANCY DETAILS", 10, y);
   y += 4;
 
-  // Iterate through each room and show summary + booking details
+  // Build all rows (room summaries + booking details) into a single table
+  const allRows = [];
+  
   for (const room of (data.room_details || [])) {
-    // Check if we need a new page
-    if (y > doc.internal.pageSize.height - 40) {
-      doc.addPage();
-      y = 20;
-    }
-
-    // Room summary row
-    const roomSummaryRow = [[
-      room.room_number,
-      room.category,
-      room.occupied_days,
-      room.available_days,
-      `${room.occupancy_percent}%`,
-      `₹${room.revenue.toFixed(2)}`
-    ]];
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Room No", "Category", "Occupied Days", "Available Days", "Occupancy %", "Revenue (₹)"]],
-      body: roomSummaryRow,
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: PRIMARY_COLOR, textColor: 255 },
-      bodyStyles: { fillColor: [240, 240, 255], fontStyle: 'bold' },
-      columnStyles: { 
-        2: { halign: "center" }, 
-        3: { halign: "center" }, 
-        4: { halign: "center" },
-        5: { halign: "right", fontStyle: "bold" }
-      },
-      margin: { left: 10, right: 10 }
+    // Add room summary row (bold, highlighted)
+    allRows.push({
+      type: 'room',
+      data: [
+        room.room_number,
+        room.category,
+        room.occupied_days,
+        room.available_days,
+        `${room.occupancy_percent}%`,
+        `₹${room.revenue.toFixed(2)}`,
+        '', '', '', '', '', '', '', ''  // Empty cells for booking detail columns
+      ]
     });
 
-    y = doc.lastAutoTable.finalY + 2;
-
-    // If this room has booking details, show them
+    // Add booking detail rows if any
     if (room.bookings_detail && room.bookings_detail.length > 0) {
-      const bookingRows = room.bookings_detail.map(b => [
-        b.booking_number,
-        b.army_number,
-        b.rank,
-        b.name,
-        b.unit,
-        b.from_date,
-        b.to_date,
-        b.days,
-        b.total_members,
-        `₹${b.rate_per_day}`,
-        `₹${b.total_revenue_due.toFixed(2)}`,
-        b.bill_no,
-        `₹${b.advance_paid.toFixed(2)}`,
-        `₹${b.final_amount_paid.toFixed(2)}`
-      ]);
-
-      autoTable(doc, {
-        startY: y,
-        head: [["Booking", "Army No", "Rank", "Name", "Unit", "From", "To", "Days", "Members", "Rate/Day", "Revenue", "Bill", "Advance", "Final"]],
-        body: bookingRows,
-        styles: { fontSize: 6, cellPadding: 1.5 },
-        headStyles: { fillColor: [100, 120, 200], textColor: 255 },
-        alternateRowStyles: { fillColor: [245, 247, 255] },
-        columnStyles: { 
-          7: { halign: "center" },
-          8: { halign: "center", fontStyle: "bold", textColor: [0, 0, 255] },
-          9: { halign: "right" },
-          10: { halign: "right", fontStyle: "bold", textColor: [0, 128, 0] },
-          12: { halign: "right" },
-          13: { halign: "right" }
-        },
-        margin: { left: 15, right: 10 }
-      });
-
-      y = doc.lastAutoTable.finalY + 6;
-    } else {
-      y += 3;
+      for (const booking of room.bookings_detail) {
+        allRows.push({
+          type: 'booking',
+          data: [
+            '', '', '', '', '', '',  // Empty cells for room summary columns
+            booking.booking_number,
+            booking.army_number,
+            booking.rank,
+            booking.name,
+            booking.unit,
+            `${booking.from_date} to ${booking.to_date}`,
+            booking.days,
+            booking.total_members,
+            `₹${booking.rate_per_day}`,
+            `₹${booking.total_revenue_due.toFixed(2)}`,
+            booking.bill_no,
+            `₹${booking.advance_paid.toFixed(2)}`,
+            `₹${booking.final_amount_paid.toFixed(2)}`
+          ]
+        });
+      }
     }
   }
+
+  // Create single table with all data
+  autoTable(doc, {
+    startY: y,
+    head: [[
+      { content: 'Room No', rowSpan: 2 },
+      { content: 'Category', rowSpan: 2 },
+      { content: 'Occupied Days', rowSpan: 2 },
+      { content: 'Available Days', rowSpan: 2 },
+      { content: 'Occupancy %', rowSpan: 2 },
+      { content: 'Revenue (₹)', rowSpan: 2 },
+      { content: 'Booking Details (Expanded View)', colSpan: 13 }
+    ], [
+      'Booking', 'Army No', 'Rank', 'Name', 'Unit', 'Dates', 'Days', 'Members', 'Rate/Day', 'Revenue', 'Bill', 'Advance', 'Final'
+    ]],
+    body: allRows.map(row => row.data),
+    styles: { fontSize: 6, cellPadding: 1.5, overflow: 'linebreak' },
+    headStyles: { fillColor: PRIMARY_COLOR, textColor: 255, fontStyle: 'bold' },
+    columnStyles: { 
+      2: { halign: "center" }, 
+      3: { halign: "center" }, 
+      4: { halign: "center" },
+      5: { halign: "right" },
+      12: { halign: "center" },
+      13: { halign: "center", fontStyle: "bold", textColor: [0, 0, 255] },
+      14: { halign: "right" },
+      15: { halign: "right", fontStyle: "bold", textColor: [0, 128, 0] },
+      17: { halign: "right" },
+      18: { halign: "right" }
+    },
+    margin: { left: 10, right: 10 },
+    didParseCell: function(data) {
+      const rowIndex = data.row.index;
+      if (data.section === 'body' && allRows[rowIndex]) {
+        if (allRows[rowIndex].type === 'room') {
+          // Room summary rows - bold with light blue background
+          data.cell.styles.fillColor = [220, 230, 255];
+          data.cell.styles.fontStyle = 'bold';
+        } else if (allRows[rowIndex].type === 'booking') {
+          // Booking detail rows - indented appearance with lighter background
+          data.cell.styles.fillColor = [245, 247, 255];
+        }
+      }
+    }
+  });
 
   addFooter(doc);
   
