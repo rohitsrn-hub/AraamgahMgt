@@ -10,7 +10,8 @@ import {
   Gear,
   List,
   Star,
-  ChartBar
+  ChartBar,
+  Database
 } from "@phosphor-icons/react";
 import { useState, useEffect } from "react";
 import axios from "axios";
@@ -24,6 +25,7 @@ const navItems = [
   { path: "/app/toiletry", icon: Package, label: "Toiletry" },
   { path: "/app/feedback", icon: Star, label: "Feedback", dynamic: true },
   { path: "/app/reports", icon: ChartBar, label: "Reports" },
+  { path: "/app/backup-restore", icon: Database, label: "Backup & Restore" },
   { path: "/app/settings", icon: Gear, label: "Settings" },
 ];
 

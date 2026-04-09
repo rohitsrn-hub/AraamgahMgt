@@ -2240,9 +2240,7 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=503, detail="Service unhealthy")
 
-# Include the router in the main app
-app.include_router(api_router)
-
+# ============= CORS & ROUTER SETUP =============
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -2436,4 +2434,8 @@ async def get_restore_history(limit: int = Query(20, ge=1, le=50)):
     except Exception as e:
         logger.error(f"Error fetching restore history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============= INCLUDE ROUTER (MUST BE AFTER ALL ROUTES) =============
+app.include_router(api_router)
+
 
