@@ -20,21 +20,25 @@ import {
   CalendarBlank,
   Info
 } from "@phosphor-icons/react";
-import { format, parseISO } from "date-fns";
-import { toZonedTime } from "date-fns-tz";
+import { parseISO, format } from "date-fns";
+import { formatInTimeZone } from "date-fns-tz";
 
-// Helper function to convert UTC to IST
-const toIST = (utcDateString) => {
-  if (!utcDateString) return null;
-  const utcDate = parseISO(utcDateString);
-  const istDate = toZonedTime(utcDate, 'Asia/Kolkata');
-  return istDate;
-};
-
-// Helper function to format IST date
+// Helper function to format UTC date to IST
 const formatIST = (utcDateString, formatStr = "dd MMM yyyy, HH:mm") => {
-  const istDate = toIST(utcDateString);
-  return istDate ? format(istDate, formatStr) + " IST" : "N/A";
+  if (!utcDateString) return "N/A";
+  
+  try {
+    // Parse the UTC date string
+    const utcDate = parseISO(utcDateString);
+    
+    // Format in IST timezone (Asia/Kolkata)
+    const istFormatted = formatInTimeZone(utcDate, 'Asia/Kolkata', formatStr);
+    
+    return `${istFormatted} IST`;
+  } catch (error) {
+    console.error("Error formatting IST:", error);
+    return "Invalid date";
+  }
 };
 
 export default function BackupRestore() {
@@ -64,10 +68,11 @@ export default function BackupRestore() {
       if (res.data.scheduler?.jobs?.length > 0) {
         const job = res.data.scheduler.jobs.find(j => j.id === 'daily_backup');
         if (job?.next_run) {
-          const nextRun = toIST(job.next_run);
-          if (nextRun) {
-            setScheduleTime({ hour: nextRun.getHours(), minute: nextRun.getMinutes() });
-          }
+          // Parse and convert to IST to extract hour/minute
+          const nextRunUTC = parseISO(job.next_run);
+          const nextRunIST = formatInTimeZone(nextRunUTC, 'Asia/Kolkata', 'HH:mm');
+          const [hour, minute] = nextRunIST.split(':').map(Number);
+          setScheduleTime({ hour, minute });
         }
       }
 
