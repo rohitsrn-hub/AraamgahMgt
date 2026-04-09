@@ -619,36 +619,90 @@ export function generateRoomOccupancyPDF(data, settings) {
 
   y = doc.lastAutoTable.finalY + 8;
 
-  // Room-wise details
+  // Room-wise details with expanded booking information
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.text("ROOM-WISE OCCUPANCY DETAILS", 10, y);
   y += 4;
 
-  const roomRows = (data.room_details || []).map(r => [
-    r.room_number,
-    r.category,
-    r.occupied_days,
-    r.available_days,
-    `${r.occupancy_percent}%`,
-    `₹${r.revenue.toFixed(2)}`
-  ]);
+  // Iterate through each room and show summary + booking details
+  for (const room of (data.room_details || [])) {
+    // Check if we need a new page
+    if (y > doc.internal.pageSize.height - 40) {
+      doc.addPage();
+      y = 20;
+    }
 
-  autoTable(doc, {
-    startY: y,
-    head: [["Room No", "Category", "Occupied Days", "Available Days", "Occupancy %", "Revenue (₹)"]],
-    body: roomRows,
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: PRIMARY_COLOR, textColor: 255 },
-    alternateRowStyles: { fillColor: LIGHT_GRAY },
-    columnStyles: { 
-      2: { halign: "center" }, 
-      3: { halign: "center" }, 
-      4: { halign: "center" },
-      5: { halign: "right", fontStyle: "bold" }
-    },
-    margin: { left: 10, right: 10 }
-  });
+    // Room summary row
+    const roomSummaryRow = [[
+      room.room_number,
+      room.category,
+      room.occupied_days,
+      room.available_days,
+      `${room.occupancy_percent}%`,
+      `₹${room.revenue.toFixed(2)}`
+    ]];
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Room No", "Category", "Occupied Days", "Available Days", "Occupancy %", "Revenue (₹)"]],
+      body: roomSummaryRow,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: PRIMARY_COLOR, textColor: 255 },
+      bodyStyles: { fillColor: [240, 240, 255], fontStyle: 'bold' },
+      columnStyles: { 
+        2: { halign: "center" }, 
+        3: { halign: "center" }, 
+        4: { halign: "center" },
+        5: { halign: "right", fontStyle: "bold" }
+      },
+      margin: { left: 10, right: 10 }
+    });
+
+    y = doc.lastAutoTable.finalY + 2;
+
+    // If this room has booking details, show them
+    if (room.bookings_detail && room.bookings_detail.length > 0) {
+      const bookingRows = room.bookings_detail.map(b => [
+        b.booking_number,
+        b.army_number,
+        b.rank,
+        b.name,
+        b.unit,
+        b.from_date,
+        b.to_date,
+        b.days,
+        b.total_members,
+        `₹${b.rate_per_day}`,
+        `₹${b.total_revenue_due.toFixed(2)}`,
+        b.bill_no,
+        `₹${b.advance_paid.toFixed(2)}`,
+        `₹${b.final_amount_paid.toFixed(2)}`
+      ]);
+
+      autoTable(doc, {
+        startY: y,
+        head: [["Booking", "Army No", "Rank", "Name", "Unit", "From", "To", "Days", "Members", "Rate/Day", "Revenue", "Bill", "Advance", "Final"]],
+        body: bookingRows,
+        styles: { fontSize: 6, cellPadding: 1.5 },
+        headStyles: { fillColor: [100, 120, 200], textColor: 255 },
+        alternateRowStyles: { fillColor: [245, 247, 255] },
+        columnStyles: { 
+          7: { halign: "center" },
+          8: { halign: "center", fontStyle: "bold", textColor: [0, 0, 255] },
+          9: { halign: "right" },
+          10: { halign: "right", fontStyle: "bold", textColor: [0, 128, 0] },
+          12: { halign: "right" },
+          13: { halign: "right" }
+        },
+        margin: { left: 15, right: 10 }
+      });
+
+      y = doc.lastAutoTable.finalY + 6;
+    } else {
+      y += 3;
+    }
+  }
 
   addFooter(doc);
   
