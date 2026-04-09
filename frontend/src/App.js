@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -22,7 +22,9 @@ import Layout from "@/components/Layout";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
-function App() {
+// Main app content component (needs useNavigate hook)
+function AppContent() {
+  const navigate = useNavigate();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [backupWarning, setBackupWarning] = useState(null);
@@ -54,16 +56,11 @@ function App() {
     }
   };
 
-  const handleBackupNow = async () => {
-    try {
-      await axios.post(`${API}/backups/manual/incremental`);
-      setBackupWarning(null);
-      setBackupBannerDismissed(false);
-      // Recheck status after backup
-      setTimeout(checkBackupStatus, 2000);
-    } catch (e) {
-      console.error("Backup failed:", e);
-    }
+  const handleBackupNow = () => {
+    // Navigate to backup page
+    setShowBackupModal(false);
+    setBackupBannerDismissed(true);
+    navigate('/backup-restore');
   };
 
   useEffect(() => {
@@ -94,48 +91,47 @@ function App() {
 
   return (
     <div className="App">
-      <BrowserRouter>
-        {/* Persistent Backup Warning Banner */}
-        {backupWarning?.missed && !backupBannerDismissed && (
-          <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-white shadow-lg">
-            <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                <span className="font-medium">
-                  ⚠️ Backup Required: {backupWarning.message}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={handleBackupNow}
-                  className="px-4 py-1 bg-white text-amber-600 rounded font-medium hover:bg-amber-50 transition"
-                >
-                  Backup Now
-                </button>
-                <button 
-                  onClick={() => setBackupBannerDismissed(true)}
-                  className="px-3 py-1 text-white hover:bg-amber-600 rounded transition"
-                >
-                  ✕
-                </button>
-              </div>
+      {/* Persistent Backup Warning Banner */}
+      {backupWarning?.missed && !backupBannerDismissed && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-white shadow-lg">
+          <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <span className="font-medium">
+                ⚠️ Backup Required: {backupWarning.message}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleBackupNow}
+                className="px-4 py-1 bg-white text-amber-600 rounded font-medium hover:bg-amber-50 transition"
+              >
+                Go to Backup Page
+              </button>
+              <button 
+                onClick={() => setBackupBannerDismissed(true)}
+                className="px-3 py-1 text-white hover:bg-amber-600 rounded transition"
+              >
+                ✕
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Backup Warning Modal */}
-        <BackupWarningModal
-          open={showBackupModal}
-          onClose={() => setShowBackupModal(false)}
-          onBackupNow={handleBackupNow}
-          missedInfo={backupWarning}
-        />
+      {/* Backup Warning Modal */}
+      <BackupWarningModal
+        open={showBackupModal}
+        onClose={() => setShowBackupModal(false)}
+        onBackupNow={handleBackupNow}
+        missedInfo={backupWarning}
+      />
 
-        {/* Main Content with top padding if banner is visible */}
-        <div className={backupWarning?.missed && !backupBannerDismissed ? "pt-14" : ""}>
-          <Routes>
+      {/* Main Content with top padding if banner is visible */}
+      <div className={backupWarning?.missed && !backupBannerDismissed ? "pt-14" : ""}>
+        <Routes>
           {/* Command Center as main landing */}
           <Route path="/" element={<CommandCenter />} />
           
@@ -183,10 +179,18 @@ function App() {
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        </div>
-      </BrowserRouter>
+      </div>
       <Toaster position="top-right" richColors />
     </div>
+  );
+}
+
+// Root App component wraps AppContent with BrowserRouter
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
   );
 }
 

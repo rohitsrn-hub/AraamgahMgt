@@ -45,13 +45,10 @@ export default function BackupWarningModal({ open, onClose, onBackupNow, missedI
             Remind Me Later
           </Button>
           <Button 
-            onClick={() => {
-              onBackupNow();
-              onClose();
-            }}
+            onClick={onBackupNow}
             className="bg-amber-600 hover:bg-amber-700"
           >
-            Backup Now
+            Go to Backup Page
           </Button>
         </DialogFooter>
       </DialogContent>
