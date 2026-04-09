@@ -2316,9 +2316,10 @@ async def get_room_occupancy_report(
             if room_id in room_ids:
                 room_bookings.append(bk)
         
-        # Calculate occupied days
+        # Calculate occupied days and build detailed booking list
         occupied_days = 0
         room_revenue = 0
+        bookings_detail = []
         
         for bk in room_bookings:
             checkin = date_type.fromisoformat(bk["check_in_date"])
@@ -2328,16 +2329,41 @@ async def get_room_occupancy_report(
             nights = max(0, (eff_out - eff_in).days)
             occupied_days += nights
             
-            # Calculate revenue
+            # Calculate revenue for this booking
             rank = (bk.get("guest_rank") or "").strip().lower()
             is_def_civ = rank == "def civ"
             
             if is_def_civ:
-                room_revenue += nights * (def_civ_rr + def_civ_lf)
+                rate_per_day = def_civ_rr + def_civ_lf
             elif category == "Cat I":
-                room_revenue += nights * (cat_i_rr + cat_i_lf)
+                rate_per_day = cat_i_rr + cat_i_lf
             else:
-                room_revenue += nights * (cat_ii_rr + cat_ii_lf)
+                rate_per_day = cat_ii_rr + cat_ii_lf
+            
+            booking_revenue = nights * rate_per_day
+            room_revenue += booking_revenue
+            
+            # Count total members (main guest + family)
+            total_members = 1 + len(bk.get("family_members", []))
+            
+            # Build detailed booking info for expandable row
+            bookings_detail.append({
+                "booking_number": bk.get("booking_number", "N/A"),
+                "army_number": bk.get("army_number", "N/A"),
+                "rank": bk.get("guest_rank", "N/A"),
+                "name": bk.get("guest_name", "N/A"),
+                "unit": bk.get("guest_unit", "N/A"),
+                "command": bk.get("command_hq", "N/A"),
+                "from_date": bk["check_in_date"],
+                "to_date": bk["check_out_date"],
+                "days": nights,
+                "total_members": total_members,
+                "rate_per_day": rate_per_day,
+                "total_revenue_due": round(booking_revenue, 2),
+                "bill_no": bk.get("booking_number", "N/A"),  # Using booking number as bill number
+                "advance_paid": bk.get("advance_paid", 0),
+                "final_amount_paid": bk.get("balance_amount", 0) if bk.get("status") == "checked_out" else 0
+            })
         
         available_days = total_days - occupied_days
         occupancy_percent = round((occupied_days / total_days) * 100, 2) if total_days > 0 else 0
@@ -2348,7 +2374,8 @@ async def get_room_occupancy_report(
             "occupied_days": occupied_days,
             "available_days": available_days,
             "occupancy_percent": occupancy_percent,
-            "revenue": round(room_revenue, 2)
+            "revenue": round(room_revenue, 2),
+            "bookings_detail": bookings_detail  # NEW: Expandable booking details
         })
         
         total_occupied += occupied_days
@@ -2454,16 +2481,52 @@ async def get_room_allotment_report(
         total_amount = (room_rent + license_fee) * nights * num_rooms
         total_amount += bk.get("extra_beds", 0) * 75 * nights
         
+        # Calculate party composition
+        self_count = 1  # Main guest
+        wife_count = 0
+        child_count = 0
+        dependents_count = 0  # Those WITH dependent_id
+        non_dependents_count = 0  # Those WITHOUT dependent_id
+        
+        family_members = bk.get("family_members", [])
+        for fm in family_members:
+            relation = (fm.get("relation") or "").lower()
+            has_dependent_card = fm.get("has_dependent_card", False)
+            dependent_id = fm.get("dependent_id", "")
+            
+            # Count by relationship
+            if "w/o" in relation or "wife" in relation:
+                wife_count += 1
+            elif "s/o" in relation or "d/o" in relation or "son" in relation or "daughter" in relation or "child" in relation:
+                child_count += 1
+            
+            # Count dependents vs non-dependents
+            if has_dependent_card and dependent_id:
+                dependents_count += 1
+            else:
+                non_dependents_count += 1
+        
         allotments.append({
             "booking_id": bk["id"],
             "booking_number": bk.get("booking_number", "N/A"),
+            "army_number": bk.get("army_number", "N/A"),
             "guest_name": bk.get("guest_name", "N/A"),
             "guest_rank": bk.get("guest_rank", "N/A"),
+            "guest_unit": bk.get("guest_unit", "N/A"),
+            "command_hq": bk.get("command_hq", "N/A"),
+            "service_type": bk.get("service_type", "N/A"),
             "room_numbers": bk.get("room_numbers", []),
             "room_categories": bk.get("room_categories", []),
             "check_in_date": bk["check_in_date"],
             "check_out_date": bk["check_out_date"],
             "nights": nights,
+            "self_count": self_count,
+            "wife_count": wife_count,
+            "child_count": child_count,
+            "dependents": dependents_count,
+            "non_dependents": non_dependents_count,
+            "identity_card_no": bk.get("identity_card_number") or bk.get("aadhaar_number", "N/A"),
+            "mobile_no": bk.get("guest_contact", "N/A"),
             "total_amount": round(total_amount, 2)
         })
     
@@ -2485,7 +2548,7 @@ async def get_guest_details_report(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None
 ):
-    """Get comprehensive guest details report"""
+    """Get comprehensive guest details report - includes ALL party members"""
     import calendar as cal_mod
     
     # Determine date range based on filter type
@@ -2533,9 +2596,10 @@ async def get_guest_details_report(
     # Get settings for financial calculations
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
     
-    guests = []
+    guest_party_members = []
     total_nights = 0
     total_revenue = 0
+    total_party_members = 0
     
     for bk in bookings:
         checkin = date_type.fromisoformat(bk["check_in_date"])
@@ -2563,27 +2627,57 @@ async def get_guest_details_report(
         total_amount += bk.get("extra_beds", 0) * 75 * nights
         total_revenue += total_amount
         
-        guests.append({
-            "guest_name": bk.get("guest_name", "N/A"),
-            "guest_rank": bk.get("guest_rank", "N/A"),
-            "guest_unit": bk.get("guest_unit"),
-            "service_type": bk.get("service_type"),
-            "guest_contact": bk.get("guest_contact"),
+        # Add main guest (Self)
+        guest_party_members.append({
+            "booking_number": bk.get("booking_number", "N/A"),
+            "room_numbers": ", ".join(bk.get("room_numbers", [])),
+            "rank": bk.get("guest_rank", "N/A"),
+            "name": bk.get("guest_name", "N/A"),
+            "age": bk.get("guest_age") or "—",
+            "sex": bk.get("guest_sex") or "—",
+            "unit": bk.get("guest_unit") or "—",
+            "relationship": "Self",
+            "address": bk.get("guest_address") or "—",
+            "aadhaar_no": bk.get("aadhaar_number") or "—",
+            "mobile_no": bk.get("guest_contact") or "—",
             "check_in_date": bk["check_in_date"],
             "check_out_date": bk["check_out_date"],
             "nights": nights,
             "total_amount": round(total_amount, 2)
         })
+        total_party_members += 1
+        
+        # Add family members
+        family_members = bk.get("family_members", [])
+        for fm in family_members:
+            guest_party_members.append({
+                "booking_number": bk.get("booking_number", "N/A"),
+                "room_numbers": ", ".join(bk.get("room_numbers", [])),
+                "rank": "—",  # Family members don't have rank
+                "name": fm.get("name", "—"),
+                "age": fm.get("age", "—"),
+                "sex": fm.get("sex", "—"),
+                "unit": "—",  # Family members inherit main guest's unit
+                "relationship": fm.get("relation", "—").title(),
+                "address": bk.get("guest_address") or "—",  # Same as main guest
+                "aadhaar_no": "—",  # Not stored for family members
+                "mobile_no": fm.get("mobile", "—"),
+                "check_in_date": bk["check_in_date"],
+                "check_out_date": bk["check_out_date"],
+                "nights": nights,
+                "total_amount": "—"  # Amount is for the whole booking
+            })
+            total_party_members += 1
     
     return {
         "period_label": period_label,
         "start_date": start_date,
         "end_date": end_date,
-        "total_guests": len(guests),
+        "total_party_members": total_party_members,
         "total_bookings": len(bookings),
         "total_nights": total_nights,
         "total_revenue": round(total_revenue, 2),
-        "guests": guests
+        "guest_party_members": guest_party_members
     }
 
 # Health check endpoint for Render
