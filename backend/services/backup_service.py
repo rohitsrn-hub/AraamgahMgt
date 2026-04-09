@@ -12,8 +12,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Backup directory
-BACKUP_DIR = Path("/app/backups")
-BACKUP_DIR.mkdir(exist_ok=True)
+# Use relative path for Render deployment compatibility
+BACKUP_DIR = Path(__file__).parent.parent / "backups"  # backend/backups
+BACKUP_DIR.mkdir(parents=True, exist_ok=True)  # Create parent dirs if needed
 
 # Collections to backup
 COLLECTIONS_TO_BACKUP = [
