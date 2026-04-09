@@ -50,6 +50,10 @@ function AppContent() {
       if (warning?.missed) {
         setBackupWarning(warning);
         setShowBackupModal(true);
+      } else {
+        // Clear warnings if backup is no longer missed
+        setBackupWarning(null);
+        setBackupBannerDismissed(false);
       }
     } catch (e) {
       console.error("Error checking backup status:", e);
@@ -66,6 +70,17 @@ function AppContent() {
   useEffect(() => {
     fetchSettings();
     checkBackupStatus();
+
+    // Listen for backup status changes from BackupRestore page
+    const handleBackupStatusChange = () => {
+      checkBackupStatus();
+    };
+    
+    window.addEventListener('backupStatusChanged', handleBackupStatusChange);
+    
+    return () => {
+      window.removeEventListener('backupStatusChanged', handleBackupStatusChange);
+    };
   }, []);
 
   if (loading) {

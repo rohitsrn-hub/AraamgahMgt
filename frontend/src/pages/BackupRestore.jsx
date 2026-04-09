@@ -17,9 +17,25 @@ import {
   CheckCircle,
   WarningCircle,
   SpinnerGap,
-  CalendarBlank
+  CalendarBlank,
+  Info
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
+
+// Helper function to convert UTC to IST
+const toIST = (utcDateString) => {
+  if (!utcDateString) return null;
+  const utcDate = parseISO(utcDateString);
+  const istDate = toZonedTime(utcDate, 'Asia/Kolkata');
+  return istDate;
+};
+
+// Helper function to format IST date
+const formatIST = (utcDateString, formatStr = "dd MMM yyyy, HH:mm") => {
+  const istDate = toIST(utcDateString);
+  return istDate ? format(istDate, formatStr) + " IST" : "N/A";
+};
 
 export default function BackupRestore() {
   const [status, setStatus] = useState(null);
@@ -31,6 +47,8 @@ export default function BackupRestore() {
   const [selectedBackupId, setSelectedBackupId] = useState(null);
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
   const [scheduleTime, setScheduleTime] = useState({ hour: 2, minute: 0 });
+  const [showNoDataWarning, setShowNoDataWarning] = useState(false);
+  const [pendingBackupType, setPendingBackupType] = useState(null);
 
   useEffect(() => {
     fetchBackupStatus();
@@ -46,10 +64,15 @@ export default function BackupRestore() {
       if (res.data.scheduler?.jobs?.length > 0) {
         const job = res.data.scheduler.jobs.find(j => j.id === 'daily_backup');
         if (job?.next_run) {
-          const nextRun = new Date(job.next_run);
-          setScheduleTime({ hour: nextRun.getHours(), minute: nextRun.getMinutes() });
+          const nextRun = toIST(job.next_run);
+          if (nextRun) {
+            setScheduleTime({ hour: nextRun.getHours(), minute: nextRun.getMinutes() });
+          }
         }
       }
+
+      // Notify parent (App.js) to refresh backup status and clear warnings
+      window.dispatchEvent(new CustomEvent('backupStatusChanged'));
     } catch (error) {
       console.error("Error fetching backup status:", error);
       toast.error("Failed to fetch backup status");
@@ -72,8 +95,8 @@ export default function BackupRestore() {
     try {
       const res = await axios.post(`${API}/backups/manual/full`);
       toast.success("Full backup completed successfully!");
-      fetchBackupStatus();
-      fetchBackupHistory();
+      await fetchBackupStatus();
+      await fetchBackupHistory();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Backup failed");
     } finally {
@@ -85,14 +108,33 @@ export default function BackupRestore() {
     setActionLoading(true);
     try {
       const res = await axios.post(`${API}/backups/manual/incremental`);
+      const backup = res.data?.backup;
+      
+      // Check if no new data was backed up
+      const totalRecords = backup?.record_count ? Object.values(backup.record_count).reduce((a, b) => a + b, 0) : 0;
+      
+      if (totalRecords === 0) {
+        // No new data - show warning
+        setPendingBackupType('incremental');
+        setShowNoDataWarning(true);
+        setActionLoading(false);
+        return;
+      }
+      
       toast.success("Incremental backup completed successfully!");
-      fetchBackupStatus();
-      fetchBackupHistory();
+      await fetchBackupStatus();
+      await fetchBackupHistory();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Backup failed");
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleNoDataWarningConfirm = async () => {
+    setShowNoDataWarning(false);
+    // Trigger full backup instead
+    await triggerFullBackup();
   };
 
   const handleRestore = async () => {
@@ -210,7 +252,7 @@ export default function BackupRestore() {
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-slate-600">Time:</span>
                   <span className="text-sm font-medium">
-                    {format(parseISO(lastBackup.timestamp), "dd MMM yyyy, HH:mm")}
+                    {formatIST(lastBackup.timestamp, "dd MMM yyyy, HH:mm")}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -243,7 +285,7 @@ export default function BackupRestore() {
               <div className="text-3xl font-bold text-slate-800">{status?.total_backups || 0}</div>
               <div className="text-sm text-slate-600">
                 {status?.first_backup_date && (
-                  <>Since {format(parseISO(status.first_backup_date), "dd MMM yyyy")}</>
+                  <>Since {formatIST(status.first_backup_date, "dd MMM yyyy")}</>
                 )}
               </div>
             </div>
@@ -262,7 +304,7 @@ export default function BackupRestore() {
             {status?.scheduler?.jobs?.find(j => j.id === 'daily_backup') ? (
               <div className="space-y-2">
                 <div className="text-sm font-medium">
-                  {format(parseISO(status.scheduler.jobs.find(j => j.id === 'daily_backup').next_run), "dd MMM yyyy, HH:mm")} IST
+                  {formatIST(status.scheduler.jobs.find(j => j.id === 'daily_backup').next_run, "dd MMM yyyy, HH:mm")}
                 </div>
                 <Badge className="bg-green-100 text-green-800">Active</Badge>
               </div>
@@ -437,7 +479,7 @@ export default function BackupRestore() {
                 {history.map((backup) => (
                   <tr key={backup.backup_id} className="border-b hover:bg-slate-50">
                     <td className="p-2 text-sm">
-                      {format(parseISO(backup.timestamp), "dd MMM yyyy, HH:mm")}
+                      {formatIST(backup.timestamp, "dd MMM yyyy, HH:mm")}
                     </td>
                     <td className="p-2">
                       <Badge className={backup.backup_type === "FULL" ? "bg-blue-100 text-blue-800" : "bg-purple-100 text-purple-800"}>
@@ -478,7 +520,7 @@ export default function BackupRestore() {
                   <option value="">Select a backup</option>
                   {history.filter(b => b.status === "SUCCESS").map(backup => (
                     <option key={backup.backup_id} value={backup.backup_id}>
-                      {format(parseISO(backup.timestamp), "dd MMM yyyy, HH:mm")} - {backup.backup_type}
+                      {formatIST(backup.timestamp, "dd MMM yyyy, HH:mm")} - {backup.backup_type}
                     </option>
                   ))}
                 </select>
@@ -520,6 +562,50 @@ export default function BackupRestore() {
               className="bg-green-600 hover:bg-green-700"
             >
               {actionLoading ? <SpinnerGap size={16} className="animate-spin" /> : "Restore"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* No New Data Warning Dialog */}
+      <Dialog open={showNoDataWarning} onOpenChange={setShowNoDataWarning}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-900">
+              <Info size={24} weight="fill" className="text-amber-500" />
+              No New Data to Backup
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-900">
+                <strong>No changes detected since last backup.</strong>
+              </p>
+              <p className="text-sm text-amber-800 mt-2">
+                An incremental backup found <strong>0 new or modified records</strong> since your last backup.
+              </p>
+            </div>
+            
+            <div className="space-y-2 text-sm">
+              <p className="font-medium text-slate-700">What would you like to do?</p>
+              <ul className="list-disc list-inside space-y-1 text-slate-600 ml-2">
+                <li><strong>Cancel:</strong> No backup needed right now</li>
+                <li><strong>Full Backup:</strong> Create a complete backup anyway (recommended if you want a new baseline)</li>
+              </ul>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowNoDataWarning(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleNoDataWarningConfirm}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Do Full Backup Instead
             </Button>
           </DialogFooter>
         </DialogContent>
