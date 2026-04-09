@@ -14,7 +14,7 @@ import Staff from "@/pages/Staff";
 import Toiletry from "@/pages/Toiletry";
 import Settings from "@/pages/Settings";
 import FeedbackPage from "@/pages/FeedbackPage";
-import MonthlyReport from "@/pages/MonthlyReport";
+import ReportsPage from "@/pages/ReportsPage";
 import BackupRestore from "@/pages/BackupRestore";
 import BackupWarningModal from "@/components/BackupWarningModal";
 import Layout from "@/components/Layout";
@@ -162,7 +162,7 @@ function AppContent() {
             <Route path="toiletry" element={<Toiletry />} />
             <Route path="settings" element={<Settings settings={settings} onUpdate={fetchSettings} />} />
             <Route path="feedback" element={<FeedbackPage />} />
-            <Route path="reports" element={<MonthlyReport settings={settings} />} />
+            <Route path="reports" element={<ReportsPage settings={settings} />} />
             <Route path="backup-restore" element={<BackupRestore />} />
           </Route>
           
@@ -177,7 +177,7 @@ function AppContent() {
             <Route index element={<FeedbackPage />} />
           </Route>
           <Route path="/reports" element={<Layout settings={settings} />}>
-            <Route index element={<MonthlyReport settings={settings} />} />
+            <Route index element={<ReportsPage settings={settings} />} />
           </Route>
           <Route path="/rooms" element={<Layout settings={settings} />}>
             <Route index element={<Rooms />} />

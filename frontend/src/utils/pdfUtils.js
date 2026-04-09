@@ -220,7 +220,30 @@ export function generateRefundsPDF(refunds) {
 export function generateMonthlyReportPDF(data, settings) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = doc.internal.pageSize.width;
-  let y = addHeader(
+  
+  // Add formation signs if available
+  const fmn1 = settings?.fmn_sign_1_url;
+  const fmn2 = settings?.fmn_sign_2_url;
+  
+  let y = 5;
+  
+  // Add formation signs at top corners
+  if (fmn1) {
+    try {
+      doc.addImage(fmn1, 'PNG', 10, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 1", e);
+    }
+  }
+  if (fmn2) {
+    try {
+      doc.addImage(fmn2, 'PNG', W - 25, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 2", e);
+    }
+  }
+  
+  y = addHeader(
     doc,
     `MONTHLY REPORT — ${data.month_name?.toUpperCase()} ${data.year}`,
     "REST HOUSE OCCUPANCY & FINANCIAL SUMMARY"
@@ -533,3 +556,263 @@ export function generateBookingSlips(bookings) {
   // Return blob URL for opening in new tab
   return { blobUrl, filename, count: bookings.length };
 }
+
+// ===== ROOM OCCUPANCY REPORT PDF =====
+export function generateRoomOccupancyPDF(data, settings) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = doc.internal.pageSize.width;
+  
+  // Add formation signs if available
+  const fmn1 = settings?.fmn_sign_1_url;
+  const fmn2 = settings?.fmn_sign_2_url;
+  
+  let y = 5;
+  
+  // Add formation signs at top corners
+  if (fmn1) {
+    try {
+      doc.addImage(fmn1, 'PNG', 10, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 1", e);
+    }
+  }
+  if (fmn2) {
+    try {
+      doc.addImage(fmn2, 'PNG', W - 25, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 2", e);
+    }
+  }
+  
+  y = addHeader(
+    doc,
+    `ROOM OCCUPANCY REPORT`,
+    data.period_label?.toUpperCase()
+  );
+  y += 5;
+
+  // Summary section
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("SUMMARY", 10, y);
+  y += 4;
+
+  const summaryRows = [
+    ["Total Rooms", data.total_rooms || 0],
+    ["Total Days in Period", data.total_days || 0],
+    ["Total Occupied Room-Days", data.total_occupied_days || 0],
+    ["Average Occupancy", `${data.avg_occupancy || 0}%`],
+    ["Total Bookings", data.total_bookings || 0],
+    ["Total Revenue", `₹${(data.total_revenue || 0).toFixed(2)}`],
+  ];
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Metric", "Value"]],
+    body: summaryRows,
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [70, 100, 180], textColor: 255 },
+    alternateRowStyles: { fillColor: LIGHT_GRAY },
+    columnStyles: { 1: { halign: "right", fontStyle: "bold" } },
+    margin: { left: 10, right: 10 }
+  });
+
+  y = doc.lastAutoTable.finalY + 8;
+
+  // Room-wise details
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("ROOM-WISE OCCUPANCY DETAILS", 10, y);
+  y += 4;
+
+  const roomRows = (data.room_details || []).map(r => [
+    r.room_number,
+    r.category,
+    r.occupied_days,
+    r.available_days,
+    `${r.occupancy_percent}%`,
+    `₹${r.revenue.toFixed(2)}`
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Room No", "Category", "Occupied Days", "Available Days", "Occupancy %", "Revenue (₹)"]],
+    body: roomRows,
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: PRIMARY_COLOR, textColor: 255 },
+    alternateRowStyles: { fillColor: LIGHT_GRAY },
+    columnStyles: { 
+      2: { halign: "center" }, 
+      3: { halign: "center" }, 
+      4: { halign: "center" },
+      5: { halign: "right", fontStyle: "bold" }
+    },
+    margin: { left: 10, right: 10 }
+  });
+
+  addFooter(doc);
+  
+  const filename = `ECSAG_room_occupancy_${data.period_label.replace(/\s+/g, '_')}.pdf`;
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  
+  return { blobUrl, filename };
+}
+
+// ===== ROOM ALLOTMENT REPORT PDF =====
+export function generateRoomAllotmentPDF(data, settings) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const W = doc.internal.pageSize.width;
+  
+  // Add formation signs if available
+  const fmn1 = settings?.fmn_sign_1_url;
+  const fmn2 = settings?.fmn_sign_2_url;
+  
+  let y = 5;
+  
+  if (fmn1) {
+    try {
+      doc.addImage(fmn1, 'PNG', 10, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 1", e);
+    }
+  }
+  if (fmn2) {
+    try {
+      doc.addImage(fmn2, 'PNG', W - 25, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 2", e);
+    }
+  }
+  
+  y = addHeader(
+    doc,
+    `ROOM ALLOTMENT REPORT`,
+    data.period_label?.toUpperCase()
+  );
+  y += 5;
+
+  const allotRows = (data.allotments || []).map(a => [
+    a.booking_number,
+    a.guest_name,
+    a.guest_rank,
+    (a.room_numbers || []).join(", "),
+    (a.room_categories || []).join(", "),
+    a.check_in_date,
+    a.check_out_date,
+    a.nights,
+    `₹${a.total_amount.toFixed(2)}`
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Booking No", "Guest Name", "Rank", "Room(s)", "Category", "Check-in", "Check-out", "Nights", "Amount (₹)"]],
+    body: allotRows,
+    styles: { fontSize: 7, cellPadding: 2 },
+    headStyles: { fillColor: [120, 80, 160], textColor: 255 },
+    alternateRowStyles: { fillColor: LIGHT_GRAY },
+    columnStyles: { 
+      7: { halign: "center" },
+      8: { halign: "right", fontStyle: "bold" }
+    },
+    margin: { left: 10, right: 10 }
+  });
+
+  addFooter(doc);
+  
+  const filename = `ECSAG_room_allotment_${data.period_label.replace(/\s+/g, '_')}.pdf`;
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  
+  return { blobUrl, filename };
+}
+
+// ===== GUEST DETAILS REPORT PDF =====
+export function generateGuestDetailsPDF(data, settings) {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const W = doc.internal.pageSize.width;
+  
+  // Add formation signs if available
+  const fmn1 = settings?.fmn_sign_1_url;
+  const fmn2 = settings?.fmn_sign_2_url;
+  
+  let y = 5;
+  
+  if (fmn1) {
+    try {
+      doc.addImage(fmn1, 'PNG', 10, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 1", e);
+    }
+  }
+  if (fmn2) {
+    try {
+      doc.addImage(fmn2, 'PNG', W - 25, y, 15, 15);
+    } catch (e) {
+      console.warn("Failed to add formation sign 2", e);
+    }
+  }
+  
+  y = addHeader(
+    doc,
+    `GUEST DETAILS REPORT`,
+    data.period_label?.toUpperCase()
+  );
+  y += 5;
+
+  // Summary
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text(`Total Guests: ${data.total_guests || 0}  |  Total Bookings: ${data.total_bookings || 0}  |  Total Nights: ${data.total_nights || 0}  |  Revenue: ₹${(data.total_revenue || 0).toFixed(2)}`, 10, y);
+  y += 6;
+
+  const guestRows = (data.guests || []).map(g => [
+    g.guest_name,
+    g.guest_rank,
+    g.guest_unit || "—",
+    g.service_type || "—",
+    g.guest_contact || "—",
+    g.check_in_date,
+    g.check_out_date,
+    g.nights,
+    `₹${g.total_amount.toFixed(2)}`
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Guest Name", "Rank", "Unit", "Service", "Contact", "Check-in", "Check-out", "Nights", "Amount (₹)"]],
+    body: guestRows,
+    styles: { fontSize: 7, cellPadding: 2 },
+    headStyles: { fillColor: [60, 140, 130], textColor: 255 },
+    alternateRowStyles: { fillColor: LIGHT_GRAY },
+    columnStyles: { 
+      7: { halign: "center" },
+      8: { halign: "right", fontStyle: "bold" }
+    },
+    margin: { left: 10, right: 10 }
+  });
+
+  addFooter(doc);
+  
+  const filename = `ECSAG_guest_details_${data.period_label.replace(/\s+/g, '_')}.pdf`;
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename;
+  link.click();
+  
+  return { blobUrl, filename };
+}
+

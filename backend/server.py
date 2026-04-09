@@ -2224,6 +2224,368 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         }
     }
 
+# ============= NEW REPORT ENDPOINTS =============
+
+@api_router.get("/reports/room-occupancy")
+async def get_room_occupancy_report(
+    filter_type: str = Query(...),
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    quarter: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get room occupancy report with flexible date filters"""
+    import calendar as cal_mod
+    
+    # Determine date range based on filter type
+    if filter_type == "daily":
+        if not start_date:
+            start_date = date_type.today().isoformat()
+        end_date = start_date
+        period_label = f"Daily Report - {start_date}"
+    elif filter_type == "monthly":
+        if not month or not year:
+            raise HTTPException(400, "Month and year required for monthly filter")
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date = f"{year}-{month:02d}-{days_in_month:02d}"
+        period_label = f"{cal_mod.month_name[month]} {year}"
+    elif filter_type == "quarterly":
+        if not quarter or not year:
+            raise HTTPException(400, "Quarter and year required for quarterly filter")
+        start_month = (quarter - 1) * 3 + 1
+        end_month = start_month + 2
+        start_date = f"{year}-{start_month:02d}-01"
+        days_in_end_month = cal_mod.monthrange(year, end_month)[1]
+        end_date = f"{year}-{end_month:02d}-{days_in_end_month:02d}"
+        period_label = f"Q{quarter} {year}"
+    elif filter_type == "annual":
+        if not year:
+            raise HTTPException(400, "Year required for annual filter")
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        period_label = f"Year {year}"
+    elif filter_type == "custom":
+        if not start_date or not end_date:
+            raise HTTPException(400, "Start and end dates required for custom filter")
+        period_label = f"{start_date} to {end_date}"
+    else:
+        raise HTTPException(400, "Invalid filter type")
+    
+    # Get all rooms
+    all_rooms = await db.rooms.find({}, {"_id": 0}).sort("room_number", 1).to_list(100)
+    
+    # Get bookings in the date range (checked_in or checked_out)
+    bookings = await db.bookings.find({
+        "status": {"$in": ["checked_in", "checked_out"]},
+        "check_in_date": {"$lte": end_date},
+        "check_out_date": {"$gt": start_date}
+    }, {"_id": 0}).to_list(5000)
+    
+    # Calculate total days in period
+    start_dt = date_type.fromisoformat(start_date)
+    end_dt = date_type.fromisoformat(end_date)
+    total_days = (end_dt - start_dt).days + 1
+    
+    # Get settings for rates
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    cat_i_rr = settings.get("cat_i_room_rent", 470)
+    cat_ii_rr = settings.get("cat_ii_room_rent", 385)
+    def_civ_rr = settings.get("def_civ_room_rent", 570)
+    cat_i_lf = settings.get("cat_i_license_fee", 30)
+    cat_ii_lf = settings.get("cat_ii_license_fee", 15)
+    def_civ_lf = settings.get("def_civ_license_fee", 30)
+    
+    # Calculate room-wise occupancy
+    room_details = []
+    total_occupied = 0
+    total_revenue = 0
+    
+    for room in all_rooms:
+        room_id = room["id"]
+        room_number = room["room_number"]
+        category = room["category"]
+        
+        # Find bookings for this room
+        room_bookings = []
+        for bk in bookings:
+            room_ids = bk.get("room_ids", [])
+            if not room_ids and bk.get("room_id"):
+                room_ids = [bk["room_id"]]
+            if room_id in room_ids:
+                room_bookings.append(bk)
+        
+        # Calculate occupied days
+        occupied_days = 0
+        room_revenue = 0
+        
+        for bk in room_bookings:
+            checkin = date_type.fromisoformat(bk["check_in_date"])
+            checkout = date_type.fromisoformat(bk["check_out_date"])
+            eff_in = max(checkin, start_dt)
+            eff_out = min(checkout, end_dt + timedelta(days=1))
+            nights = max(0, (eff_out - eff_in).days)
+            occupied_days += nights
+            
+            # Calculate revenue
+            rank = (bk.get("guest_rank") or "").strip().lower()
+            is_def_civ = rank == "def civ"
+            
+            if is_def_civ:
+                room_revenue += nights * (def_civ_rr + def_civ_lf)
+            elif category == "Cat I":
+                room_revenue += nights * (cat_i_rr + cat_i_lf)
+            else:
+                room_revenue += nights * (cat_ii_rr + cat_ii_lf)
+        
+        available_days = total_days - occupied_days
+        occupancy_percent = round((occupied_days / total_days) * 100, 2) if total_days > 0 else 0
+        
+        room_details.append({
+            "room_number": room_number,
+            "category": category,
+            "occupied_days": occupied_days,
+            "available_days": available_days,
+            "occupancy_percent": occupancy_percent,
+            "revenue": round(room_revenue, 2)
+        })
+        
+        total_occupied += occupied_days
+        total_revenue += room_revenue
+    
+    total_available = (len(all_rooms) * total_days) - total_occupied
+    avg_occupancy = round((total_occupied / (len(all_rooms) * total_days)) * 100, 2) if len(all_rooms) * total_days > 0 else 0
+    
+    return {
+        "period_label": period_label,
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_rooms": len(all_rooms),
+        "total_days": total_days,
+        "total_occupied_days": total_occupied,
+        "total_available_days": total_available,
+        "avg_occupancy": avg_occupancy,
+        "total_bookings": len(bookings),
+        "total_revenue": round(total_revenue, 2),
+        "room_details": room_details
+    }
+
+
+@api_router.get("/reports/room-allotment")
+async def get_room_allotment_report(
+    filter_type: str = Query(...),
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    quarter: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get room allotment report showing all bookings with room assignments"""
+    import calendar as cal_mod
+    
+    # Determine date range based on filter type (same logic as occupancy)
+    if filter_type == "daily":
+        if not start_date:
+            start_date = date_type.today().isoformat()
+        end_date = start_date
+        period_label = f"Daily Report - {start_date}"
+    elif filter_type == "monthly":
+        if not month or not year:
+            raise HTTPException(400, "Month and year required for monthly filter")
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date = f"{year}-{month:02d}-{days_in_month:02d}"
+        period_label = f"{cal_mod.month_name[month]} {year}"
+    elif filter_type == "quarterly":
+        if not quarter or not year:
+            raise HTTPException(400, "Quarter and year required for quarterly filter")
+        start_month = (quarter - 1) * 3 + 1
+        end_month = start_month + 2
+        start_date = f"{year}-{start_month:02d}-01"
+        days_in_end_month = cal_mod.monthrange(year, end_month)[1]
+        end_date = f"{year}-{end_month:02d}-{days_in_end_month:02d}"
+        period_label = f"Q{quarter} {year}"
+    elif filter_type == "annual":
+        if not year:
+            raise HTTPException(400, "Year required for annual filter")
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        period_label = f"Year {year}"
+    elif filter_type == "custom":
+        if not start_date or not end_date:
+            raise HTTPException(400, "Start and end dates required for custom filter")
+        period_label = f"{start_date} to {end_date}"
+    else:
+        raise HTTPException(400, "Invalid filter type")
+    
+    # Get bookings in the date range
+    bookings = await db.bookings.find({
+        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
+        "check_in_date": {"$lte": end_date},
+        "check_out_date": {"$gt": start_date}
+    }, {"_id": 0}).sort("check_in_date", 1).to_list(5000)
+    
+    # Get settings for financial calculations
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    
+    allotments = []
+    for bk in bookings:
+        checkin = date_type.fromisoformat(bk["check_in_date"])
+        checkout = date_type.fromisoformat(bk["check_out_date"])
+        nights = (checkout - checkin).days
+        
+        # Calculate total amount
+        rank = (bk.get("guest_rank") or "").strip().lower()
+        is_def_civ = rank == "def civ"
+        cats = bk.get("room_categories", [])
+        num_rooms = len(bk.get("room_ids", [])) or 1
+        
+        if is_def_civ:
+            room_rent = settings.get("def_civ_room_rent", 570)
+            license_fee = settings.get("def_civ_license_fee", 30)
+        elif "Cat I" in cats:
+            room_rent = settings.get("cat_i_room_rent", 470)
+            license_fee = settings.get("cat_i_license_fee", 30)
+        else:
+            room_rent = settings.get("cat_ii_room_rent", 385)
+            license_fee = settings.get("cat_ii_license_fee", 15)
+        
+        total_amount = (room_rent + license_fee) * nights * num_rooms
+        total_amount += bk.get("extra_beds", 0) * 75 * nights
+        
+        allotments.append({
+            "booking_id": bk["id"],
+            "booking_number": bk.get("booking_number", "N/A"),
+            "guest_name": bk.get("guest_name", "N/A"),
+            "guest_rank": bk.get("guest_rank", "N/A"),
+            "room_numbers": bk.get("room_numbers", []),
+            "room_categories": bk.get("room_categories", []),
+            "check_in_date": bk["check_in_date"],
+            "check_out_date": bk["check_out_date"],
+            "nights": nights,
+            "total_amount": round(total_amount, 2)
+        })
+    
+    return {
+        "period_label": period_label,
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_allotments": len(allotments),
+        "allotments": allotments
+    }
+
+
+@api_router.get("/reports/guest-details")
+async def get_guest_details_report(
+    filter_type: str = Query(...),
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    quarter: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get comprehensive guest details report"""
+    import calendar as cal_mod
+    
+    # Determine date range based on filter type
+    if filter_type == "daily":
+        if not start_date:
+            start_date = date_type.today().isoformat()
+        end_date = start_date
+        period_label = f"Daily Report - {start_date}"
+    elif filter_type == "monthly":
+        if not month or not year:
+            raise HTTPException(400, "Month and year required for monthly filter")
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date = f"{year}-{month:02d}-{days_in_month:02d}"
+        period_label = f"{cal_mod.month_name[month]} {year}"
+    elif filter_type == "quarterly":
+        if not quarter or not year:
+            raise HTTPException(400, "Quarter and year required for quarterly filter")
+        start_month = (quarter - 1) * 3 + 1
+        end_month = start_month + 2
+        start_date = f"{year}-{start_month:02d}-01"
+        days_in_end_month = cal_mod.monthrange(year, end_month)[1]
+        end_date = f"{year}-{end_month:02d}-{days_in_end_month:02d}"
+        period_label = f"Q{quarter} {year}"
+    elif filter_type == "annual":
+        if not year:
+            raise HTTPException(400, "Year required for annual filter")
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        period_label = f"Year {year}"
+    elif filter_type == "custom":
+        if not start_date or not end_date:
+            raise HTTPException(400, "Start and end dates required for custom filter")
+        period_label = f"{start_date} to {end_date}"
+    else:
+        raise HTTPException(400, "Invalid filter type")
+    
+    # Get bookings in the date range
+    bookings = await db.bookings.find({
+        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
+        "check_in_date": {"$lte": end_date},
+        "check_out_date": {"$gt": start_date}
+    }, {"_id": 0}).sort("check_in_date", 1).to_list(5000)
+    
+    # Get settings for financial calculations
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    
+    guests = []
+    total_nights = 0
+    total_revenue = 0
+    
+    for bk in bookings:
+        checkin = date_type.fromisoformat(bk["check_in_date"])
+        checkout = date_type.fromisoformat(bk["check_out_date"])
+        nights = (checkout - checkin).days
+        total_nights += nights
+        
+        # Calculate total amount
+        rank = (bk.get("guest_rank") or "").strip().lower()
+        is_def_civ = rank == "def civ"
+        cats = bk.get("room_categories", [])
+        num_rooms = len(bk.get("room_ids", [])) or 1
+        
+        if is_def_civ:
+            room_rent = settings.get("def_civ_room_rent", 570)
+            license_fee = settings.get("def_civ_license_fee", 30)
+        elif "Cat I" in cats:
+            room_rent = settings.get("cat_i_room_rent", 470)
+            license_fee = settings.get("cat_i_license_fee", 30)
+        else:
+            room_rent = settings.get("cat_ii_room_rent", 385)
+            license_fee = settings.get("cat_ii_license_fee", 15)
+        
+        total_amount = (room_rent + license_fee) * nights * num_rooms
+        total_amount += bk.get("extra_beds", 0) * 75 * nights
+        total_revenue += total_amount
+        
+        guests.append({
+            "guest_name": bk.get("guest_name", "N/A"),
+            "guest_rank": bk.get("guest_rank", "N/A"),
+            "guest_unit": bk.get("guest_unit"),
+            "service_type": bk.get("service_type"),
+            "guest_contact": bk.get("guest_contact"),
+            "check_in_date": bk["check_in_date"],
+            "check_out_date": bk["check_out_date"],
+            "nights": nights,
+            "total_amount": round(total_amount, 2)
+        })
+    
+    return {
+        "period_label": period_label,
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_guests": len(guests),
+        "total_bookings": len(bookings),
+        "total_nights": total_nights,
+        "total_revenue": round(total_revenue, 2),
+        "guests": guests
+    }
+
 # Health check endpoint for Render
 @api_router.get("/health")
 async def health_check():

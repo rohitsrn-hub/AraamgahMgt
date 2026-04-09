@@ -13,7 +13,7 @@ const MONTHS = [
   "July","August","September","October","November","December"
 ];
 
-export default function MonthlyReport({ settings }) {
+export default function MonthlySummaryTab({ settings }) {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
   const [report, setReport] = useState(null);
@@ -46,13 +46,11 @@ export default function MonthlyReport({ settings }) {
   };
 
   return (
-    <div className="space-y-6" data-testid="monthly-report-page">
+    <div className="space-y-6" data-testid="monthly-summary-tab">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-800" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            Monthly Report
-          </h1>
-          <p className="text-slate-500 mt-1">Occupancy, revenue & license fee summary</p>
+          <h2 className="text-xl font-bold text-slate-800">Monthly Summary Report</h2>
+          <p className="text-sm text-slate-500 mt-1">Occupancy, revenue & license fee summary</p>
         </div>
         <div className="flex gap-2 items-center">
           <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>

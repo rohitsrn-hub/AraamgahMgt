@@ -3,6 +3,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartBar, Bed, Users, FileText } from "@phosphor-icons/react";
 import MonthlySummaryTab from "./reports/MonthlySummaryTab";
 import RoomOccupancyTab from "./reports/RoomOccupancyTab";
+import RoomAllotmentTab from "./reports/RoomAllotmentTab";
+import GuestDetailsTab from "./reports/GuestDetailsTab";
 
 export default function ReportsPage({ settings }) {
   const [activeTab, setActiveTab] = useState("monthly");
@@ -41,8 +43,7 @@ export default function ReportsPage({ settings }) {
           
           <TabsTrigger 
             value="allotment"
-            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 py-3 px-4 rounded-lg font-semibold opacity-50 cursor-not-allowed"
-            disabled
+            className="data-[state=active]:bg-purple-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 py-3 px-4 rounded-lg font-semibold"
           >
             <FileText size={20} className="mr-2" weight="fill" />
             <span className="hidden sm:inline">Room Allotment</span>
@@ -51,8 +52,7 @@ export default function ReportsPage({ settings }) {
           
           <TabsTrigger 
             value="guests"
-            className="data-[state=active]:bg-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 py-3 px-4 rounded-lg font-semibold opacity-50 cursor-not-allowed"
-            disabled
+            className="data-[state=active]:bg-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 py-3 px-4 rounded-lg font-semibold"
           >
             <Users size={20} className="mr-2" weight="fill" />
             <span className="hidden sm:inline">Guest Details</span>
@@ -70,20 +70,14 @@ export default function ReportsPage({ settings }) {
           <RoomOccupancyTab settings={settings} />
         </TabsContent>
 
-        {/* Tab Content - Room Allotment (Coming Soon) */}
+        {/* Tab Content - Room Allotment */}
         <TabsContent value="allotment" className="mt-6 bg-purple-50/30 p-6 rounded-xl">
-          <div className="text-center py-12 text-slate-500">
-            <FileText size={48} className="mx-auto mb-4 opacity-50" />
-            <p className="font-medium">Room Allotment Report - Coming Soon</p>
-          </div>
+          <RoomAllotmentTab settings={settings} />
         </TabsContent>
 
-        {/* Tab Content - Guest Details (Coming Soon) */}
+        {/* Tab Content - Guest Details */}
         <TabsContent value="guests" className="mt-6 bg-teal-50/30 p-6 rounded-xl">
-          <div className="text-center py-12 text-slate-500">
-            <Users size={48} className="mx-auto mb-4 opacity-50" />
-            <p className="font-medium">Guest Details Report - Coming Soon</p>
-          </div>
+          <GuestDetailsTab settings={settings} />
         </TabsContent>
       </Tabs>
     </div>
