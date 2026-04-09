@@ -1266,6 +1266,51 @@ async def cancel_booking(request: CancelBookingRequest):
     
     return {"message": "Booking cancelled successfully", "booking_id": request.booking_id}
 
+@api_router.delete("/bookings/{booking_id}")
+async def delete_booking(booking_id: str):
+    """
+    Permanently delete a booking (NOT cancellation - complete removal)
+    
+    Use case: Wrong entry that needs to be completely removed from system
+    
+    This will:
+    - Delete booking from database
+    - Free up occupied rooms
+    - Remove from all analytics (automatic via database query)
+    - Remove from planner (automatic via database query)
+    - Remove associated payments/refunds (optional - kept for audit)
+    
+    WARNING: This is irreversible. Use cancellation for normal booking cancellations.
+    """
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    # Free up rooms if booking is confirmed or checked_in
+    if booking["status"] in [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]:
+        room_ids = booking.get("room_ids", [])
+        if not room_ids and booking.get("room_id"):
+            room_ids = [booking["room_id"]]
+        
+        for rid in room_ids:
+            await db.rooms.update_one(
+                {"id": rid},
+                {"$set": {"status": RoomStatus.AVAILABLE.value}}
+            )
+    
+    # Delete the booking
+    result = await db.bookings.delete_one({"id": booking_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Booking not found or already deleted")
+    
+    return {
+        "message": "Booking permanently deleted",
+        "booking_id": booking_id,
+        "booking_number": booking.get("booking_number"),
+        "guest_name": booking.get("guest_name")
+    }
+
 # ============= GUEST HISTORY =============
 
 @api_router.get("/bookings/guest-history")
