@@ -11,11 +11,18 @@
 
 ### ✨ Major Feature Updates:
 
+**🗑️ Booking Management**
+- **NEW:** Hard Delete button for permanently removing wrong entries
+- Complete removal from database, analytics, and planner
+- Confirmation dialog with detailed warnings
+- Available for all booking statuses
+
 **🏠 Enhanced Check-In Experience**
 - Room-wise guest assignment with inline family member addition
 - Per-room pricing based on dependent card validation
 - Automatic Def Civ rate application when required
 - **NEW:** Expanded family relations (Father, Mother, Brother, Sister)
+- **NEW:** Dynamic rank dropdown automatically updates from Settings
 
 **💰 Improved Financial Management**
 - Bank/UPI details captured during booking for faster refunds
@@ -720,6 +727,60 @@ Choose from:
 - Payment details
 - Status badge
 
+### Booking Actions
+
+**For Confirmed Bookings:**
+- **Check In** - Opens check-in dialog (available from check-in date)
+- **Cancel** - Opens cancellation dialog with refund calculation
+- **Delete** 🗑️ - Permanently remove wrong entry (see Hard Delete section below)
+
+**For Checked-In Bookings:**
+- **Check Out** - Complete check-out process
+- **Print Bill** - Generate checkout receipt PDF
+- **Cancel** - Cancel booking with refund calculation
+- **Delete** 🗑️ - Permanently remove wrong entry
+
+**For All Other Statuses:**
+- **Delete** 🗑️ - Permanently remove entry from system
+
+---
+
+### Hard Delete Feature (NEW 🗑️)
+
+**Purpose:** Completely remove wrong, duplicate, or test bookings from the system.
+
+**⚠️ IMPORTANT DIFFERENCE:**
+- **Cancel** = Normal booking cancellation with refund processing (guest cancelled their booking)
+- **Delete** = Permanent removal for administrative errors (wrong data entry, duplicate, test data)
+
+**When to Use Delete:**
+✅ Wrong guest name entered by mistake
+✅ Duplicate booking created accidentally
+✅ Test booking that needs complete removal
+✅ Data entry error requiring complete removal
+
+**When NOT to Use Delete:**
+❌ Guest wants to cancel → Use "Cancel" button instead
+❌ Routine booking management → Use normal status changes
+
+**How It Works:**
+
+1. **Click Delete Button** (🗑️ trash icon) in Actions column
+2. **Confirmation Dialog Shows:**
+   - Booking details (number, guest, rooms, dates)
+   - Warning: "This action cannot be undone!"
+   - What will be deleted:
+     * Booking removed from database
+     * Rooms freed for future bookings
+     * Removed from analytics and planner
+3. **Choose Action:**
+   - "Cancel" - Abort deletion
+   - "Delete Permanently" - Proceed with deletion
+4. **Result:**
+   - Booking disappears immediately
+   - Rooms become available
+   - Cannot be undone
+
 ---
 
 ## 9. Room Modification (NEW)
@@ -1004,23 +1065,46 @@ These values are used in monthly financial reports to calculate the license fee 
 
 ---
 
-### Ranks Management
+### Ranks Management (ENHANCED ✨)
+
+**Purpose:** Manage military ranks that appear in booking forms
+
+**Dynamic Rank Dropdown:**
+- Ranks configured here automatically appear in New Booking form
+- No manual updates needed
+- Changes reflect immediately after saving
 
 **Add Rank:**
-- Click "Add Rank"
-- Enter rank name
-- Click checkmark
+1. Enter rank name in text field
+2. Click "Add Rank" button or press Enter
+3. Rank appears in list below
+4. **NEW:** Rank immediately available in New Booking form dropdown
 
 **Remove Rank:**
-- Click trash icon next to rank
-- Rank removed from dropdown
+1. Click trash icon (🗑️) next to rank name
+2. Rank removed from list
+3. Removed from booking form dropdown after save
 
 **Reset to Defaults:**
+- Click "Reset to Default Ranks"
 - Restores standard military ranks
-- Confirmation required
+- Confirmation required before reset
 
 **Default Ranks:**
-Gen, Lt Gen, Maj Gen, Brig, Col, Lt Col, Maj, Capt, Lt, Sub, JCO, NCO, Def Civ
+Sep/Dfr/Swr, Nk, Hav, Sgt, PO, Nb Sub, JWO, CPO, Sub, WO, CA, SM, MCPO, Hony Lt or Eqvt, Hony Capt or Eqvt, Def Civ
+
+**How Dynamic Update Works:**
+1. Add/remove ranks in Settings page
+2. Click "Save Settings" button at bottom
+3. Navigate to Bookings → New Booking
+4. New ranks appear in "Rank" dropdown
+5. Removed ranks disappear from dropdown
+
+**Important Notes:**
+- Ranks saved in Settings persist across sessions
+- Changes take effect immediately after save
+- No restart or manual refresh needed
+- Existing bookings with old ranks remain unchanged
 
 ---
 

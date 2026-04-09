@@ -90,6 +90,8 @@ export default function Bookings() {
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [createdBookingData, setCreatedBookingData] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [bookingToDelete, setBookingToDelete] = useState(null);
 
   // Guest History
   const [showGuestHistory, setShowGuestHistory] = useState(false);
@@ -915,6 +917,26 @@ export default function Bookings() {
     }
   };
 
+  const openDeleteDialog = (booking) => {
+    setBookingToDelete(booking);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteBooking = async () => {
+    if (!bookingToDelete) return;
+    
+    try {
+      await axios.delete(`${API}/bookings/${bookingToDelete.id}`);
+      toast.success(`Booking #${bookingToDelete.booking_number} permanently deleted`);
+      setShowDeleteConfirm(false);
+      setBookingToDelete(null);
+      fetchData(); // Refresh bookings list
+    } catch (error) {
+      console.error("Delete booking error:", error);
+      toast.error(error.response?.data?.detail || "Failed to delete booking");
+    }
+  };
+
   const openCheckInDialog = (booking) => {
     setSelectedBooking(booking);
     
@@ -1368,7 +1390,7 @@ export default function Bookings() {
                       </td>
                       <td>{getStatusBadge(booking.status)}</td>
                       <td>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-wrap">
                           {booking.status === "confirmed" && (
                             <>
                               <Button size="sm" variant="outline"
@@ -1413,6 +1435,16 @@ export default function Bookings() {
                               </Button>
                             </>
                           )}
+                          {/* Delete button - available for all statuses */}
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => openDeleteDialog(booking)}
+                            className="text-slate-600 border-slate-300 hover:bg-slate-100"
+                            title="Permanently delete this booking"
+                            data-testid={`delete-btn-${booking.id}`}>
+                            <Trash size={16} />
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -3317,6 +3349,69 @@ ECSAG Shillong`;
               className="bg-emerald-500 hover:bg-emerald-600"
             >
               Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== DELETE CONFIRMATION DIALOG ===== */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent data-testid="delete-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <WarningCircle size={24} weight="fill" />
+              Permanently Delete Booking?
+            </DialogTitle>
+          </DialogHeader>
+          {bookingToDelete && (
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                <p className="font-semibold text-red-900">{bookingToDelete.guest_name}</p>
+                <p className="text-sm text-red-700">Booking #{bookingToDelete.booking_number}</p>
+                <p className="text-sm text-red-700">Rooms: {getRoomDisplay(bookingToDelete)}</p>
+                <p className="text-sm text-red-700">
+                  {format(parseISO(bookingToDelete.check_in_date), "dd MMM yyyy")} - {format(parseISO(bookingToDelete.check_out_date), "dd MMM yyyy")}
+                </p>
+              </div>
+
+              <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl">
+                <div className="flex gap-2 items-start">
+                  <WarningCircle size={20} className="text-amber-600 flex-shrink-0 mt-0.5" weight="bold" />
+                  <div className="text-sm text-amber-900">
+                    <p className="font-semibold mb-1">This action cannot be undone!</p>
+                    <ul className="list-disc list-inside space-y-1 text-amber-800">
+                      <li>Booking will be permanently removed from the database</li>
+                      <li>All associated data (payments, refunds) will be deleted</li>
+                      <li>Rooms will be freed for future bookings</li>
+                      <li>This is NOT a cancellation - use Cancel for normal cancellations</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-sm text-slate-600">
+                <strong>Use this only for:</strong> Wrong entries, duplicate bookings, or test data that needs complete removal.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setShowDeleteConfirm(false);
+                setBookingToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteBooking}
+              variant="destructive"
+              className="bg-red-600 hover:bg-red-700"
+              data-testid="confirm-delete-btn"
+            >
+              <Trash size={16} className="mr-2" />
+              Delete Permanently
             </Button>
           </DialogFooter>
         </DialogContent>
