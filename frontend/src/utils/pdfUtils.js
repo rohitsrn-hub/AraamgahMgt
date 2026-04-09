@@ -697,28 +697,42 @@ export function generateRoomAllotmentPDF(data, settings) {
   );
   y += 5;
 
-  const allotRows = (data.allotments || []).map(a => [
+  const allotRows = (data.allotments || []).map((a, idx) => [
+    idx + 1,
     a.booking_number,
-    a.guest_name,
+    a.army_number,
     a.guest_rank,
-    (a.room_numbers || []).join(", "),
-    (a.room_categories || []).join(", "),
+    a.guest_name,
+    a.guest_unit,
+    a.self_count,
+    a.wife_count,
+    a.child_count,
     a.check_in_date,
     a.check_out_date,
     a.nights,
+    a.dependents,
+    a.non_dependents,
+    (a.room_numbers || []).join(", "),
+    a.mobile_no,
     `₹${a.total_amount.toFixed(2)}`
   ]);
 
   autoTable(doc, {
     startY: y,
-    head: [["Booking No", "Guest Name", "Rank", "Room(s)", "Category", "Check-in", "Check-out", "Nights", "Amount (₹)"]],
+    head: [["S.No", "Booking", "Army No", "Rank", "Name", "Unit", "Self", "Wife", "Child", "In", "Out", "Nights", "Dep", "Non-Dep", "Room", "Mobile", "Amount"]],
     body: allotRows,
-    styles: { fontSize: 7, cellPadding: 2 },
+    styles: { fontSize: 6, cellPadding: 1.5 },
     headStyles: { fillColor: [120, 80, 160], textColor: 255 },
     alternateRowStyles: { fillColor: LIGHT_GRAY },
     columnStyles: { 
-      7: { halign: "center" },
-      8: { halign: "right", fontStyle: "bold" }
+      0: { halign: "center" },
+      6: { halign: "center", fontStyle: "bold" },
+      7: { halign: "center", fontStyle: "bold" },
+      8: { halign: "center", fontStyle: "bold" },
+      11: { halign: "center" },
+      12: { halign: "center", textColor: [34, 139, 34], fontStyle: "bold" },
+      13: { halign: "center", textColor: [255, 140, 0], fontStyle: "bold" },
+      16: { halign: "right", fontStyle: "bold" }
     },
     margin: { left: 10, right: 10 }
   });
@@ -773,33 +787,41 @@ export function generateGuestDetailsPDF(data, settings) {
   // Summary
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text(`Total Guests: ${data.total_guests || 0}  |  Total Bookings: ${data.total_bookings || 0}  |  Total Nights: ${data.total_nights || 0}  |  Revenue: ₹${(data.total_revenue || 0).toFixed(2)}`, 10, y);
+  doc.text(`Total Party Members: ${data.total_party_members || 0}  |  Total Bookings: ${data.total_bookings || 0}  |  Total Nights: ${data.total_nights || 0}  |  Revenue: ₹${(data.total_revenue || 0).toFixed(2)}`, 10, y);
   y += 6;
 
-  const guestRows = (data.guests || []).map(g => [
-    g.guest_name,
-    g.guest_rank,
-    g.guest_unit || "—",
-    g.service_type || "—",
-    g.guest_contact || "—",
-    g.check_in_date,
-    g.check_out_date,
-    g.nights,
-    `₹${g.total_amount.toFixed(2)}`
+  const guestRows = (data.guest_party_members || []).map(g => [
+    g.booking_number,
+    g.room_numbers,
+    g.rank,
+    g.name,
+    g.age,
+    g.sex,
+    g.relationship,
+    g.mobile_no,
+    typeof g.total_amount === 'number' ? `₹${g.total_amount.toFixed(2)}` : g.total_amount
   ]);
 
   autoTable(doc, {
     startY: y,
-    head: [["Guest Name", "Rank", "Unit", "Service", "Contact", "Check-in", "Check-out", "Nights", "Amount (₹)"]],
+    head: [["Booking", "Room", "Rank", "Name", "Age", "Sex", "Relation", "Mobile", "Amount (₹)"]],
     body: guestRows,
-    styles: { fontSize: 7, cellPadding: 2 },
+    styles: { fontSize: 6, cellPadding: 1.5 },
     headStyles: { fillColor: [60, 140, 130], textColor: 255 },
     alternateRowStyles: { fillColor: LIGHT_GRAY },
     columnStyles: { 
-      7: { halign: "center" },
+      4: { halign: "center" },
+      5: { halign: "center" },
       8: { halign: "right", fontStyle: "bold" }
     },
-    margin: { left: 10, right: 10 }
+    margin: { left: 10, right: 10 },
+    didParseCell: function (data) {
+      // Highlight main guest rows (Self)
+      if (data.section === 'body' && guestRows[data.row.index] && guestRows[data.row.index][6] === 'Self') {
+        data.cell.styles.fillColor = [219, 234, 254]; // Light blue for main guests
+        data.cell.styles.fontStyle = 'bold';
+      }
+    }
   });
 
   addFooter(doc);

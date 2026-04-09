@@ -178,34 +178,54 @@ export default function RoomAllotmentTab({ settings }) {
               <table className="data-table">
                 <thead>
                   <tr>
+                    <th>S.No</th>
                     <th>Booking No</th>
-                    <th>Guest Name</th>
+                    <th>Army No</th>
                     <th>Rank</th>
-                    <th>Room(s)</th>
-                    <th>Category</th>
+                    <th>Name</th>
+                    <th>Unit</th>
+                    <th>Command</th>
+                    <th className="text-center">Self</th>
+                    <th className="text-center">Wife</th>
+                    <th className="text-center">Child</th>
                     <th>Check-in</th>
                     <th>Check-out</th>
                     <th className="text-center">Nights</th>
+                    <th className="text-center">Dependents</th>
+                    <th className="text-center">Non-Dep</th>
+                    <th>Room(s)</th>
+                    <th>I Card No</th>
+                    <th>Mobile No</th>
                     <th className="text-right">Amount (₹)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(report.allotments || []).map((allot) => (
+                  {(report.allotments || []).map((allot, idx) => (
                     <tr key={allot.booking_id}>
+                      <td className="text-center">{idx + 1}</td>
                       <td className="font-medium">{allot.booking_number}</td>
-                      <td>{allot.guest_name}</td>
+                      <td>{allot.army_number}</td>
                       <td>{allot.guest_rank}</td>
-                      <td>{allot.room_numbers?.join(", ") || "N/A"}</td>
-                      <td>{allot.room_categories?.join(", ") || "N/A"}</td>
+                      <td>{allot.guest_name}</td>
+                      <td>{allot.guest_unit}</td>
+                      <td>{allot.command_hq}</td>
+                      <td className="text-center font-semibold">{allot.self_count}</td>
+                      <td className="text-center font-semibold">{allot.wife_count}</td>
+                      <td className="text-center font-semibold">{allot.child_count}</td>
                       <td>{allot.check_in_date}</td>
                       <td>{allot.check_out_date}</td>
                       <td className="text-center">{allot.nights}</td>
+                      <td className="text-center text-green-700 font-semibold">{allot.dependents}</td>
+                      <td className="text-center text-orange-700 font-semibold">{allot.non_dependents}</td>
+                      <td>{allot.room_numbers?.join(", ") || "N/A"}</td>
+                      <td className="text-sm">{allot.identity_card_no}</td>
+                      <td className="text-sm">{allot.mobile_no}</td>
                       <td className="text-right font-semibold">₹{allot.total_amount?.toFixed(2) || '0.00'}</td>
                     </tr>
                   ))}
                   {report.allotments?.length === 0 && (
                     <tr>
-                      <td colSpan="9" className="text-center text-slate-500 py-8">
+                      <td colSpan="19" className="text-center text-slate-500 py-8">
                         No allotments found for the selected period
                       </td>
                     </tr>

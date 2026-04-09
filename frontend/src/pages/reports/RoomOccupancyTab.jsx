@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { FilePdf, Bed } from "@phosphor-icons/react";
+import { FilePdf, Bed, CaretDown, CaretRight } from "@phosphor-icons/react";
 import { generateRoomOccupancyPDF } from "@/utils/pdfUtils";
 
 const MONTHS = [
@@ -23,9 +23,17 @@ export default function RoomOccupancyTab({ settings }) {
   const [customEnd, setCustomEnd] = useState("");
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [expandedRooms, setExpandedRooms] = useState({}); // Track expanded rooms
 
   const years = [];
   for (let y = 2024; y <= new Date().getFullYear() + 1; y++) years.push(y);
+
+  const toggleRoomExpand = (roomNumber) => {
+    setExpandedRooms(prev => ({
+      ...prev,
+      [roomNumber]: !prev[roomNumber]
+    }));
+  };
 
   const fetchReport = async () => {
     setLoading(true);
@@ -208,6 +216,7 @@ export default function RoomOccupancyTab({ settings }) {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th className="w-12"></th>
                       <th>Room No</th>
                       <th>Category</th>
                       <th className="text-center">Occupied Days</th>
@@ -218,24 +227,97 @@ export default function RoomOccupancyTab({ settings }) {
                   </thead>
                   <tbody>
                     {(report.room_details || []).map((room) => (
-                      <tr key={room.room_number}>
-                        <td className="font-medium">{room.room_number}</td>
-                        <td>{room.category}</td>
-                        <td className="text-center">{room.occupied_days}</td>
-                        <td className="text-center">{room.available_days}</td>
-                        <td className="text-center">
-                          <span className={`font-semibold ${
-                            room.occupancy_percent >= 75 ? 'text-emerald-600' :
-                            room.occupancy_percent >= 50 ? 'text-amber-600' :
-                            'text-slate-600'
-                          }`}>
-                            {room.occupancy_percent}%
-                          </span>
-                        </td>
-                        <td className="text-right font-semibold">₹{room.revenue?.toFixed(2) || '0.00'}</td>
-                      </tr>
+                      <>
+                        <tr key={room.room_number} className={expandedRooms[room.room_number] ? "bg-indigo-50" : ""}>
+                          <td className="text-center">
+                            {room.bookings_detail && room.bookings_detail.length > 0 && (
+                              <button
+                                onClick={() => toggleRoomExpand(room.room_number)}
+                                className="p-1 hover:bg-indigo-100 rounded"
+                                title={expandedRooms[room.room_number] ? "Collapse" : "Expand bookings"}
+                              >
+                                {expandedRooms[room.room_number] ? (
+                                  <CaretDown size={18} weight="bold" className="text-indigo-600" />
+                                ) : (
+                                  <CaretRight size={18} weight="bold" className="text-slate-500" />
+                                )}
+                              </button>
+                            )}
+                          </td>
+                          <td className="font-medium">{room.room_number}</td>
+                          <td>{room.category}</td>
+                          <td className="text-center">{room.occupied_days}</td>
+                          <td className="text-center">{room.available_days}</td>
+                          <td className="text-center">
+                            <span className={`font-semibold ${
+                              room.occupancy_percent >= 75 ? 'text-emerald-600' :
+                              room.occupancy_percent >= 50 ? 'text-amber-600' :
+                              'text-slate-600'
+                            }`}>
+                              {room.occupancy_percent}%
+                            </span>
+                          </td>
+                          <td className="text-right font-semibold">₹{room.revenue?.toFixed(2) || '0.00'}</td>
+                        </tr>
+                        
+                        {/* Expandable Booking Details */}
+                        {expandedRooms[room.room_number] && room.bookings_detail && room.bookings_detail.length > 0 && (
+                          <tr key={`${room.room_number}-details`}>
+                            <td colSpan="7" className="p-0 bg-indigo-50/50">
+                              <div className="px-6 py-4">
+                                <h4 className="text-sm font-bold text-indigo-900 mb-3">Booking Details for {room.room_number}</h4>
+                                <div className="bg-white rounded-lg border border-indigo-200 overflow-hidden">
+                                  <table className="w-full text-sm">
+                                    <thead className="bg-indigo-100">
+                                      <tr>
+                                        <th className="text-left p-2 font-semibold">Booking No</th>
+                                        <th className="text-left p-2 font-semibold">Army No</th>
+                                        <th className="text-left p-2 font-semibold">Rank</th>
+                                        <th className="text-left p-2 font-semibold">Name</th>
+                                        <th className="text-left p-2 font-semibold">Unit</th>
+                                        <th className="text-left p-2 font-semibold">Command</th>
+                                        <th className="text-center p-2 font-semibold">From</th>
+                                        <th className="text-center p-2 font-semibold">To</th>
+                                        <th className="text-center p-2 font-semibold">Days</th>
+                                        <th className="text-center p-2 font-semibold">Members</th>
+                                        <th className="text-right p-2 font-semibold">Rate/Day</th>
+                                        <th className="text-right p-2 font-semibold">Revenue</th>
+                                        <th className="text-left p-2 font-semibold">Bill No</th>
+                                        <th className="text-right p-2 font-semibold">Advance</th>
+                                        <th className="text-right p-2 font-semibold">Final Paid</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {room.bookings_detail.map((booking, idx) => (
+                                        <tr key={idx} className="border-t border-indigo-100 hover:bg-indigo-50">
+                                          <td className="p-2 font-medium">{booking.booking_number}</td>
+                                          <td className="p-2">{booking.army_number}</td>
+                                          <td className="p-2">{booking.rank}</td>
+                                          <td className="p-2">{booking.name}</td>
+                                          <td className="p-2">{booking.unit}</td>
+                                          <td className="p-2">{booking.command}</td>
+                                          <td className="p-2 text-center">{booking.from_date}</td>
+                                          <td className="p-2 text-center">{booking.to_date}</td>
+                                          <td className="p-2 text-center font-semibold">{booking.days}</td>
+                                          <td className="p-2 text-center font-semibold text-blue-600">{booking.total_members}</td>
+                                          <td className="p-2 text-right">₹{booking.rate_per_day}</td>
+                                          <td className="p-2 text-right font-bold text-emerald-700">₹{booking.total_revenue_due.toFixed(2)}</td>
+                                          <td className="p-2">{booking.bill_no}</td>
+                                          <td className="p-2 text-right">₹{booking.advance_paid.toFixed(2)}</td>
+                                          <td className="p-2 text-right">₹{booking.final_amount_paid.toFixed(2)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     ))}
                     <tr className="font-bold bg-slate-100">
+                      <td></td>
                       <td colSpan="2">TOTAL</td>
                       <td className="text-center">{report.total_occupied_days || 0}</td>
                       <td className="text-center">{report.total_available_days || 0}</td>

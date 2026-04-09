@@ -171,10 +171,11 @@ export default function GuestDetailsTab({ settings }) {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-slate-600">Total Guests</CardTitle>
+                <CardTitle className="text-sm font-medium text-slate-600">Total Party Members</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold text-teal-600">{report.total_guests || 0}</div>
+                <div className="text-3xl font-bold text-teal-600">{report.total_party_members || 0}</div>
+                <p className="text-xs text-slate-500 mt-1">Guests + Companions</p>
               </CardContent>
             </Card>
             <Card>
@@ -208,7 +209,7 @@ export default function GuestDetailsTab({ settings }) {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users size={22} className="text-teal-500" weight="fill" />
-                Guest Information — {report.period_label}
+                Guest Party Details — {report.period_label}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -216,11 +217,17 @@ export default function GuestDetailsTab({ settings }) {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Guest Name</th>
+                      <th>Booking No</th>
+                      <th>Room(s)</th>
                       <th>Rank</th>
+                      <th>Name</th>
+                      <th>Age</th>
+                      <th>Sex</th>
                       <th>Unit</th>
-                      <th>Service</th>
-                      <th>Contact</th>
+                      <th>Relationship</th>
+                      <th>Address</th>
+                      <th>Aadhaar No</th>
+                      <th>Mobile No</th>
                       <th>Check-in</th>
                       <th>Check-out</th>
                       <th className="text-center">Nights</th>
@@ -228,22 +235,38 @@ export default function GuestDetailsTab({ settings }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {(report.guests || []).map((guest, idx) => (
-                      <tr key={idx}>
-                        <td className="font-medium">{guest.guest_name}</td>
-                        <td>{guest.guest_rank}</td>
-                        <td>{guest.guest_unit || "—"}</td>
-                        <td>{guest.service_type || "—"}</td>
-                        <td>{guest.guest_contact || "—"}</td>
+                    {(report.guest_party_members || []).map((guest, idx) => (
+                      <tr key={idx} className={guest.relationship === "Self" ? "bg-blue-50 font-semibold" : ""}>
+                        <td className="font-medium">{guest.booking_number}</td>
+                        <td>{guest.room_numbers}</td>
+                        <td>{guest.rank}</td>
+                        <td>{guest.name}</td>
+                        <td className="text-center">{guest.age}</td>
+                        <td className="text-center">{guest.sex}</td>
+                        <td>{guest.unit}</td>
+                        <td>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            guest.relationship === 'Self' ? 'bg-blue-100 text-blue-700' :
+                            guest.relationship.toLowerCase().includes('w/o') || guest.relationship.toLowerCase().includes('wife') ? 'bg-pink-100 text-pink-700' :
+                            'bg-green-100 text-green-700'
+                          }`}>
+                            {guest.relationship}
+                          </span>
+                        </td>
+                        <td className="text-sm">{guest.address}</td>
+                        <td className="text-sm">{guest.aadhaar_no}</td>
+                        <td className="text-sm">{guest.mobile_no}</td>
                         <td>{guest.check_in_date}</td>
                         <td>{guest.check_out_date}</td>
                         <td className="text-center">{guest.nights}</td>
-                        <td className="text-right font-semibold">₹{guest.total_amount?.toFixed(2) || '0.00'}</td>
+                        <td className="text-right font-semibold">
+                          {typeof guest.total_amount === 'number' ? `₹${guest.total_amount.toFixed(2)}` : guest.total_amount}
+                        </td>
                       </tr>
                     ))}
-                    {report.guests?.length === 0 && (
+                    {report.guest_party_members?.length === 0 && (
                       <tr>
-                        <td colSpan="9" className="text-center text-slate-500 py-8">
+                        <td colSpan="15" className="text-center text-slate-500 py-8">
                           No guest records found for the selected period
                         </td>
                       </tr>
