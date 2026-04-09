@@ -11,6 +11,16 @@
 
 ### ✨ Major Feature Updates:
 
+**📊 Advanced Reporting System (NEW)**
+- **Tab-based interface** with 4 comprehensive reports
+- **Room Occupancy Report** with expandable booking details per room
+- **Room Allotment Register** with party composition (Self/Wife/Child/Dependents/Non-Dependents)
+- **Guest Details Register** showing ALL party members (main guest + companions)
+- **Flexible date filters:** Daily, Monthly, Quarterly, Annual, Custom range
+- **Professional PDF export** with formation signs for all reports
+- **Real-time data** pulled from live database
+- **Color-coded metrics** for easy analysis
+
 **💾 Data Protection & Backup (NEW)**
 - **Automatic daily backups** at 02:00 AM IST
 - Manual backup options (Full & Incremental)
@@ -896,38 +906,342 @@ Administrators can add categories like VIP Suite, Standard, Economy, etc.
 
 ---
 
-## 12. Reports
+## 12. Reports (REDESIGNED 📊)
 
-### Available Reports
+E-ARMS now features a **comprehensive tab-based reporting system** that mirrors official military registers. All reports include flexible date filtering and professional PDF export with formation signs.
 
-**Occupancy Report:**
-- Date range selection
-- Room-wise occupancy
-- Category-wise breakdown
-- Occupancy percentage
+---
 
-**Revenue Report:**
-- Date range selection
-- Total revenue
-- Payment mode breakdown
-- Per-category revenue
+### 🎛️ **Report Navigation**
 
-**Guest Report:**
-- List of guests for date range
-- Rank-wise distribution
-- Unit-wise analysis
+Access via: **Sidebar → Reports**
 
-**Monthly Summary:**
-- Total bookings
-- Total revenue
-- Average occupancy
-- Peak days
+**Four Report Tabs:**
+1. 📈 **Monthly Summary** - Overall occupancy and financial analysis
+2. 🏨 **Room Occupancy** - Room-wise utilization with expandable booking details
+3. 📋 **Room Allotment** - Comprehensive booking register
+4. 👥 **Guest Details** - Complete party member register
 
-### Exporting Reports
+---
 
-- PDF format
-- Excel format (if available)
-- Print directly
+### 📈 **Tab 1: Monthly Summary Report**
+
+**Purpose:** Monthly command-wise occupancy and financial summary for administrative reporting
+
+#### **Features:**
+- **Month/Year Selection:** Dropdown selectors for any month and year
+- **Command-wise Breakdown:** Total guests and occupied days by Command/Service
+- **License Fee Calculation:** Automatic calculation for JCO (Cat I), OR (Cat II), and Def Civ
+- **Financial Summary:**
+  - Room rent totals by category
+  - License fee totals
+  - Extra bed charges
+  - Grand total revenue
+  - Advance received/adjusted/balance
+  - No-show tracking
+
+#### **Key Metrics:**
+- Total rooms and days in month
+- Total booked room-days
+- Average occupancy percentage
+- Total guests served
+- Complete financial breakdown
+
+#### **PDF Export:**
+- Click **"Print PDF"** button (red)
+- A4 portrait format
+- Formation signs on top corners
+- Professional layout for official records
+
+**Use Case:** Monthly reporting to higher authorities, financial reconciliation
+
+---
+
+### 🏨 **Tab 2: Room Occupancy Report (NEW)**
+
+**Purpose:** Detailed room-wise occupancy analysis with individual booking breakdowns
+
+#### **Date Filters:**
+- **Daily:** Today's occupancy
+- **Monthly:** Select month and year
+- **Quarterly:** Q1/Q2/Q3/Q4 of selected year
+- **Annual:** Full year view
+- **Custom Range:** Specify start and end dates
+
+#### **Summary Cards Display:**
+- Total Rooms (e.g., 15)
+- Average Occupancy % (e.g., 1.33%)
+- Total Bookings (e.g., 11)
+
+#### **Room-wise Occupancy Table:**
+
+**Main Table Columns:**
+- **🔽 Expand Icon** - Click to show booking details
+- **Room No** - Room number (e.g., C2-10)
+- **Category** - Cat I, Cat II, etc.
+- **Occupied Days** - Total days occupied in period
+- **Available Days** - Days available
+- **Occupancy %** - Utilization percentage (color-coded: Green ≥75%, Amber ≥50%, Grey <50%)
+- **Revenue (₹)** - Total revenue generated
+
+#### **Expandable Booking Details:**
+
+Click the **dropdown arrow (▶)** next to any room to view:
+
+**Detailed Booking Information:**
+- **Booking No** - Unique booking reference
+- **Army No** - Service number
+- **Rank** - Guest rank
+- **Name** - Main guest name
+- **Unit** - Military unit
+- **Command** - Command HQ
+- **From Date** - Check-in date
+- **To Date** - Check-out date
+- **Days** - Number of nights
+- **Members** - Total party size (highlighted in blue)
+- **Rate/Day** - Daily rate charged
+- **Revenue** - Days × Rate (highlighted in green)
+- **Bill No** - Billing reference
+- **Advance Paid** - Advance payment amount
+- **Final Amount Paid** - Amount paid at checkout
+
+**Visual Design:**
+- Room rows: Light blue background, bold text
+- Expanded section: Indigo background with nested table
+- Arrows change: ▶ (collapsed) to ▼ (expanded)
+
+#### **PDF Export:**
+- Click **"Print PDF"** button (red)
+- A4 portrait format with formation signs
+- **Includes expanded booking details for ALL rooms**
+- Each room shows:
+  1. Room summary table with header
+  2. Booking details table below (indented) with header
+  3. Complete financial breakdown per booking
+
+**Use Case:** Room utilization tracking, maintenance planning, revenue analysis per room
+
+---
+
+### 📋 **Tab 3: Room Allotment Report (ENHANCED)**
+
+**Purpose:** Complete booking register matching the official Room Allotment Register format
+
+#### **Date Filters:**
+Same as Room Occupancy (Daily, Monthly, Quarterly, Annual, Custom Range)
+
+#### **Comprehensive Table Columns:**
+
+| Column | Description |
+|--------|-------------|
+| **S.No** | Serial number |
+| **Booking No** | Unique booking reference |
+| **Army No** | Service number |
+| **Rank** | Guest rank |
+| **Name** | Main guest name |
+| **Unit** | Military unit |
+| **Command** | Command HQ |
+| **Self** | Count (always 1 - main guest) |
+| **Wife** | Wife count (0 or 1) |
+| **Child** | Number of children |
+| **Check-in** | Arrival date |
+| **Check-out** | Departure date |
+| **Nights** | Number of nights |
+| **Dependents** | Companions WITH dependent ID (green) |
+| **Non-Dep** | Companions WITHOUT dependent ID (orange) |
+| **Room(s)** | Allotted room numbers |
+| **I Card No** | Identity/Aadhaar number |
+| **Mobile No** | Contact number |
+| **Amount (₹)** | Total booking amount |
+
+#### **Smart Calculations:**
+- **Self, Wife, Child:** Counted from booking party composition
+- **Dependents:** Family members with valid `dependent_id` and dependent card
+- **Non-Dependents:** Family members without valid dependent credentials
+- **Color Coding:**
+  - Dependents: Green (valid military dependents)
+  - Non-Dependents: Orange (civilians or no ID)
+
+#### **PDF Export:**
+- Click **"Print PDF"** button (red)
+- A4 landscape format (fits all columns)
+- Formation signs on top corners
+- Compact font for maximum data visibility
+- Color-coded Dependents/Non-Dependents columns
+
+**Use Case:** Official booking register, dependent verification, occupancy tracking
+
+---
+
+### 👥 **Tab 4: Guest Details Report (NEW)**
+
+**Purpose:** Complete party member register showing ALL individuals (main guest + companions)
+
+#### **Date Filters:**
+Same as other reports (Daily, Monthly, Quarterly, Annual, Custom Range)
+
+#### **Summary Cards Display:**
+- **Total Party Members** (e.g., 23) - Main guests + all companions
+- **Total Bookings** (e.g., 13)
+- **Total Nights** (e.g., 34)
+- **Revenue (₹)** (e.g., ₹29,550.00)
+
+#### **Guest Party Details Table:**
+
+**Complete Information for Each Person:**
+
+| Column | Description |
+|--------|-------------|
+| **Booking No** | Reference number |
+| **Room(s)** | Allotted rooms |
+| **Rank** | Rank (for main guest only, "—" for family) |
+| **Name** | Individual's name |
+| **Age** | Age in years |
+| **Sex** | M/F |
+| **Unit** | Military unit (main guest only) |
+| **Relationship** | Self / W/O / Son / Daughter / Other |
+| **Address** | Residential address |
+| **Aadhaar No** | Aadhaar number (main guest only) |
+| **Mobile No** | Contact number |
+| **Check-in** | Arrival date |
+| **Check-out** | Departure date |
+| **Nights** | Stay duration |
+| **Amount (₹)** | Total amount (shown for main guest, "—" for family) |
+
+#### **Visual Highlights:**
+- **Main Guest Rows (Self):**
+  - Light blue background
+  - Bold text
+  - Blue "Self" relationship badge
+- **Wife Rows:**
+  - Pink relationship badge
+- **Children/Others:**
+  - Green relationship badge
+
+#### **Data Structure:**
+- Each booking creates **multiple rows**:
+  - 1 row for main guest (Relationship: "Self")
+  - 1 row for each family member (Relationship: W/O, Son, Daughter, etc.)
+- **Example:** Booking with 1 main guest + wife + 2 children = 4 rows total
+
+#### **PDF Export:**
+- Click **"Print PDF"** button (red)
+- A4 landscape format
+- Formation signs on top corners
+- Main guest rows highlighted in light blue
+- Compact layout for multiple columns
+
+**Use Case:** Guest register maintenance, demographic analysis, security records, visitor tracking
+
+---
+
+### 🎯 **Common Features Across All Reports**
+
+#### **Date Filter Options:**
+
+1. **Daily**
+   - Automatically set to today
+   - View current day's data
+
+2. **Monthly**
+   - Select Month (dropdown: January - December)
+   - Select Year (dropdown: 2024 - current + 1 year)
+   - Default: Current month and year
+
+3. **Quarterly**
+   - Select Quarter: Q1 (Jan-Mar), Q2 (Apr-Jun), Q3 (Jul-Sep), Q4 (Oct-Dec)
+   - Select Year
+   - Default: Current quarter based on selected month
+
+4. **Annual**
+   - Select Year only
+   - Shows full year data (Jan 1 - Dec 31)
+
+5. **Custom Range**
+   - Start Date: Date picker
+   - End Date: Date picker
+   - Click **"Apply"** to fetch data
+   - Validation: End date must be ≥ Start date
+
+#### **PDF Generation Features:**
+
+**All PDFs Include:**
+- ✅ **Formation Signs:** Eastern Command and 101 Area logos on top corners
+- ✅ **Professional Layout:** Optimized for A4 printing
+- ✅ **Report Header:** Report name and period label
+- ✅ **Color Coding:** Key metrics highlighted (blue, green, orange)
+- ✅ **Auto-pagination:** Splits across pages if needed
+- ✅ **Footer:** Page numbers and timestamps
+
+**PDF File Naming:**
+- `ECSAG_monthly_summary_[Period].pdf`
+- `ECSAG_room_occupancy_[Period].pdf`
+- `ECSAG_room_allotment_[Period].pdf`
+- `ECSAG_guest_details_[Period].pdf`
+
+**Download Location:** Browser's default download folder
+
+---
+
+### 📊 **Report Usage Guide**
+
+#### **Scenario 1: Monthly Administrative Reporting**
+1. Go to **Monthly Summary** tab
+2. Select month and year
+3. Review command-wise breakdown and financials
+4. Click **"Print PDF"**
+5. Submit PDF to higher authorities
+
+#### **Scenario 2: Room Maintenance Planning**
+1. Go to **Room Occupancy** tab
+2. Select **"Quarterly"** filter
+3. Review occupancy percentages
+4. Identify underutilized rooms
+5. Click room **dropdown arrows** to see booking patterns
+6. Export PDF for maintenance scheduling
+
+#### **Scenario 3: Dependent Verification**
+1. Go to **Room Allotment** tab
+2. Select desired period
+3. Check **Dependents** and **Non-Dep** columns
+4. Green numbers = Valid dependent IDs
+5. Orange numbers = Need verification
+6. Export PDF for admin review
+
+#### **Scenario 4: Guest Register Audit**
+1. Go to **Guest Details** tab
+2. Select **"Annual"** filter
+3. Review all party members for the year
+4. Check relationship badges (Self, W/O, Son, Daughter)
+5. Verify age, sex, and contact details
+6. Export complete register as PDF
+
+---
+
+### 🔧 **Tips & Best Practices**
+
+**Filter Selection:**
+- Use **Monthly** for routine monthly reports
+- Use **Quarterly** for trend analysis
+- Use **Annual** for year-end summaries
+- Use **Custom Range** for specific audit periods
+
+**PDF Export:**
+- Always review data before exporting
+- PDFs are formatted for official records
+- Formation signs ensure authenticity
+- Keep PDF archives for audit trail
+
+**Data Accuracy:**
+- Reports pull real-time data from database
+- Ensure bookings have complete information (Army No, Aadhaar, Mobile)
+- Validate dependent IDs during check-in for accurate Dependents count
+- Update ages and relationships for accurate Guest Details
+
+**Performance:**
+- Large date ranges may take longer to load
+- Use specific filters for faster results
+- Custom range limited to reasonable periods (suggest < 1 year)
 
 ---
 
@@ -1439,6 +1753,20 @@ Settings → Room Categories = Main configuration
 ## Version History
 
 **v2.0 (April 2026)**
+- ✨ **NEW:** Advanced tab-based reporting system with 4 comprehensive reports
+- ✨ **NEW:** Room Occupancy Report with expandable booking details per room
+- ✨ **NEW:** Room Allotment Register with party composition tracking (Self/Wife/Child/Dependents/Non-Dependents)
+- ✨ **NEW:** Guest Details Register showing ALL party members (main guest + all companions)
+- ✨ **NEW:** Flexible date filters (Daily, Monthly, Quarterly, Annual, Custom range) across all reports
+- ✨ **NEW:** Professional PDF export with formation signs for all 4 reports
+- ✨ **NEW:** Real-time financial breakdown in Room Occupancy (Rate/Day × Days, Advance, Final Payment)
+- ✨ **NEW:** Color-coded relationship badges in Guest Details (Self=Blue, Wife=Pink, Children=Green)
+- ✨ **NEW:** Smart dependent tracking (Dependents with ID in green, Non-Dependents in orange)
+- ✨ **NEW:** Complete party member register with Age, Sex, Address, Aadhaar, Mobile columns
+- ✨ **NEW:** Automatic daily backups at 02:00 AM IST with incremental strategy
+- ✨ **NEW:** Manual backup options (Full & Incremental) with restore functionality
+- ✨ **NEW:** 90-day backup retention with automatic cleanup
+- ✨ **NEW:** Backup dashboard with status cards and history
 - ✨ **NEW:** Booking selection modals for context-aware check-in/check-out
 - ✨ **NEW:** Enhanced payment details at check-out with auto-population
 - ✨ **NEW:** Month/year navigation in Room Planner (dropdown + prev/next buttons)
