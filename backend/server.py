@@ -11,6 +11,9 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 
+# Import backup services
+from services import backup_service, restore_service, scheduler_service
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -2248,6 +2251,189 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============= STARTUP & SHUTDOWN EVENTS =============
+@app.on_event("startup")
+async def startup_event():
+    """Initialize scheduler and check for missed backups on startup"""
+    try:
+        # Initialize backup scheduler
+        scheduler_service.init_scheduler(db)
+        logger.info("Backup scheduler initialized")
+        
+        # Check for missed backups
+        missed_check = await scheduler_service.check_missed_backups(db)
+        if missed_check.get("missed"):
+            logger.warning(f"Backup warning: {missed_check.get('message')}")
+    except Exception as e:
+        logger.error(f"Startup initialization error: {str(e)}")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# ============= BACKUP & RESTORE APIs =============
+
+@api_router.post("/backups/manual/full")
+async def trigger_full_backup():
+    """Manually trigger a full backup"""
+    try:
+        metadata = await backup_service.perform_full_backup(db)
+        return {
+            "success": True,
+            "message": "Full backup completed successfully",
+            "backup": metadata
+        }
+    except Exception as e:
+        logger.error(f"Manual full backup failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+
+@api_router.post("/backups/manual/incremental")
+async def trigger_incremental_backup():
+    """Manually trigger an incremental backup"""
+    try:
+        metadata = await backup_service.perform_incremental_backup(db)
+        return {
+            "success": True,
+            "message": "Incremental backup completed successfully",
+            "backup": metadata
+        }
+    except Exception as e:
+        logger.error(f"Manual incremental backup failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+
+@api_router.get("/backups/status")
+async def get_backup_status():
+    """Get current backup status and statistics"""
+    try:
+        # Get last backup
+        last_backup = await backup_service.get_last_backup_metadata(db)
+        
+        # Get total backup count
+        total_backups = await db.backup_metadata.count_documents({"status": "SUCCESS"})
+        
+        # Get first backup date
+        first_backup = await db.backup_metadata.find_one(
+            {"status": "SUCCESS"},
+            {"_id": 0, "timestamp": 1},
+            sort=[("timestamp", 1)]
+        )
+        
+        # Check for missed backups
+        missed_check = await scheduler_service.check_missed_backups(db)
+        
+        # Get scheduler status
+        scheduler_status = scheduler_service.get_scheduler_status()
+        
+        return {
+            "last_backup": last_backup,
+            "total_backups": total_backups,
+            "first_backup_date": first_backup.get("timestamp") if first_backup else None,
+            "missed_backup_warning": missed_check,
+            "scheduler": scheduler_status
+        }
+    except Exception as e:
+        logger.error(f"Error fetching backup status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/backups/history")
+async def get_backup_history(limit: int = Query(50, ge=1, le=100)):
+    """Get backup history"""
+    try:
+        history = await backup_service.get_backup_history(db, limit=limit)
+        return {
+            "backups": history,
+            "count": len(history)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching backup history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/backups/restore/full/{backup_id}")
+async def restore_full_backup(backup_id: str):
+    """Restore a specific backup (MERGE strategy)"""
+    try:
+        result = await restore_service.restore_full(backup_id, db)
+        return {
+            "success": True,
+            "message": "Restore completed successfully",
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Restore failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+
+@api_router.post("/backups/restore/last")
+async def restore_last_backup():
+    """Restore the most recent successful backup"""
+    try:
+        result = await restore_service.restore_last_backup(db)
+        return {
+            "success": True,
+            "message": "Last backup restored successfully",
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Restore failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+
+class DateRangeRestore(BaseModel):
+    start_date: str
+    end_date: str
+
+@api_router.post("/backups/restore/range")
+async def restore_date_range(request: DateRangeRestore):
+    """Restore all backups within a date range"""
+    try:
+        start = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
+        end = datetime.fromisoformat(request.end_date.replace('Z', '+00:00'))
+        
+        result = await restore_service.restore_by_date_range(start, end, db)
+        return {
+            "success": True,
+            "message": "Date range restore completed",
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Date range restore failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+
+class ScheduleUpdate(BaseModel):
+    hour: int = Field(..., ge=0, le=23)
+    minute: int = Field(..., ge=0, le=59)
+
+@api_router.put("/backups/schedule")
+async def update_backup_schedule(request: ScheduleUpdate):
+    """Update scheduled backup time"""
+    try:
+        result = await scheduler_service.update_backup_schedule(
+            request.hour,
+            request.minute,
+            db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to update schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/backups/restore-history")
+async def get_restore_history(limit: int = Query(20, ge=1, le=50)):
+    """Get restore operation history"""
+    try:
+        history = await restore_service.get_restore_history(db, limit=limit)
+        return {
+            "restores": history,
+            "count": len(history)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching restore history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
