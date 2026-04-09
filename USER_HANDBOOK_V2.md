@@ -11,6 +11,14 @@
 
 ### ✨ Major Feature Updates:
 
+**💾 Data Protection & Backup (NEW)**
+- **Automatic daily backups** at 02:00 AM IST
+- Manual backup options (Full & Incremental)
+- Flexible restore with MERGE strategy
+- 90-day retention with automatic cleanup
+- Backup status dashboard and history
+- Warning alerts for missed backups
+
 **🗑️ Booking Management**
 - **NEW:** Hard Delete button for permanently removing wrong entries
 - Complete removal from database, analytics, and planner
@@ -1456,6 +1464,366 @@ Settings → Room Categories = Main configuration
 - Basic booking and check-in/out
 - Room management
 - Reports and feedback
+
+---
+
+## 16. Backup & Restore System (NEW 💾)
+
+### Purpose
+Protect your booking data with automated backups and flexible restore options. The system ensures data safety with minimal storage overhead using incremental backups.
+
+---
+
+### 📊 **Backup Dashboard Overview**
+
+Access via: **Sidebar → Backup & Restore**
+
+The dashboard provides:
+
+#### **A. Last Backup Status Card**
+- **Type**: FULL or INCREMENTAL
+- **Timestamp**: When backup was taken (IST)
+- **Records**: Total records backed up
+- **Size**: Backup file size in MB
+- **Duration**: Time taken to complete
+
+#### **B. Total Backups Card**
+- Total number of successful backups
+- First backup date
+- Complete backup history
+
+#### **C. Next Scheduled Card**
+- Next scheduled backup time (IST)
+- Scheduler status (Active/Inactive)
+
+---
+
+### 🔄 **Automatic Backup (Scheduled)**
+
+**Default Schedule:** Daily at **02:00 AM IST**
+
+#### **How It Works:**
+1. System automatically runs incremental backup every day at 02:00 AM
+2. If no prior backup exists, performs full backup
+3. Only backs up **new or modified records** since last backup
+4. Stores backup in `/app/backups/` directory
+5. Saves metadata to database for tracking
+
+#### **What Gets Backed Up:**
+- ✅ Bookings (all statuses)
+- ✅ Rooms configuration
+- ✅ Settings
+- ✅ Staff records
+- ✅ Refunds
+- ✅ App settings
+
+#### **Backup Types:**
+
+**FULL Backup:**
+- Backs up **entire dataset**
+- Creates baseline backup
+- Larger file size
+- Use for first backup or after major changes
+
+**INCREMENTAL Backup:**
+- Backs up **only new/modified data** since last backup
+- Smaller file size (90% less storage)
+- Faster backup time
+- Default for automatic scheduled backups
+
+#### **Retention Policy:**
+- Backups kept for **90 days (3 months)**
+- Automatic cleanup runs **every Sunday at 03:00 AM IST**
+- Old backups deleted automatically
+- No manual cleanup needed
+
+---
+
+### 🖱️ **Manual Backup Options**
+
+Navigate to **Backup & Restore** page → **Manual Backup** section
+
+#### **Trigger Full Backup:**
+1. Click **"Full Backup"** button (blue)
+2. Wait for backup to complete (progress indicator shown)
+3. Success toast notification appears
+4. Backup appears in history table
+
+**When to Use:**
+- ✅ Before major system changes
+- ✅ Before restoring data
+- ✅ First backup of the system
+- ✅ After bulk data import
+
+#### **Trigger Incremental Backup:**
+1. Click **"Incremental Backup"** button (purple)
+2. System backs up only new data since last backup
+3. Success notification shown
+4. Faster than full backup
+
+**When to Use:**
+- ✅ Quick daily backups
+- ✅ After adding several bookings
+- ✅ Routine data protection
+- ✅ When automatic backup was missed
+
+---
+
+### 📥 **Restore Functionality**
+
+Navigate to **Backup & Restore** page → **Restore Data** section
+
+#### **Restore Strategy: MERGE**
+
+The system uses **MERGE** strategy for all restores:
+- ✅ **Keeps newer existing records** (never overwrites with older data)
+- ✅ **Adds missing records** from backup
+- ✅ **Skips older records** if newer version exists
+- ✅ **Preserves data integrity**
+
+**Example:**
+- Backup has booking updated at 10:00 AM
+- Current database has same booking updated at 11:00 AM
+- **Result:** 11:00 AM version kept (newer), backup version skipped
+
+#### **Three Restore Options:**
+
+**1. Last Backup Restore** 🕐
+- Restores most recent successful backup
+- Quickest restore option
+- Use for recent data recovery
+
+**Steps:**
+1. Click **"Last Backup"** button (green)
+2. Confirmation dialog appears
+3. Review backup details
+4. Click **"Restore"**
+5. Wait for completion
+6. Success notification shown
+
+**2. Select Backup Restore** 📋
+- Choose specific backup from history
+- Restore particular point in time
+- View backup details before restoring
+
+**Steps:**
+1. Click **"Select Backup"** button (blue)
+2. Dropdown shows backup history
+3. Select desired backup by date/time
+4. Review backup type and record count
+5. Click **"Restore"**
+6. Wait for completion
+
+**3. Date Range Restore** 📅
+- Restore all backups between two dates
+- Useful for recovering specific time period
+- Combines multiple backups
+
+**Steps:**
+1. Click **"Date Range"** button (purple)
+2. Select **Start Date** (date picker)
+3. Select **End Date** (date picker)
+4. Click **"Restore"**
+5. System restores all backups in range chronologically
+6. Completion notification shown
+
+#### **⚠️ Important Restore Notes:**
+- Restore does **not delete** existing data
+- Only **adds or updates** based on MERGE logic
+- Safe to run multiple times
+- No data loss risk
+- Can take several minutes for large datasets
+
+---
+
+### ⏰ **Schedule Configuration**
+
+Navigate to **Backup & Restore** page → **Backup Schedule** section
+
+#### **Modify Backup Time:**
+1. **Hour (IST)**: Enter hour (0-23)
+   - Example: 2 for 02:00 AM, 14 for 02:00 PM
+2. **Minute**: Enter minute (0-59)
+   - Example: 30 for :30 minutes
+3. Click **"Update Schedule"** button
+4. Success confirmation shown
+5. New schedule saved to database
+
+#### **Current Schedule Display:**
+- Shows active schedule: "Daily at HH:MM IST"
+- Next scheduled run time visible in dashboard
+
+#### **Best Practices:**
+- ✅ Schedule during **low-usage hours** (night)
+- ✅ Avoid peak booking hours
+- ✅ Default 02:00 AM IST recommended
+- ✅ Ensure system is running at scheduled time
+
+---
+
+### ⚠️ **Failure Handling & Warnings**
+
+#### **Missed Backup Detection:**
+
+If scheduled backup fails or is skipped, system shows:
+
+**1. Warning Modal on Startup** 🚨
+- Appears immediately when you open the app
+- Shows amber warning icon
+- Message: "Scheduled backup was not completed"
+- Details: Hours since last backup
+
+**Modal Options:**
+- **"Backup Now"** - Triggers immediate incremental backup
+- **"Remind Me Later"** - Dismisses modal (banner remains)
+
+**2. Persistent Warning Banner** ⚠️
+- **Amber banner** at top of all pages
+- Stays visible until backup completed
+- Cannot be permanently dismissed
+- Shows message: "⚠️ Backup Required: [details]"
+
+**Banner Actions:**
+- **"Backup Now"** button - Triggers backup
+- **"✕"** button - Temporarily hides banner (reopens on refresh)
+
+#### **Why Backup Is Important:**
+- ✅ Protects against data loss
+- ✅ Enables recovery from errors
+- ✅ Maintains 90-day data retention
+- ✅ Ensures business continuity
+- ✅ Required for system reliability
+
+---
+
+### 📜 **Backup History**
+
+Located at bottom of **Backup & Restore** page
+
+#### **History Table Columns:**
+- **Timestamp**: When backup was taken (DD MMM YYYY, HH:MM)
+- **Type**: FULL or INCREMENTAL badge
+- **Records**: Total records backed up
+- **Size**: File size in MB
+- **Duration**: Time taken (seconds)
+- **Status**: Success (green) or Failed (red)
+
+#### **Using History:**
+- View all past backups
+- Identify successful backups for restore
+- Monitor backup sizes and durations
+- Track backup frequency
+
+---
+
+### 🔧 **Troubleshooting**
+
+#### **Problem: Backup Takes Too Long**
+**Solution:**
+- Use **Incremental Backup** instead of Full
+- Incremental is 90% faster
+- Scheduled backups use incremental by default
+
+#### **Problem: Warning Banner Won't Go Away**
+**Solution:**
+- Click **"Backup Now"** button
+- Wait for backup to complete
+- Banner disappears after successful backup
+- Don't just dismiss - actually run backup
+
+#### **Problem: Restore Didn't Work**
+**Check:**
+- ✅ Restore completed successfully? (check notification)
+- ✅ Using MERGE strategy (doesn't overwrite newer data)
+- ✅ Check specific records manually
+- ✅ View restore history for details
+
+#### **Problem: Backup Files Taking Too Much Space**
+**Solution:**
+- Retention is 90 days (automatic cleanup)
+- Old backups deleted every Sunday
+- Check `/app/backups/` directory
+- Cleanup runs at 03:00 AM IST Sundays
+
+#### **Problem: Scheduled Backup Not Running**
+**Check:**
+- ✅ System must be running at 02:00 AM IST
+- ✅ Check scheduler status in dashboard
+- ✅ Use manual backup if scheduled missed
+- ✅ Verify schedule time is correct
+
+---
+
+### 💡 **Best Practices**
+
+#### **DO:**
+- ✅ **Run manual full backup** before major changes
+- ✅ **Verify last backup** before modifying data
+- ✅ **Test restore** periodically (use date range for old data)
+- ✅ **Keep system running** during scheduled time
+- ✅ **Monitor backup status** regularly
+- ✅ **Respond to warnings** immediately
+
+#### **DON'T:**
+- ❌ Ignore backup warning banners
+- ❌ Delete files from `/app/backups/` manually
+- ❌ Rely only on automatic backups
+- ❌ Skip testing restore functionality
+- ❌ Change schedule to overlap with peak hours
+
+---
+
+### 📊 **Backup Workflow Example**
+
+**Daily Operation:**
+```
+02:00 AM IST → Automatic incremental backup runs
+02:00:30 AM  → Backup completes (98 records, 0.5 MB)
+              → Metadata saved to database
+              → Next backup scheduled for tomorrow 02:00 AM
+```
+
+**Manual Full Backup:**
+```
+User clicks "Full Backup"
+→ System backs up all 450 records
+→ Creates backup_full_20260409_143022.json (2.3 MB)
+→ Success toast: "Full backup completed successfully"
+→ Backup appears in history table
+```
+
+**Restore Last Backup:**
+```
+User clicks "Last Backup" restore
+→ Loads backup_incr_20260409_020015.json
+→ Applies MERGE strategy:
+  - 95 records added (missing from current DB)
+  - 3 records updated (backup newer)
+  - 50 records skipped (current DB newer)
+→ Success: "Restore completed successfully"
+```
+
+---
+
+### 🎯 **Key Takeaways**
+
+1. **Automatic Protection**: Daily backups at 02:00 AM IST
+2. **Incremental by Default**: 90% less storage, faster backups
+3. **Flexible Restore**: Last backup, specific backup, or date range
+4. **MERGE Strategy**: Never lose newer data
+5. **90-Day Retention**: Automatic cleanup, no maintenance needed
+6. **Warning System**: Modal + banner ensure you never miss backups
+7. **Manual Override**: Full control when needed
+
+---
+
+### 📞 **Need Help?**
+
+- Check **Backup History** for past backup status
+- Review **Backup Status Dashboard** for current state
+- Test **Restore** with old date range (non-destructive)
+- Trigger **Manual Backup** if automatic missed
+- Monitor **Warning Banners** for alerts
 
 ---
 
