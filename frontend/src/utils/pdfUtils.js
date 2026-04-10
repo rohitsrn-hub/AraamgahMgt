@@ -33,7 +33,7 @@ function addFooter(doc) {
   doc.setFontSize(7);
   doc.setTextColor(120, 120, 120);
   doc.text(`Generated: ${format(new Date(), "dd MMM yyyy HH:mm")}`, 10, pageH - 7);
-  doc.text("E-ARMS — Araamgah Management System", pageW / 2, pageH - 7, { align: "center" });
+  doc.text("SARAI — Shillong Aramgah Room Automation Interface", pageW / 2, pageH - 7, { align: "center" });
   doc.text(`Page ${doc.internal.getCurrentPageInfo().pageNumber}`, pageW - 10, pageH - 7, { align: "right" });
   doc.setTextColor(0, 0, 0);
 }
@@ -45,7 +45,7 @@ export function generateCheckoutReceipt(booking, settings) {
   let y = addHeader(doc, "CHECKOUT RECEIPT", `Booking # ${booking.booking_number}`);
   y += 3;
 
-  const isDefCiv = (booking.guest_rank || "").toLowerCase() === "def civ";
+  const isNonOrg = !(booking.is_org);
   const cats = booking.room_categories || [];
   const catLabel = [...new Set(cats)].join(", ") || "N/A";
   const roomNums = (booking.room_numbers || []).join(", ") || booking.room_number || "N/A";
@@ -55,7 +55,7 @@ export function generateCheckoutReceipt(booking, settings) {
 
   // Guest info
   doc.setFillColor(...LIGHT_GRAY);
-  doc.rect(10, y, W - 20, 22, "F");
+  doc.rect(10, y, W - 20, 18, "F");
   doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
   doc.text("GUEST DETAILS", 13, y + 5);
@@ -63,11 +63,9 @@ export function generateCheckoutReceipt(booking, settings) {
   doc.setFontSize(8);
   const g = booking;
   doc.text(`Name: ${g.guest_name || "—"}`, 13, y + 11);
-  doc.text(`Rank: ${g.guest_rank || "—"}  |  Unit: ${g.guest_unit || "—"}`, 13, y + 16);
-  doc.text(`Service: ${g.service_type || "—"}${g.command_hq ? "  Cmd: " + g.command_hq : ""}`, W / 2 + 5, y + 11);
-  doc.text(`Army No: ${g.army_number || "—"}  |  Mob: ${g.guest_contact || "—"}`, W / 2 + 5, y + 16);
-  doc.text(`Service Status: ${g.guest_service_status || "—"}`, 13, y + 21);
-  y += 26;
+  doc.text(`Type: ${g.is_org ? "Organization" : "Non-Organization"}${g.org_color ? "  |  Color: " + g.org_color : ""}`, 13, y + 16);
+  doc.text(`Mobile: ${g.guest_contact || "—"}`, W / 2 + 5, y + 11);
+  y += 22;
 
   // Stay details
   doc.setFillColor(...LIGHT_GRAY);
@@ -283,9 +281,9 @@ export function generateMonthlyReportPDF(data, settings) {
 
   const lf = data.license_fees || {};
   const lfRows = [
-    ["JCO (Cat I Rooms)", `${lf.jco?.days || 0} days × ₹${lf.jco?.rate || 30}`, `₹${(lf.jco?.total || 0).toFixed(2)}`],
-    ["OR (Cat II Rooms)", `${lf.or?.days || 0} days × ₹${lf.or?.rate || 15}`, `₹${(lf.or?.total || 0).toFixed(2)}`],
-    ["Def Civ", `${lf.def_civ?.days || 0} days × ₹${lf.def_civ?.rate || 30}`, `₹${(lf.def_civ?.total || 0).toFixed(2)}`],
+    ["Org (Cat I)", `${lf.org_cat_i?.days || 0} days × ₹${lf.org_cat_i?.rate || 30}`, `₹${(lf.org_cat_i?.total || 0).toFixed(2)}`],
+    ["Org (Cat II)", `${lf.org_cat_ii?.days || 0} days × ₹${lf.org_cat_ii?.rate || 15}`, `₹${(lf.org_cat_ii?.total || 0).toFixed(2)}`],
+    ["Non-Org", `${lf.non_org?.days || 0} days × ₹${lf.non_org?.rate || 30}`, `₹${(lf.non_org?.total || 0).toFixed(2)}`],
     ["TOTAL LICENSE FEE", "", `₹${(data.total_license_fee || 0).toFixed(2)}`],
   ];
 
@@ -310,9 +308,9 @@ export function generateMonthlyReportPDF(data, settings) {
 
   const r = data.rates || {};
   const summaryRows = [
-    ["JCO (Cat I)", `${data.jco_days || 0} days × ₹${r.cat_i_room_rent || 470} (room rent)`, `₹${((data.jco_days || 0) * (r.cat_i_room_rent || 470)).toFixed(2)}`],
-    ["OR (Cat II)", `${data.or_days || 0} days × ₹${r.cat_ii_room_rent || 385} (room rent)`, `₹${((data.or_days || 0) * (r.cat_ii_room_rent || 385)).toFixed(2)}`],
-    ["Def Civ", `${data.def_civ_days || 0} days × ₹${r.def_civ_room_rent || 570} (room rent)`, `₹${((data.def_civ_days || 0) * (r.def_civ_room_rent || 570)).toFixed(2)}`],
+    ["Org (Cat I)", `${data.org_cat_i_days || 0} days × ₹${r.cat_i_room_rent || 470} (room rent)`, `₹${((data.org_cat_i_days || 0) * (r.cat_i_room_rent || 470)).toFixed(2)}`],
+    ["Org (Cat II)", `${data.org_cat_ii_days || 0} days × ₹${r.cat_ii_room_rent || 385} (room rent)`, `₹${((data.org_cat_ii_days || 0) * (r.cat_ii_room_rent || 385)).toFixed(2)}`],
+    ["Non-Org", `${data.non_org_days || 0} days × ₹${r.non_org_room_rent || 570} (room rent)`, `₹${((data.non_org_days || 0) * (r.non_org_room_rent || 570)).toFixed(2)}`],
     ["Room Rent Sub-Total", "", `₹${(data.room_rent_total || 0).toFixed(2)}`],
     ["License Fee Total", "", `₹${(data.total_license_fee || 0).toFixed(2)}`],
     ["Extra Beds", `${data.extra_beds_total || 0} bed-nights × ₹75`, `₹${(data.extra_bed_amount || 0).toFixed(2)}`],
@@ -499,9 +497,9 @@ export function generateBookingSlips(bookings) {
     doc.text("CONTACT ADDRESS:", 10, y);
     doc.text(booking.guest_address || "N/A", 45, y, { maxWidth: 150 });
     
-    // S/JCO/NOK Mobile No
+    // Contact Mobile No
     y += 6;
-    doc.text("S/JCO/NOK MOBILE NO:", 10, y);
+    doc.text("CONTACT MOBILE NO:", 10, y);
     doc.line(60, y, 200, y); // Blank line for manual entry
     
     // D.Card No / Aadhar Card No
@@ -525,7 +523,7 @@ export function generateBookingSlips(bookings) {
     doc.text("NCO/IC", 65, y);
     doc.line(60, y + 2, 60 + sigWidth, y + 2);
     
-    doc.text("JCO/IC", 115, y);
+    doc.text("Signature", 115, y);
     doc.line(110, y + 2, 110 + sigWidth, y + 2);
     
     doc.text("OIC", 165, y);

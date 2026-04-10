@@ -2090,7 +2090,7 @@ export default function Bookings() {
                 </h4>
                 <p className="text-xs text-blue-700 mb-4 bg-blue-100 p-2 rounded-md">
                   <WarningCircle size={14} className="inline mr-1" weight="fill" />
-                  Assign <strong>Self</strong> to one room and add family members to each room. If any family member lacks a <strong>Dependent Card</strong>, that room will be charged at <strong>Def Civ rates</strong>.
+                  Assign <strong>Self</strong> to one room and add family members to each room. If any family member lacks an <strong>Org Card</strong>, that room will be charged at <strong>Non-Org rates</strong>.
                 </p>
                 
                 {roomGuestMapping.map((room, roomIdx) => {
@@ -2218,27 +2218,27 @@ export default function Bookings() {
                               </div>
                             </div>
 
-                            {/* Dependent Card Checkbox */}
+                            {/* Org Card Checkbox */}
                             <div className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200">
                               <input
                                 type="checkbox"
-                                checked={member.has_dependent_card}
-                                onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "has_dependent_card", e.target.checked)}
+                                checked={member.has_org_card}
+                                onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "has_org_card", e.target.checked)}
                                 className="h-4 w-4"
-                                id={`dep-card-${roomIdx}-${memberIdx}`}
+                                id={`org-card-${roomIdx}-${memberIdx}`}
                               />
-                              <label htmlFor={`dep-card-${roomIdx}-${memberIdx}`} className="text-xs font-medium text-slate-700 cursor-pointer">
-                                Dependent Card Available?
+                              <label htmlFor={`org-card-${roomIdx}-${memberIdx}`} className="text-xs font-medium text-slate-700 cursor-pointer">
+                                Org Card Available?
                               </label>
                             </div>
 
-                            {/* Conditional Dependent ID Field */}
-                            {member.has_dependent_card && (
+                            {/* Conditional Org ID Field */}
+                            {member.has_org_card && (
                               <div className="mt-2">
-                                <Label className="text-xs">Dependent ID Ser No</Label>
+                                <Label className="text-xs">Org ID Ser No</Label>
                                 <Input 
-                                  value={member.dependent_id || ""} 
-                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "dependent_id", toUpperCase(e.target.value))}
+                                  value={member.org_id || ""} 
+                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "org_id", toUpperCase(e.target.value))}
                                   onFocus={(e) => e.target.select()} 
                                   className="earms-input mt-1 text-xs h-8" 
                                   placeholder="Enter ID Serial Number" 
@@ -3229,7 +3229,7 @@ ${createdBookingData.is_org !== undefined ? `• Type: ${createdBookingData.is_o
 • Balance Due: ₹${createdBookingData.balance_amount}
 
 *Guidelines for guests pl*
-1. Pl carry aadhar card as ID proof for smooth check in. *Non Dependent and Unaccompanied Civil Guest* are not allowed without serving pers. Dependent Card & Aadhar card reqd for verification.
+1. Pl carry aadhar card as ID proof for smooth check in. *Non-Org guests and unaccompanied guests* are not allowed without organization member. Org Card & Aadhar card required for verification.
 2. Max 4 days res at a time.
 3. Extra bed charges is Rs 75/- per day.
 4. Cancellation- 100% Adv booking will be refunded only if indl info the JCO I/C ECSAG regarding cancellation 04 days before the date of booking. 50% booking amt will be refunded if informed within 2-4 days of booking. No refund will be given if informed within 2 days of booking date.
@@ -3269,7 +3269,7 @@ ${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}\n`
 • Balance Due: ₹${createdBookingData.balance_amount}
 
 *Guidelines for guests pl*
-1. Pl carry aadhar card as ID proof for smooth check in. *Non Dependent and Unaccompanied Civil Guest* are not allowed without serving pers. Dependent Card & Aadhar card reqd for verification.
+1. Pl carry aadhar card as ID proof for smooth check in. *Non-Org guests and unaccompanied guests* are not allowed without organization member. Org Card & Aadhar card required for verification.
 2. Max 4 days res at a time.
 3. Extra bed charges is Rs 75/- per day.
 4. Cancellation- 100% Adv booking will be refunded only if indl info the JCO I/C ECSAG regarding cancellation 04 days before the date of booking. 50% booking amt will be refunded if informed within 2-4 days of booking. No refund will be given if informed within 2 days of booking date.
