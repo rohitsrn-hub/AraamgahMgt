@@ -818,6 +818,20 @@ export default function Bookings() {
         room_guest_mapping: roomGuestMapping  // Send room-guest mapping with inline family members
       });
       toast.success("Check-in successful!");
+      
+      // Generate Org Data Form for Organization guests
+      if (selectedBooking.is_org) {
+        setTimeout(async () => {
+          try {
+            const { generateOrgDataForm } = await import("../utils/pdfUtils");
+            const filename = generateOrgDataForm(selectedBooking);
+            toast.info(`📄 Org Data Form: ${filename} downloaded. Print and fill manually.`, { duration: 10000 });
+          } catch (err) {
+            console.error("Org Data Form generation failed:", err);
+          }
+        }, 500);
+      }
+      
       setShowCheckIn(false);
       setSelectedBooking(null);
       resetActionForm();

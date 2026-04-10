@@ -890,3 +890,171 @@ export function generateGuestDetailsPDF(data, settings) {
   return { blobUrl, filename };
 }
 
+
+
+
+/**
+ * Generate Org Data Form - Blank form for manual pen-filling of sensitive data
+ * This form is generated at check-in for Organization guests
+ * Contains fields: Rank, Service Number, Unit, Command
+ * To be filled manually with pen and kept as physical record only
+ */
+export function generateOrgDataForm(booking) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.width;
+  let y = 15;
+
+  // Header
+  doc.setFillColor(31, 78, 121);
+  doc.rect(0, 0, pageWidth, 25, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("SARAI", pageWidth / 2, 12, { align: "center" });
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text("Shillong Aramgah Room Automation Interface", pageWidth / 2, 19, { align: "center" });
+  doc.setTextColor(0, 0, 0);
+  
+  y = 35;
+
+  // Title
+  doc.setFillColor(220, 230, 241);
+  doc.rect(10, y, pageWidth - 20, 12, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("ORGANIZATION GUEST DATA FORM", pageWidth / 2, y + 8, { align: "center" });
+
+  y += 20;
+
+  // Instructions
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "italic");
+  doc.setTextColor(200, 0, 0);
+  doc.text("⚠️ CONFIDENTIAL - FOR MANUAL RECORD KEEPING ONLY", pageWidth / 2, y, { align: "center" });
+  doc.setTextColor(0, 0, 0);
+  y += 6;
+  doc.setFont("helvetica", "normal");
+  doc.text("Please fill the following details with pen. This form will be kept in physical records.", pageWidth / 2, y, { align: "center" });
+  doc.text("Do not enter this information in the digital system.", pageWidth / 2, y + 5, { align: "center" });
+
+  y += 18;
+
+  // Booking Information (Read-only)
+  doc.setFillColor(245, 245, 245);
+  doc.rect(10, y, pageWidth - 20, 35, "F");
+  doc.setDrawColor(200, 200, 200);
+  doc.rect(10, y, pageWidth - 20, 35);
+  
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("BOOKING INFORMATION", 15, y + 7);
+  
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Booking No: ${booking.booking_number}`, 15, y + 14);
+  doc.text(`Guest Name: ${booking.guest_name}`, 15, y + 20);
+  doc.text(`Mobile: ${booking.guest_contact || "—"}`, 15, y + 26);
+  doc.text(`Room(s): ${(booking.room_numbers || []).join(", ")}`, 15, y + 32);
+  
+  doc.text(`Check-in: ${format(new Date(booking.check_in_date), "dd MMM yyyy")}`, pageWidth / 2 + 10, y + 14);
+  doc.text(`Check-out: ${format(new Date(booking.check_out_date), "dd MMM yyyy")}`, pageWidth / 2 + 10, y + 20);
+  doc.text(`Color: ${booking.org_color || "Not assigned"}`, pageWidth / 2 + 10, y + 26);
+
+  y += 45;
+
+  // Sensitive Data Fields (Blank for manual filling)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("SENSITIVE DATA (Fill with pen)", 15, y);
+  
+  y += 8;
+
+  const fieldHeight = 20;
+  const fieldWidth = pageWidth - 20;
+
+  // Rank field
+  doc.setFillColor(255, 255, 255);
+  doc.rect(10, y, fieldWidth, fieldHeight);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("Rank:", 13, y + 7);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(120, 120, 120);
+  doc.text("(e.g., Sep, Nk, Hav, Sub, WO, etc.)", 13, y + 13);
+  doc.setTextColor(0, 0, 0);
+  y += fieldHeight + 3;
+
+  // Service Number field
+  doc.rect(10, y, fieldWidth, fieldHeight);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("Service Number:", 13, y + 7);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(120, 120, 120);
+  doc.text("(e.g., IC-12345, 15814432-F)", 13, y + 13);
+  doc.setTextColor(0, 0, 0);
+  y += fieldHeight + 3;
+
+  // Unit field
+  doc.rect(10, y, fieldWidth, fieldHeight);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("Unit:", 13, y + 7);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(120, 120, 120);
+  doc.text("(e.g., 2 PARA, 14 Rajput, etc.)", 13, y + 13);
+  doc.setTextColor(0, 0, 0);
+  y += fieldHeight + 3;
+
+  // Command field
+  doc.rect(10, y, fieldWidth, fieldHeight);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("Command HQ:", 13, y + 7);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(120, 120, 120);
+  doc.text("(e.g., Eastern Command, Northern Command, etc.)", 13, y + 13);
+  doc.setTextColor(0, 0, 0);
+  y += fieldHeight + 8;
+
+  // Signature section
+  doc.setDrawColor(0, 0, 0);
+  doc.line(15, y + 15, 90, y + 15);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text("Guest Signature", 15, y + 20);
+  doc.text("Date: ________________", 15, y + 26);
+
+  doc.line(pageWidth - 90, y + 15, pageWidth - 15, y + 15);
+  doc.text("Staff Signature", pageWidth - 90, y + 20);
+  doc.text("Date: ________________", pageWidth - 90, y + 26);
+
+  // Footer warning
+  y = doc.internal.pageSize.height - 20;
+  doc.setFillColor(255, 240, 240);
+  doc.rect(10, y, pageWidth - 20, 15, "F");
+  doc.setDrawColor(200, 0, 0);
+  doc.rect(10, y, pageWidth - 20, 15);
+  doc.setTextColor(200, 0, 0);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8);
+  doc.text("⚠️ IMPORTANT: Store this form in physical records only. Do not digitize or scan.", pageWidth / 2, y + 6, { align: "center" });
+  doc.text("This information is confidential and must not be entered into any digital system.", pageWidth / 2, y + 11, { align: "center" });
+
+  // Footer
+  doc.setTextColor(100, 100, 100);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.text("SARAI — Shillong Aramgah Room Automation Interface", pageWidth / 2, doc.internal.pageSize.height - 7, { align: "center" });
+
+  // Save
+  const filename = `ORG_DATA_${booking.booking_number}_${format(new Date(), "yyyyMMdd")}.pdf`;
+  doc.save(filename);
+  
+  return filename;
+}
