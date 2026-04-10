@@ -830,7 +830,12 @@ export default function Bookings() {
         setTimeout(async () => {
           try {
             const { generateOrgDataForm } = await import("../utils/pdfUtils");
-            const filename = generateOrgDataForm(selectedBooking);
+            // Pass booking with family members from check-in form
+            const bookingWithFamily = {
+              ...selectedBooking,
+              family_members: allFamilyMembers
+            };
+            const filename = generateOrgDataForm(bookingWithFamily);
             toast.info(`📄 Org Data Form: ${filename} downloaded. Print and fill manually.`, { duration: 10000 });
           } catch (err) {
             console.error("Org Data Form generation failed:", err);
@@ -972,7 +977,9 @@ export default function Bookings() {
       staff_id: "",
       extra_beds: 0,
       notes: "",
-      guest_age: (booking.member_ages && booking.member_ages[0]) ? booking.member_ages[0].toString() : "",  // Autofill from M1 age
+      guest_age: (booking.member_ages && booking.member_ages.length > 0 && booking.member_ages[0]) 
+        ? String(booking.member_ages[0])
+        : (booking.total_members && booking.total_members > 0 ? "" : ""),  // Autofill from M1 age if available
       guest_sex: booking.guest_sex || "M",  // Default to Male
       guest_address: "",
       family_members: []

@@ -497,19 +497,19 @@ export function generateBookingSlips(bookings) {
     doc.text("CONTACT ADDRESS:", 10, y);
     doc.text(booking.guest_address || "N/A", 45, y, { maxWidth: 150 });
     
-    // Contact Mobile No
+    // Contact Mobile No - Fill with booking mobile
     y += 6;
     doc.text("CONTACT MOBILE NO:", 10, y);
-    doc.line(60, y, 200, y); // Blank line for manual entry
+    doc.text(booking.guest_contact || "N/A", 60, y);
     
-    // D.Card No / Aadhar Card No - BLANK
+    // ID Card No / Aadhar Card No - BLANK
     y += 6;
-    doc.text("D.CARD NO/AADHAR CARD NO:", 10, y);
+    doc.text("ID CARD NO/AADHAR CARD NO:", 10, y);
     doc.line(70, y, 200, y); // Blank line for manual entry
     
-    // D/Card Issued By - BLANK
+    // ID Card Issued By - BLANK
     y += 6;
-    doc.text("D/CARD ISSUED BY:", 10, y);
+    doc.text("ID CARD ISSUED BY:", 10, y);
     doc.line(55, y, 200, y); // Blank line for manual entry
     
     // Signature section
@@ -902,221 +902,189 @@ export function generateGuestDetailsPDF(data, settings) {
 export function generateOrgDataForm(booking) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.width;
+  const pageHeight = doc.internal.pageSize.height;
   let y = 15;
 
   // Header
   doc.setFillColor(31, 78, 121);
-  doc.rect(0, 0, pageWidth, 25, "F");
+  doc.rect(0, 0, pageWidth, 20, "F");
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(16);
+  doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
-  doc.text("SARAI", pageWidth / 2, 12, { align: "center" });
-  doc.setFontSize(10);
+  doc.text("SARAI", pageWidth / 2, 10, { align: "center" });
+  doc.setFontSize(8);
   doc.setFont("helvetica", "normal");
-  doc.text("Shillong Aramgah Room Automation Interface", pageWidth / 2, 19, { align: "center" });
+  doc.text("Shillong Aramgah Room Automation Interface", pageWidth / 2, 15, { align: "center" });
   doc.setTextColor(0, 0, 0);
   
-  y = 35;
+  y = 28;
 
   // Title
   doc.setFillColor(220, 230, 241);
-  doc.rect(10, y, pageWidth - 20, 12, "F");
+  doc.rect(10, y, pageWidth - 20, 10, "F");
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.text("ORGANIZATION GUEST DATA FORM", pageWidth / 2, y + 8, { align: "center" });
+  doc.setFontSize(12);
+  doc.text("ORGANIZATION GUEST DATA FORM", pageWidth / 2, y + 7, { align: "center" });
 
-  y += 20;
+  y += 14;
 
-  // Instructions
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "italic");
+  // Warning - Compact
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
   doc.setTextColor(200, 0, 0);
   doc.text("⚠️ CONFIDENTIAL - FOR MANUAL RECORD KEEPING ONLY", pageWidth / 2, y, { align: "center" });
+  doc.setFontSize(7);
+  doc.setFont("helvetica", "normal");
+  y += 4;
+  doc.text("Please fill with pen. This form will be kept in physical records. Do not digitize.", pageWidth / 2, y, { align: "center" });
   doc.setTextColor(0, 0, 0);
-  y += 6;
-  doc.setFont("helvetica", "normal");
-  doc.text("Please fill the following details with pen. This form will be kept in physical records.", pageWidth / 2, y, { align: "center" });
-  doc.text("Do not enter this information in the digital system.", pageWidth / 2, y + 5, { align: "center" });
 
-  y += 18;
-
-  // Booking Information (Read-only)
-  doc.setFillColor(245, 245, 245);
-  doc.rect(10, y, pageWidth - 20, 35, "F");
-  doc.setDrawColor(200, 200, 200);
-  doc.rect(10, y, pageWidth - 20, 35);
-  
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("BOOKING INFORMATION", 15, y + 7);
-  
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.text(`Booking No: ${booking.booking_number}`, 15, y + 14);
-  doc.text(`Guest Name: ${booking.guest_name}`, 15, y + 20);
-  doc.text(`Mobile: ${booking.guest_contact || "—"}`, 15, y + 26);
-  doc.text(`Room(s): ${(booking.room_numbers || []).join(", ")}`, 15, y + 32);
-  
-  doc.text(`Check-in: ${format(new Date(booking.check_in_date), "dd MMM yyyy")}`, pageWidth / 2 + 10, y + 14);
-  doc.text(`Check-out: ${format(new Date(booking.check_out_date), "dd MMM yyyy")}`, pageWidth / 2 + 10, y + 20);
-  doc.text(`Color: ${booking.org_color || "Not assigned"}`, pageWidth / 2 + 10, y + 26);
-
-  y += 45;
-
-  // Sensitive Data Fields (Blank for manual filling)
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("MAIN GUEST SENSITIVE DATA (Fill with pen)", 15, y);
-  
   y += 8;
 
-  const fieldHeight = 20;
+  // Booking Information - Compact
+  doc.setFillColor(245, 245, 245);
+  doc.rect(10, y, pageWidth - 20, 24, "F");
+  doc.setDrawColor(200, 200, 200);
+  doc.rect(10, y, pageWidth - 20, 24);
+  
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("BOOKING INFORMATION", 15, y + 5);
+  
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(`Booking: ${booking.booking_number}`, 15, y + 10);
+  doc.text(`Guest: ${booking.guest_name}`, 15, y + 15);
+  doc.text(`Mobile: ${booking.guest_contact || "—"}`, 15, y + 20);
+  
+  doc.text(`Room(s): ${(booking.room_numbers || []).join(", ")}`, pageWidth / 2 + 5, y + 10);
+  doc.text(`Check-in: ${format(new Date(booking.check_in_date), "dd MMM yyyy")}`, pageWidth / 2 + 5, y + 15);
+  doc.text(`Color: ${booking.org_color || "Not assigned"}`, pageWidth / 2 + 5, y + 20);
+
+  y += 30;
+
+  // Main Guest Sensitive Data
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("MAIN GUEST SENSITIVE DATA (Fill with pen)", 15, y);
+  
+  y += 6;
+
+  const fieldHeight = 12;
   const fieldWidth = pageWidth - 20;
 
-  // Identity Card No field (NEW)
-  doc.setFillColor(255, 255, 255);
-  doc.rect(10, y, fieldWidth, fieldHeight);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("Identity Card No:", 13, y + 7);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(120, 120, 120);
-  doc.text("(Aadhaar / Voter ID / Driving License, etc.)", 13, y + 13);
-  doc.setTextColor(0, 0, 0);
-  y += fieldHeight + 3;
+  // Compact fields with smaller spacing
+  const sensitiveFields = [
+    { label: "Identity Card No:", hint: "(Aadhaar / Voter ID / Driving License)" },
+    { label: "Rank:", hint: "(e.g., Sep, Nk, Hav, Sub, WO)" },
+    { label: "Service Number:", hint: "(e.g., IC-12345, 15814432-F)" },
+    { label: "Unit:", hint: "(e.g., 2 PARA, 14 Rajput)" },
+    { label: "Command HQ:", hint: "(e.g., Eastern Command, Northern)" }
+  ];
 
-  // Rank field
-  doc.rect(10, y, fieldWidth, fieldHeight);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("Rank:", 13, y + 7);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(120, 120, 120);
-  doc.text("(e.g., Sep, Nk, Hav, Sub, WO, etc.)", 13, y + 13);
-  doc.setTextColor(0, 0, 0);
-  y += fieldHeight + 3;
+  sensitiveFields.forEach(field => {
+    doc.setFillColor(255, 255, 255);
+    doc.rect(10, y, fieldWidth, fieldHeight);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text(field.label, 13, y + 5);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(120, 120, 120);
+    doc.text(field.hint, 13, y + 9);
+    doc.setTextColor(0, 0, 0);
+    y += fieldHeight + 2;
+  });
 
-  // Service Number field
-  doc.rect(10, y, fieldWidth, fieldHeight);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("Service Number:", 13, y + 7);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(120, 120, 120);
-  doc.text("(e.g., IC-12345, 15814432-F)", 13, y + 13);
-  doc.setTextColor(0, 0, 0);
-  y += fieldHeight + 3;
+  y += 4;
 
-  // Unit field
-  doc.rect(10, y, fieldWidth, fieldHeight);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("Unit:", 13, y + 7);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(120, 120, 120);
-  doc.text("(e.g., 2 PARA, 14 Rajput, etc.)", 13, y + 13);
-  doc.setTextColor(0, 0, 0);
-  y += fieldHeight + 3;
-
-  // Command field
-  doc.rect(10, y, fieldWidth, fieldHeight);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("Command HQ:", 13, y + 7);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor(120, 120, 120);
-  doc.text("(e.g., Eastern Command, Northern Command, etc.)", 13, y + 13);
-  doc.setTextColor(0, 0, 0);
-  y += fieldHeight + 8;
-
-  // Family Members with Org Cards Section
+  // Family Members with Org Cards Section - REDESIGNED for 4+ members
   const familyWithOrgCards = (booking.family_members || []).filter(fm => fm.has_org_card);
   
   if (familyWithOrgCards.length > 0) {
-    // Check if we need a new page
-    if (y > doc.internal.pageSize.height - 100) {
-      doc.addPage();
-      y = 20;
-    }
-
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.text("FAMILY MEMBERS WITH ORG DEPENDENT CARD", 15, y);
-    y += 8;
+    y += 6;
+
+    // Compact grid layout - 2 columns for space efficiency
+    const memberBoxWidth = (pageWidth - 25) / 2;
+    const memberBoxHeight = 32;
+    let col = 0;
 
     familyWithOrgCards.forEach((member, idx) => {
-      // Check if we need a new page for this member
-      if (y > doc.internal.pageSize.height - 60) {
+      // Check if we need a new page
+      if (y > pageHeight - 50) {
         doc.addPage();
         y = 20;
+        col = 0;
       }
+
+      const xOffset = col === 0 ? 10 : 10 + memberBoxWidth + 5;
 
       // Member box
       doc.setFillColor(250, 250, 250);
-      doc.rect(10, y, fieldWidth, 45, "F");
+      doc.rect(xOffset, y, memberBoxWidth, memberBoxHeight, "F");
       doc.setDrawColor(150, 150, 150);
-      doc.rect(10, y, fieldWidth, 45);
+      doc.rect(xOffset, y, memberBoxWidth, memberBoxHeight);
 
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.text(`Family Member ${idx + 1}:`, 13, y + 7);
+      doc.setFontSize(8);
+      doc.text(`Member ${idx + 1}:`, xOffset + 3, y + 5);
       
       doc.setFont("helvetica", "normal");
-      doc.text(`Name: ${member.name || "—"}`, 13, y + 14);
-      doc.text(`Relation: ${member.relation || "—"}`, 13, y + 20);
-      doc.text(`Age: ${member.age || "—"}`, 13, y + 26);
-      doc.text(`Gender: ${member.sex || "—"}`, pageWidth / 2, y + 14);
-      doc.text(`Mobile: ${member.mobile || "—"}`, pageWidth / 2, y + 20);
+      doc.setFontSize(7);
+      doc.text(`Name: ${member.name || "—"}`, xOffset + 3, y + 10);
+      doc.text(`Rel: ${member.relation || "—"}`, xOffset + 3, y + 14);
+      doc.text(`Age: ${member.age || "—"} | ${member.sex || "—"}`, xOffset + 3, y + 18);
 
       // Blank field for Org Dep ID
       doc.setFont("helvetica", "bold");
-      doc.text("Org Dep ID Card No:", 13, y + 36);
+      doc.setFontSize(7);
+      doc.text("Org Dep ID:", xOffset + 3, y + 24);
       doc.setFont("helvetica", "normal");
-      doc.setTextColor(120, 120, 120);
-      doc.text("(Fill manually)", 60, y + 36);
-      doc.setTextColor(0, 0, 0);
-      doc.line(13, y + 41, fieldWidth - 10, y + 41);
+      doc.line(xOffset + 3, y + 28, xOffset + memberBoxWidth - 3, y + 28);
 
-      y += 50;
+      // Move to next column or row
+      if (col === 0) {
+        col = 1;
+      } else {
+        col = 0;
+        y += memberBoxHeight + 3;
+      }
     });
 
-    y += 5;
+    // Move to next row if we ended on column 1
+    if (col === 1) {
+      y += memberBoxHeight + 3;
+    }
+
+    y += 4;
   }
 
-  // Signature section
+  // Signature section - compact
   doc.setDrawColor(0, 0, 0);
-  doc.line(15, y + 15, 90, y + 15);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.text("Guest Signature", 15, y + 20);
-  doc.text("Date: ________________", 15, y + 26);
-
-  doc.line(pageWidth - 90, y + 15, pageWidth - 15, y + 15);
-  doc.text("Staff Signature", pageWidth - 90, y + 20);
-  doc.text("Date: ________________", pageWidth - 90, y + 26);
-
-  // Footer warning
-  y = doc.internal.pageSize.height - 20;
-  doc.setFillColor(255, 240, 240);
-  doc.rect(10, y, pageWidth - 20, 15, "F");
-  doc.setDrawColor(200, 0, 0);
-  doc.rect(10, y, pageWidth - 20, 15);
-  doc.setTextColor(200, 0, 0);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8);
-  doc.text("⚠️ IMPORTANT: Store this form in physical records only. Do not digitize or scan.", pageWidth / 2, y + 6, { align: "center" });
-  doc.text("This information is confidential and must not be entered into any digital system.", pageWidth / 2, y + 11, { align: "center" });
-
-  // Footer
-  doc.setTextColor(100, 100, 100);
+  doc.line(15, y + 10, 80, y + 10);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
-  doc.text("SARAI — Shillong Aramgah Room Automation Interface", pageWidth / 2, doc.internal.pageSize.height - 7, { align: "center" });
+  doc.text("Guest Signature", 15, y + 14);
+  doc.text("Date: ___________", 15, y + 18);
+
+  doc.line(pageWidth - 80, y + 10, pageWidth - 15, y + 10);
+  doc.text("Staff Signature", pageWidth - 80, y + 14);
+  doc.text("Date: ___________", pageWidth - 80, y + 18);
+
+  // Footer warning - FIXED positioning
+  const footerY = pageHeight - 15;
+  doc.setFillColor(255, 240, 240);
+  doc.rect(10, footerY, pageWidth - 20, 10, "F");
+  doc.setDrawColor(200, 0, 0);
+  doc.rect(10, footerY, pageWidth - 20, 10);
+  doc.setTextColor(200, 0, 0);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.text("⚠️ IMPORTANT: Store in physical records only. Do not digitize or scan.", pageWidth / 2, footerY + 4, { align: "center" });
+  doc.text("This information is confidential and must not be entered into any digital system.", pageWidth / 2, footerY + 8, { align: "center" });
 
   // Save
   const filename = `ORG_DATA_${booking.booking_number}_${format(new Date(), "yyyyMMdd")}.pdf`;
