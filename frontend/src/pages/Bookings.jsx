@@ -679,21 +679,21 @@ export default function Bookings() {
       };
     }
     
-    // If Self has valid ID (from identity_card_number field) and all family members have dependent cards
-    const selfHasValidId = actionForm.identity_card_number && actionForm.identity_card_number.trim().length > 0;
+    // Removed identity card validation - no longer applicable
+    const selfHasValidId = true;  // Always allow check-in
     
     if (roomMapping.has_self && !selfHasValidId) {
-      // Self lacks valid ID
+      // Removed Def Civ logic - now using Non-Org for non-organization guests
       return {
         ...roomMapping,
-        charge_category: "Def Civ"
+        charge_category: selectedBooking?.is_org ? roomMapping.room_category : "Non-Org"
       };
     }
     
-    // All conditions met → Original category (Cat I/II)
+    // All conditions met → Original category (Cat I/II for Org, Non-Org for others)
     return {
       ...roomMapping,
-      charge_category: roomMapping.room_category
+      charge_category: selectedBooking?.is_org ? roomMapping.room_category : "Non-Org"
     };
   };
 
@@ -2126,8 +2126,8 @@ export default function Bookings() {
                             {selectedBooking?.guest_name || "Guest"} (Self)
                           </span>
                         </label>
-                        {room.has_self && !actionForm.identity_card_number && (
-                          <p className="text-xs text-red-500 mt-1 ml-6">⚠️ Enter Identity Card No in Personal Details section above</p>
+                        {room.has_self && selectedBooking?.is_org && !actionForm.org_color && (
+                          <p className="text-xs text-amber-600 mt-1 ml-6">💡 Tip: Select Color for Org guest in Personal Details section above</p>
                         )}
                       </div>
 

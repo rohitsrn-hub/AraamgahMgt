@@ -1,0 +1,14 @@
+{
+  "backup_id": "56f73253-b381-4221-87e8-f229fb6cab5e",
+  "timestamp": "2026-04-10T07:28:22.286362+00:00",
+  "backup_type": "INCREMENTAL",
+  "since": "2026-04-09T20:30:00.002000",
+  "collections": {
+    "bookings": [],
+    "rooms": [],
+    "settings": [],
+    "staff": [],
+    "refunds": [],
+    "app_settings": []
+  }
+}
