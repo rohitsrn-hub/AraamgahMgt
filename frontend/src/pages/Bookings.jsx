@@ -1252,8 +1252,14 @@ export default function Bookings() {
 
     const nights = Math.max(1, Math.floor((amendForm.check_out_date - amendForm.check_in_date) / (1000 * 60 * 60 * 24)));
     
+    console.log("=== Frontend Cost Calculation ===");
+    console.log("Nights:", nights);
+    console.log("Selected room IDs:", amendForm.room_ids);
+    console.log("Available rooms:", availableRoomsForAmend);
+    
     // Get selected rooms for amendment
     const selectedRooms = availableRoomsForAmend.filter(r => amendForm.room_ids.includes(r.id));
+    console.log("Selected rooms:", selectedRooms);
     
     // Calculate new total
     let newTotal = 0;
@@ -1265,11 +1271,17 @@ export default function Bookings() {
       } else {
         rate = isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate;
       }
+      console.log(`Room ${room.room_number} (${room.category}): ₹${rate} × ${nights} nights = ₹${rate * nights}`);
       newTotal += (rate || 0) * nights;
     });
 
     const oldTotal = amendBooking.total_amount || 0;
     const difference = newTotal - oldTotal;
+    
+    console.log("Old Total:", oldTotal);
+    console.log("New Total:", newTotal);
+    console.log("Difference:", difference);
+    console.log("=== End Calculation ===");
 
     return { oldTotal, newTotal, difference, nights };
   };
