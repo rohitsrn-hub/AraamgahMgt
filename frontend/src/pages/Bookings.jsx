@@ -482,20 +482,22 @@ export default function Bookings() {
       return;
     }
     
-    // Payment validation
-    if (!bookingForm.payment_mode) {
-      toast.error("Please select payment mode");
-      return;
-    }
-    if (!isPaymentDetailsFilled()) {
-      toast.error("Please fill in the required payment details");
-      return;
-    }
-    
     // Advance amount validation
     if (bookingForm.advance_paid < 0) {
       toast.error("Advance amount cannot be negative");
       return;
+    }
+    
+    // Payment validation - only if advance is greater than 0
+    if (bookingForm.advance_paid > 0) {
+      if (!bookingForm.payment_mode) {
+        toast.error("Please select payment mode");
+        return;
+      }
+      if (!isPaymentDetailsFilled()) {
+        toast.error("Please fill in the required payment details");
+        return;
+      }
     }
 
     // Calculate number of nights
@@ -639,8 +641,8 @@ export default function Bookings() {
         age: "",
         sex: "F",
         mobile: "",
-        has_dependent_card: false,  // Default: no dependent card
-        dependent_id: ""
+        has_org_card: false,  // Default: no org card
+        org_id: ""
       });
       // Recalculate charge category
       updated[roomIndex] = calculateRoomChargeCategory(updated[roomIndex]);
@@ -672,8 +674,8 @@ export default function Bookings() {
   };
 
   const calculateRoomChargeCategory = (roomMapping) => {
-    // Check if any family member lacks dependent card
-    const anyMemberWithoutCard = roomMapping.family_members.some(m => !m.has_dependent_card);
+    // Check if any family member lacks org card
+    const anyMemberWithoutCard = roomMapping.family_members.some(m => !m.has_org_card);
     
     // If Self is not in this room and there are no family members, keep original category
     if (!roomMapping.has_self && roomMapping.family_members.length === 0) {
@@ -683,7 +685,7 @@ export default function Bookings() {
       };
     }
     
-    // If any family member lacks dependent card → Non-Org rate
+    // If any family member lacks org card → Non-Org rate
     if (anyMemberWithoutCard) {
       return {
         ...roomMapping,
@@ -773,11 +775,7 @@ export default function Bookings() {
     
     // Identity card validation removed - no longer required for sanitized system
     
-    // Service status validation
-    if (!actionForm.guest_service_status) {
-      toast.error("Please select service status");
-      return;
-    }
+    // Service status validation removed - no longer required for sanitized system
     
     // Room-guest assignment validation
     const totalGuestsAssigned = roomGuestMapping.reduce((sum, room) => {
@@ -799,8 +797,8 @@ export default function Bookings() {
           age: member.age,
           sex: member.sex,
           mobile: member.mobile,
-          has_dependent_card: member.has_dependent_card,
-          dependent_id: member.has_dependent_card ? member.dependent_id : ""  // Only send if card available
+          has_org_card: member.has_org_card,
+          org_id: member.has_org_card ? member.org_id : ""  // Only send if card available
         });
       });
     });
@@ -974,8 +972,8 @@ export default function Bookings() {
       staff_id: "",
       extra_beds: 0,
       notes: "",
-      guest_age: "",
-      guest_sex: "",
+      guest_age: booking.guest_age || "",  // Autofill age from booking
+      guest_sex: booking.guest_sex || "M",  // Default to Male
       guest_address: "",
       family_members: []
     }));
