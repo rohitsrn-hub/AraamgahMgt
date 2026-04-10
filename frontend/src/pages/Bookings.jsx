@@ -1290,10 +1290,20 @@ export default function Bookings() {
           toast.error("Please select payment mode");
           return;
         }
-        if (!isPaymentDetailsFilled(amendForm.payment_mode, amendForm)) {
-          toast.error("Please fill payment details");
-          return;
+        
+        // Validate payment details based on mode
+        if (amendForm.payment_mode === "UPI") {
+          if (!amendForm.upi_id && !amendForm.upi_phone) {
+            toast.error("Please fill UPI ID or UPI Phone");
+            return;
+          }
+        } else if (amendForm.payment_mode === "Bank Transfer") {
+          if (!amendForm.bank_name || !amendForm.bank_account) {
+            toast.error("Please fill Bank Name and Account Number");
+            return;
+          }
         }
+        // Cash mode doesn't need additional details
       }
 
       const payload = {
