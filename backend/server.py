@@ -1452,13 +1452,16 @@ async def amend_booking(request: AmendBookingRequest):
         # Use is_org to determine rates
         is_org = booking.get("is_org", False)
         print(f"Is Org: {is_org}")
+        print(f"Settings keys: {list(settings.keys())}")
+        print(f"Raw cat_i_rate from settings: {settings.get('cat_i_rate')}")
+        print(f"Raw cat_ii_rate from settings: {settings.get('cat_ii_rate')}")
         
         if is_org:
-            cat_i_rate = settings.get("cat_i_rate", 800)
-            cat_ii_rate = settings.get("cat_ii_rate", 600)
+            cat_i_rate = float(settings.get("cat_i_rate", 800))
+            cat_ii_rate = float(settings.get("cat_ii_rate", 600))
         else:
-            cat_i_rate = settings.get("def_civ_cat_i_rate", settings.get("cat_i_rate", 800))
-            cat_ii_rate = settings.get("def_civ_cat_ii_rate", settings.get("cat_ii_rate", 600))
+            cat_i_rate = float(settings.get("def_civ_cat_i_rate", settings.get("cat_i_rate", 800)))
+            cat_ii_rate = float(settings.get("def_civ_cat_ii_rate", settings.get("cat_ii_rate", 600)))
         
         print(f"Cat I rate: {cat_i_rate}, Cat II rate: {cat_ii_rate}")
         
