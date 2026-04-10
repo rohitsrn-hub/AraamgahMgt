@@ -13,6 +13,7 @@ from enum import Enum
 
 # Import backup services
 from services import backup_service, restore_service, scheduler_service
+from services.migration_service import run_startup_migrations
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -2891,7 +2892,146 @@ async def get_restore_history(limit: int = Query(20, ge=1, le=50)):
         logger.error(f"Error fetching restore history: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============= MIGRATION ENDPOINTS =============
+
+@api_router.get("/migration/status")
+async def get_migration_status():
+    """Get status of one-time data sanitization migration"""
+    try:
+        status = await db.migration_status.find_one(
+            {"migration_id": "2026_04_10_sanitize_defense_data"},
+            {"_id": 0}
+        )
+        
+        if not status:
+            return {
+                "status": "pending",
+                "message": "Migration not yet run"
+            }
+        
+        return status
+    except Exception as e:
+        logger.error(f"Error fetching migration status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/migration/download-archive")
+async def download_migration_archive():
+    """Download the defense data archive file"""
+    try:
+        # Get migration status to find archive file
+        status = await db.migration_status.find_one(
+            {"migration_id": "2026_04_10_sanitize_defense_data"},
+            {"_id": 0}
+        )
+        
+        if not status or not status.get("archive_file"):
+            raise HTTPException(
+                status_code=404,
+                detail="Archive file not found. Migration may not have completed yet."
+            )
+        
+        archive_filename = status["archive_file"]
+        migrations_dir = Path(__file__).parent / "migrations"
+        archive_path = migrations_dir / archive_filename
+        
+        if not archive_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Archive file {archive_filename} not found on server"
+            )
+        
+        return FileResponse(
+            path=str(archive_path),
+            filename=archive_filename,
+            media_type="text/csv"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading archive: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/migration/delete-archive")
+async def delete_migration_archive():
+    """Delete the migration archive file (after verification)"""
+    try:
+        # Get migration status to find archive file
+        status = await db.migration_status.find_one(
+            {"migration_id": "2026_04_10_sanitize_defense_data"},
+            {"_id": 0}
+        )
+        
+        if not status or not status.get("archive_file"):
+            raise HTTPException(
+                status_code=404,
+                detail="Archive file not found"
+            )
+        
+        archive_filename = status["archive_file"]
+        migrations_dir = Path(__file__).parent / "migrations"
+        archive_path = migrations_dir / archive_filename
+        
+        if archive_path.exists():
+            archive_path.unlink()
+            
+            # Update migration status
+            await db.migration_status.update_one(
+                {"migration_id": "2026_04_10_sanitize_defense_data"},
+                {
+                    "$set": {
+                        "archive_deleted": True,
+                        "archive_deleted_at": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+            )
+            
+            return {
+                "success": True,
+                "message": f"Archive file {archive_filename} deleted successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Archive file not found on server"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting archive: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============= INCLUDE ROUTER (MUST BE AFTER ALL ROUTES) =============
 app.include_router(api_router)
+
+
+# ============= STARTUP EVENT =============
+@app.on_event("startup")
+async def startup_event():
+    """Run on application startup"""
+    logger.info("🚀 Application starting up...")
+    
+    # Run one-time migrations
+    try:
+        logger.info("🔄 Running database migrations...")
+        migration_result = await run_startup_migrations(db)
+        
+        if migration_result["status"] == "success":
+            logger.info(f"✅ Migration completed: {migration_result['message']}")
+        elif migration_result["status"] == "already_completed":
+            logger.info("✅ Migrations already completed")
+        else:
+            logger.warning(f"⚠️ Migration status: {migration_result['status']}")
+    except Exception as e:
+        logger.error(f"❌ Migration failed: {str(e)}", exc_info=True)
+        # Don't crash the app if migration fails
+        logger.warning("⚠️ Application will continue despite migration failure")
+    
+    # Start scheduler
+    scheduler_service.start_scheduler(db)
+    logger.info("✅ Application startup complete")
+
 
 
