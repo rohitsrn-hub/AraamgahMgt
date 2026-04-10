@@ -296,8 +296,11 @@ class Booking(BaseModel):
     room_rent_total: float = 0.0
     license_fee_total: float = 0.0
     notes: Optional[str] = None
+    amendment_log: List[dict] = Field(default_factory=list)  # Track amendments
     checked_in_by: Optional[str] = None
     checked_out_by: Optional[str] = None
+    total_members: Optional[int] = None  # NEW: For party composition
+    member_ages: Optional[List[int]] = None  # NEW: Ages of all members
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -330,6 +333,8 @@ class BookingCreate(BaseModel):
     children_count: int = 0
     family_members: List[dict] = Field(default_factory=list)
     notes: Optional[str] = None
+    total_members: Optional[int] = None  # NEW: For party composition
+    member_ages: Optional[List[int]] = None  # NEW: Ages of all members
 
 class CheckInRequest(BaseModel):
     booking_id: str
@@ -363,6 +368,28 @@ class CheckOutRequest(BaseModel):
 class CancelBookingRequest(BaseModel):
     booking_id: str
     reason: Optional[str] = None
+
+class AmendBookingRequest(BaseModel):
+    booking_id: str
+    # Amendable fields
+    check_in_date: Optional[str] = None
+    check_out_date: Optional[str] = None
+    room_ids: Optional[List[str]] = None
+    num_rooms: Optional[int] = None
+    total_members: Optional[int] = None
+    member_ages: Optional[List[int]] = None
+    # Payment adjustment
+    additional_advance: float = 0.0
+    payment_mode: Optional[str] = None
+    payment_id: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_ifsc: Optional[str] = None
+    bank_account: Optional[str] = None
+    upi_id: Optional[str] = None
+    upi_phone: Optional[str] = None
+    # Amendment metadata
+    amendment_reason: Optional[str] = None
+
     refund_amount: float = 0.0
 
 # Staff
@@ -1307,6 +1334,195 @@ async def delete_booking(booking_id: str):
         "booking_id": booking_id,
         "booking_number": booking.get("booking_number"),
         "guest_name": booking.get("guest_name")
+    }
+
+@api_router.post("/bookings/amend")
+async def amend_booking(request: AmendBookingRequest):
+    """
+    Amend a confirmed booking without cancellation charges
+    
+    Allows changes to: dates, rooms, party composition
+    Restrictions: Only CONFIRMED bookings can be amended
+    Payment: Collects additional advance if cost increases
+    """
+    from datetime import date as date_type
+    
+    # Fetch existing booking
+    booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    # Restriction: Only CONFIRMED bookings
+    if booking["status"] != BookingStatus.CONFIRMED.value:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Only CONFIRMED bookings can be amended. Current status: {booking['status']}"
+        )
+    
+    # Prepare amendment data
+    amendment_data = {
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # Track changes for amendment log
+    changes = []
+    
+    # Amend dates
+    if request.check_in_date and request.check_in_date != booking["check_in_date"]:
+        changes.append(f"Check-in: {booking['check_in_date']} → {request.check_in_date}")
+        amendment_data["check_in_date"] = request.check_in_date
+    
+    if request.check_out_date and request.check_out_date != booking["check_out_date"]:
+        changes.append(f"Check-out: {booking['check_out_date']} → {request.check_out_date}")
+        amendment_data["check_out_date"] = request.check_out_date
+    
+    # Amend rooms
+    if request.room_ids and request.room_ids != booking.get("room_ids", []):
+        # Validate room availability for new dates
+        check_in = request.check_in_date or booking["check_in_date"]
+        check_out = request.check_out_date or booking["check_out_date"]
+        
+        # Check if new rooms are available
+        for new_room_id in request.room_ids:
+            conflicting = await db.bookings.find_one({
+                "id": {"$ne": request.booking_id},
+                "room_ids": new_room_id,
+                "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+                "$or": [
+                    {"check_in_date": {"$lt": check_out}, "check_out_date": {"$gt": check_in}},
+                ]
+            })
+            if conflicting:
+                room = await db.rooms.find_one({"id": new_room_id}, {"_id": 0})
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Room {room.get('room_number') if room else new_room_id} not available for selected dates"
+                )
+        
+        # Fetch new room details
+        new_rooms = []
+        new_room_numbers = []
+        new_room_categories = []
+        for room_id in request.room_ids:
+            room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
+            if room:
+                new_rooms.append(room["id"])
+                new_room_numbers.append(room["room_number"])
+                new_room_categories.append(room["category"])
+        
+        changes.append(f"Rooms: {', '.join(booking.get('room_numbers', []))} → {', '.join(new_room_numbers)}")
+        amendment_data["room_ids"] = new_rooms
+        amendment_data["room_numbers"] = new_room_numbers
+        amendment_data["room_categories"] = new_room_categories
+        if request.num_rooms:
+            amendment_data["num_rooms"] = request.num_rooms
+    
+    # Amend party composition
+    if request.total_members and request.total_members != booking.get("total_members"):
+        changes.append(f"Members: {booking.get('total_members', 1)} → {request.total_members}")
+        amendment_data["total_members"] = request.total_members
+    
+    if request.member_ages:
+        amendment_data["member_ages"] = request.member_ages
+    
+    # Recalculate total amount
+    if "check_in_date" in amendment_data or "check_out_date" in amendment_data or "room_ids" in amendment_data:
+        from datetime import date as date_type
+        
+        settings = await db.settings.find_one({}, {"_id": 0})
+        if not settings:
+            settings = {}
+        
+        check_in = date_type.fromisoformat(amendment_data.get("check_in_date", booking["check_in_date"]))
+        check_out = date_type.fromisoformat(amendment_data.get("check_out_date", booking["check_out_date"]))
+        nights = (check_out - check_in).days
+        
+        # Get room categories (either new or existing)
+        room_categories = amendment_data.get("room_categories", booking.get("room_categories", []))
+        
+        # Calculate total for each category
+        cat_i_count = sum(1 for cat in room_categories if cat == "Cat I")
+        cat_ii_count = sum(1 for cat in room_categories if cat == "Cat II")
+        
+        # Use is_org to determine rates
+        is_org = booking.get("is_org", False)
+        
+        if is_org:
+            cat_i_rate = settings.get("cat_i_rate", 800)
+            cat_ii_rate = settings.get("cat_ii_rate", 600)
+        else:
+            cat_i_rate = settings.get("def_civ_cat_i_rate", settings.get("cat_i_rate", 800))
+            cat_ii_rate = settings.get("def_civ_cat_ii_rate", settings.get("cat_ii_rate", 600))
+        
+        new_total = (cat_i_count * cat_i_rate + cat_ii_count * cat_ii_rate) * nights
+        old_total = booking.get("total_amount", 0)
+        
+        amendment_data["total_amount"] = new_total
+        
+        # Calculate payment difference
+        if new_total > old_total:
+            # Increased cost - collect additional advance
+            additional_required = new_total - old_total
+            if request.additional_advance < additional_required:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Additional advance required: ₹{additional_required}. Provided: ₹{request.additional_advance}"
+                )
+            
+            # Update advance paid
+            amendment_data["advance_paid"] = booking.get("advance_paid", 0) + request.additional_advance
+            
+            # Update payment details if provided
+            if request.payment_mode:
+                amendment_data["payment_mode"] = request.payment_mode
+            if request.payment_id:
+                amendment_data["payment_id"] = request.payment_id
+            if request.bank_name:
+                amendment_data["bank_name"] = request.bank_name
+            if request.bank_ifsc:
+                amendment_data["bank_ifsc"] = request.bank_ifsc.upper()
+            if request.bank_account:
+                amendment_data["bank_account"] = request.bank_account
+            if request.upi_id:
+                amendment_data["upi_id"] = request.upi_id
+            if request.upi_phone:
+                amendment_data["upi_phone"] = request.upi_phone
+            
+            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{request.additional_advance} paid)")
+        else:
+            # Decreased cost - refund at check-in
+            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (₹{old_total - new_total} to be refunded at check-in)")
+        
+        # Recalculate balance
+        amendment_data["balance_amount"] = new_total - amendment_data.get("advance_paid", booking.get("advance_paid", 0))
+    
+    # Add amendment log
+    amendment_log = booking.get("amendment_log", [])
+    amendment_log.append({
+        "amended_at": datetime.now(timezone.utc).isoformat(),
+        "changes": changes,
+        "reason": request.amendment_reason or "No reason provided"
+    })
+    amendment_data["amendment_log"] = amendment_log
+    
+    # Add notes
+    notes = booking.get("notes", "") or ""
+    notes += f"\n[AMENDED {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}]: {'; '.join(changes)}"
+    amendment_data["notes"] = notes.strip()
+    
+    # Update booking
+    await db.bookings.update_one(
+        {"id": request.booking_id},
+        {"$set": amendment_data}
+    )
+    
+    # Fetch updated booking
+    updated_booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
+    
+    return {
+        "message": "Booking amended successfully",
+        "booking": updated_booking,
+        "changes": changes
     }
 
 # ============= GUEST HISTORY =============
