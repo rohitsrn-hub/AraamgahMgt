@@ -89,7 +89,7 @@ export default function Layout({ settings }) {
       {/* Header */}
       <header className="earms-header" data-testid="main-header">
         <div className="h-full px-4 md:px-8 flex items-center justify-between">
-          {/* Left - Mobile menu + Formation Sign 1 */}
+          {/* Left - Mobile menu */}
           <div className="flex items-center gap-4">
             {/* Mobile menu button */}
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
@@ -100,38 +100,26 @@ export default function Layout({ settings }) {
               </SheetTrigger>
               <SheetContent side="left" className="w-72 p-0">
                 <div className="p-4 border-b">
-                  <h2 className="font-bold text-lg text-slate-800">E-ARMS Menu</h2>
+                  <h2 className="font-bold text-lg text-slate-800">SARAI Menu</h2>
                 </div>
                 <NavContent />
               </SheetContent>
             </Sheet>
-            
-            <img 
-              src={fmnSign1} 
-              alt="Formation Sign 1" 
-              className="h-12 w-12 md:h-14 md:w-14 object-contain rounded-lg"
-              data-testid="fmn-sign-1"
-            />
           </div>
 
           {/* Center - Title */}
           <div className="text-center flex-1 px-4">
             <h1 className="text-xl md:text-3xl lg:text-4xl font-extrabold text-slate-800 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-              E-ARMS
+              SARAI
             </h1>
             <p className="text-xs md:text-sm text-slate-500 hidden sm:block font-medium">
-              ECSAG Automated Room Management System
+              Shillong Aramgah Room Automation Interface
             </p>
           </div>
 
-          {/* Right - Formation Sign 2 */}
-          <div className="flex items-center">
-            <img 
-              src={fmnSign2} 
-              alt="Formation Sign 2" 
-              className="h-12 w-12 md:h-14 md:w-14 object-contain rounded-lg"
-              data-testid="fmn-sign-2"
-            />
+          {/* Right - Empty spacer for balance */}
+          <div className="flex items-center w-12 md:w-14">
+            {/* Removed formation signs */}
           </div>
         </div>
       </header>

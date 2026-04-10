@@ -95,7 +95,7 @@ export default function Bookings() {
 
   // Guest History
   const [showGuestHistory, setShowGuestHistory] = useState(false);
-  const [guestHistorySearch, setGuestHistorySearch] = useState({ phone: "", army_number: "" });
+  const [guestHistorySearch, setGuestHistorySearch] = useState({ phone: "" });
   const [guestHistoryData, setGuestHistoryData] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -116,9 +116,8 @@ export default function Bookings() {
   const [bookingForm, setBookingForm] = useState({
     guest_name: "",
     guest_contact: "",
-    guest_rank: "",
-    army_number: "",
-    guest_unit: "",
+    is_org: false,         // NEW: Organization/Non-Org classification
+    org_color: "",         // NEW: Color category (only for Org guests)
     num_rooms: 1,
     room_ids: [],
     check_in_date: null,
@@ -159,10 +158,7 @@ export default function Bookings() {
     guest_age: "",
     guest_sex: "",
     guest_address: "",
-    identity_card_number: "",
-    guest_service_status: "",
-    service_type: "",
-    command_hq: "",
+    org_color: "",  // Organization color (filled at check-in/checkout if Org guest)
     bank_name: "",
     bank_ifsc: "",
     bank_account: "",
@@ -377,9 +373,8 @@ export default function Bookings() {
     setBookingForm({
       guest_name: "",
       guest_contact: "",
-      guest_rank: "",
-      army_number: "",
-      guest_unit: "",
+      is_org: false,
+      org_color: "",
       num_rooms: 1,
       room_ids: [],
       check_in_date: null,
@@ -520,10 +515,9 @@ export default function Bookings() {
       const payload = {
         guest_name: formData.guest_name,
         guest_contact: formattedPhone,
-        guest_rank: formData.guest_rank,
-        army_number: formData.army_number,
+        is_org: formData.is_org || false,
+        org_color: formData.org_color || null,
         aadhaar_number: formData.aadhaar_number,
-        guest_unit: formData.guest_unit,
         room_ids: formData.room_ids,
         num_rooms: formData.num_rooms,
         check_in_date: format(formData.check_in_date, "yyyy-MM-dd"),
@@ -561,8 +555,7 @@ export default function Bookings() {
 
   const resetActionForm = () => setActionForm({
     staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
-    guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", identity_card_number: "",
-    guest_service_status: "", service_type: "", command_hq: "",
+    guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", org_color: "",
     bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: []
   });
 
@@ -815,10 +808,7 @@ export default function Bookings() {
         guest_age: actionForm.guest_age ? parseInt(actionForm.guest_age) : undefined,
         guest_sex: actionForm.guest_sex || undefined,
         guest_address: actionForm.guest_address || undefined,
-        identity_card_number: actionForm.identity_card_number || undefined,
-        guest_service_status: actionForm.guest_service_status || undefined,
-        service_type: actionForm.service_type || undefined,
-        command_hq: actionForm.command_hq || undefined,
+        org_color: actionForm.org_color || undefined,  // Organization color for Org guests
         bank_name: actionForm.bank_name || undefined,
         bank_ifsc: actionForm.bank_ifsc || undefined,
         bank_account: actionForm.bank_account || undefined,
@@ -955,8 +945,8 @@ export default function Bookings() {
       upi_id: booking.upi_id || "",
       upi_phone: booking.upi_phone || "",
       
-      // Identity - use Aadhaar from booking if available
-      identity_card_number: booking.aadhaar_number || "",
+      // Organization color (if already set during booking)
+      org_color: booking.org_color || "",
       
       // Reset other fields to empty (will be filled during check-in)
       staff_id: "",
@@ -965,9 +955,6 @@ export default function Bookings() {
       guest_age: "",
       guest_sex: "",
       guest_address: "",
-      guest_service_status: "",
-      service_type: "",
-      command_hq: "",
       family_members: []
     }));
     
@@ -1112,8 +1099,8 @@ export default function Bookings() {
   };
 
   const handleSearchGuestHistory = async () => {
-    if (!guestHistorySearch.phone && !guestHistorySearch.army_number) {
-      toast.error("Please enter phone number or army number");
+    if (!guestHistorySearch.phone) {
+      toast.error("Please enter phone number");
       return;
     }
 
@@ -1122,9 +1109,6 @@ export default function Bookings() {
       const params = {};
       if (guestHistorySearch.phone) {
         params.phone_number = guestHistorySearch.phone;
-      }
-      if (guestHistorySearch.army_number) {
-        params.army_number = guestHistorySearch.army_number;
       }
 
       const response = await axios.get(`${API}/bookings/guest-history`, { params });

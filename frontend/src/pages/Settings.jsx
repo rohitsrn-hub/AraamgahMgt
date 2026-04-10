@@ -172,7 +172,7 @@ export default function Settings({ settings, onUpdate }) {
         <h1 className="text-2xl md:text-3xl font-bold text-slate-800" style={{ fontFamily: 'Outfit, sans-serif' }}>
           Settings
         </h1>
-        <p className="text-slate-500 mt-1">Configure E-ARMS system settings</p>
+        <p className="text-slate-500 mt-1">Configure SARAI system settings</p>
       </div>
 
       {/* P3: System Actions */}

@@ -9,15 +9,15 @@ const CommandCenter = () => {
     <div className="cc-container">
 
       <div className="cc-title">
-        <h1>E-ARMS</h1>
-        <p>ECSAG AUTOMATED ROOM MANAGEMENT SYSTEM</p>
+        <h1>SARAI</h1>
+        <p>SHILLONG ARAMGAH ROOM AUTOMATION INTERFACE</p>
       </div>
 
       <div className="cc-core">
 
         <div className="cc-hub">
           <div>
-            <h2>E-ARMS</h2>
+            <h2>SARAI</h2>
             <span>Command Core</span>
           </div>
         </div>
