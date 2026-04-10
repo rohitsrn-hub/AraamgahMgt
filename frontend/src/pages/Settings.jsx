@@ -31,8 +31,6 @@ const DEFAULT_COLORS = [
 
 export default function Settings({ settings, onUpdate }) {
   const [formData, setFormData] = useState({
-    fmn_sign_1_url: settings?.fmn_sign_1_url || "",
-    fmn_sign_2_url: settings?.fmn_sign_2_url || "",
     cat_i_rate: settings?.cat_i_rate || 500,
     cat_ii_rate: settings?.cat_ii_rate || 400,
     def_civ_cat_i_rate: settings?.def_civ_cat_i_rate || 600,
@@ -470,7 +468,7 @@ export default function Settings({ settings, onUpdate }) {
                     <p className="text-xs text-blue-600">per night</p>
                   </div>
                   <div className="p-3 bg-orange-50 rounded-lg">
-                    <p className="text-xs text-orange-600 font-medium mb-1">Def Civ Rate</p>
+                    <p className="text-xs text-orange-600 font-medium mb-1">Non-Org Rate</p>
                     <p className="text-2xl font-bold text-orange-700">₹{cat.def_civ_rate}</p>
                     <p className="text-xs text-orange-600">per night</p>
                   </div>

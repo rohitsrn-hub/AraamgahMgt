@@ -3,7 +3,11 @@ Backup Service - Handles full and incremental backups
 """
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import pytz
+
+# IST timezone
+IST = pytz.timezone('Asia/Kolkata')
 from pathlib import Path
 from typing import Dict, List, Optional
 from uuid import uuid4

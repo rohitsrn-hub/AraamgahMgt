@@ -180,21 +180,19 @@ export default function RoomAllotmentTab({ settings }) {
                   <tr>
                     <th>S.No</th>
                     <th>Booking No</th>
-                    <th>Army No</th>
-                    <th>Rank</th>
                     <th>Name</th>
-                    <th>Unit</th>
-                    <th>Command</th>
+                    <th>Type</th>
+                    <th>Color</th>
                     <th className="text-center">Self</th>
                     <th className="text-center">Wife</th>
                     <th className="text-center">Child</th>
                     <th>Check-in</th>
                     <th>Check-out</th>
                     <th className="text-center">Nights</th>
-                    <th className="text-center">Dependents</th>
-                    <th className="text-center">Non-Dep</th>
+                    <th className="text-center">Org Dep</th>
+                    <th className="text-center">Non-Org Dep</th>
                     <th>Room(s)</th>
-                    <th>I Card No</th>
+                    <th>Aadhaar No</th>
                     <th>Mobile No</th>
                     <th className="text-right">Amount (₹)</th>
                   </tr>
@@ -204,28 +202,36 @@ export default function RoomAllotmentTab({ settings }) {
                     <tr key={allot.booking_id}>
                       <td className="text-center">{idx + 1}</td>
                       <td className="font-medium">{allot.booking_number}</td>
-                      <td>{allot.army_number}</td>
-                      <td>{allot.guest_rank}</td>
                       <td>{allot.guest_name}</td>
-                      <td>{allot.guest_unit}</td>
-                      <td>{allot.command_hq}</td>
+                      <td>
+                        {allot.is_org ? (
+                          <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">Org</span>
+                        ) : (
+                          <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">Non-Org</span>
+                        )}
+                      </td>
+                      <td>
+                        {allot.org_color ? (
+                          <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700">{allot.org_color}</span>
+                        ) : "—"}
+                      </td>
                       <td className="text-center font-semibold">{allot.self_count}</td>
                       <td className="text-center font-semibold">{allot.wife_count}</td>
                       <td className="text-center font-semibold">{allot.child_count}</td>
                       <td>{allot.check_in_date}</td>
                       <td>{allot.check_out_date}</td>
                       <td className="text-center">{allot.nights}</td>
-                      <td className="text-center text-green-700 font-semibold">{allot.dependents}</td>
+                      <td className="text-center text-blue-700 font-semibold">{allot.dependents}</td>
                       <td className="text-center text-orange-700 font-semibold">{allot.non_dependents}</td>
                       <td>{allot.room_numbers?.join(", ") || "N/A"}</td>
-                      <td className="text-sm">{allot.identity_card_no}</td>
+                      <td className="text-sm">{allot.aadhaar_no || "—"}</td>
                       <td className="text-sm">{allot.mobile_no}</td>
                       <td className="text-right font-semibold">₹{allot.total_amount?.toFixed(2) || '0.00'}</td>
                     </tr>
                   ))}
                   {report.allotments?.length === 0 && (
                     <tr>
-                      <td colSpan="19" className="text-center text-slate-500 py-8">
+                      <td colSpan="16" className="text-center text-slate-500 py-8">
                         No allotments found for the selected period
                       </td>
                     </tr>
