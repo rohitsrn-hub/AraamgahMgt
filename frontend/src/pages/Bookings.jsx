@@ -307,23 +307,25 @@ export default function Bookings() {
   };
 
   useEffect(() => {
-    if (settings?.default_advance_amount) {
+    if (settings?.default_advance_amount && bookingForm.check_in_date) {
       // Check if same-day booking
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const checkInDate = bookingForm.check_in_date ? new Date(bookingForm.check_in_date) : null;
-      if (checkInDate) {
-        checkInDate.setHours(0, 0, 0, 0);
+      const checkInDate = new Date(bookingForm.check_in_date);
+      checkInDate.setHours(0, 0, 0, 0);
+      
+      const isSameDay = checkInDate.getTime() === today.getTime();
+      const newAdvance = isSameDay ? 0 : settings.default_advance_amount * bookingForm.num_rooms;
+      
+      // Only update if advance amount actually needs to change
+      if (bookingForm.advance_paid !== newAdvance) {
+        setBookingForm(prev => ({
+          ...prev,
+          advance_paid: newAdvance
+        }));
       }
-      
-      const isSameDay = checkInDate && checkInDate.getTime() === today.getTime();
-      
-      setBookingForm(prev => ({
-        ...prev,
-        advance_paid: isSameDay ? 0 : settings.default_advance_amount * prev.num_rooms
-      }));
     }
-  }, [bookingForm.num_rooms, bookingForm.check_in_date, settings]);
+  }, [bookingForm.num_rooms, bookingForm.check_in_date, settings?.default_advance_amount]);
 
   useEffect(() => {
     setBookingForm(prev => ({ ...prev, room_ids: [] }));

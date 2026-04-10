@@ -165,11 +165,11 @@ frontend:
   
   - task: "P0.4 - Same-day booking zero advance logic"
     implemented: true
-    working: false
+    working: true
     file: "/app/frontend/src/pages/Bookings.jsx"
-    stuck_count: 1
+    stuck_count: 0
     priority: "critical"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
@@ -177,23 +177,27 @@ frontend:
       - working: false
         agent: "testing"
         comment: "❌ FAILED: Tested same-day booking flow (check-in=today, check-out=tomorrow). Could not verify advance field or same-day message because: (1) Room selection section did not show available rooms after dates were selected (2) Payment section with advance field appears only after room selection (3) Same-day message at lines 1815-1825 is in payment section which was not visible. ISSUE: Room availability API may not be returning rooms, or there's a UI rendering issue preventing room selection grid from appearing. Need to investigate why 'Found 0 room options' when there should be available rooms for selected dates."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Re-tested P0.4 after main agent's refactored useEffect. ALL TESTS PASSED (8/8 steps). (1) Room selection grid now renders correctly with 12 available rooms - CRITICAL FIX CONFIRMED. (2) Same-day advance logic working: advance auto-sets to ₹0 with green message '✓ Same-day booking - No advance required'. (3) Date change logic working: changing to future dates updates advance to ₹400 with 'Default: ₹400 × 1 room(s)' message, same-day message disappears. (4) Reset logic working: changing back to same-day resets advance to ₹0 and same-day message reappears. The refactored useEffect (lines 309-327) successfully resolved the state update conflict that was preventing room grid rendering. P0.4 is now fully functional."
 
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: true
 
 test_plan:
   current_focus:
-    - "P0.4 - Investigate why room selection not showing available rooms for same-day booking"
-  stuck_tasks:
-    - "P0.4 - Same-day booking zero advance logic (room selection issue)"
+    - "All P0 blockers resolved - ready for user acceptance testing"
+  stuck_tasks: []
   test_all: false
   test_priority: "critical_first"
 
 agent_communication:
   - agent: "main"
     message: "Fork agent continuing SARAI sanitization. Fixed all 4 P0 CRITICAL blockers in check-in flow: (1) Removed Org ID Ser No field for family members (2) Removed identity_card_number validation (3) Replaced all Def Civ with Non-Org labels (4) Implemented same-day zero advance logic with visual indicator. Also fixed rate calculation to use is_org flag. Linting passed (3393 lines). READY FOR COMPREHENSIVE FRONTEND TESTING - focus on check-in flow for org guests, same-day booking form, and rate display accuracy."
+  - agent: "testing"
+    message: "✅ P0.4 RE-TEST COMPLETE - ALL TESTS PASSED (8/8). Main agent's refactored useEffect successfully fixed the room selection grid rendering issue. Comprehensive testing confirms: (1) Room grid renders with 12 available rooms (2) Same-day advance logic: ₹0 + green message (3) Future date logic: ₹400 + default message (4) Reset logic: ₹0 + same-day message reappears. ALL 4 P0 CRITICAL BLOCKERS NOW VERIFIED WORKING: P0.1 ✅ (No Org ID Ser No for family), P0.2 ✅ (No identity_card_number validation), P0.3 ✅ (No Def Civ labels), P0.4 ✅ (Same-day zero advance). SARAI sanitization project P0 phase COMPLETE. Ready for user acceptance testing."
   - agent: "testing"
     message: "Completed comprehensive P0 blocker testing. RESULTS: ✅ P0.1 PASS (No Org ID Ser No field for family members), ✅ P0.2 PASS (No identity_card_number validation), ✅ P0.3 PASS (No Def Civ labels). ❌ P0.4 FAIL - Cannot verify same-day advance logic because room selection grid shows 0 available rooms after selecting dates (10 Apr 2026 - 11 Apr 2026). Payment section with advance field only appears after room selection. ISSUE: Either (a) room availability API not returning rooms, (b) UI rendering issue, or (c) no rooms actually available for test dates. Need to investigate room availability endpoint or check if rooms exist in database."
