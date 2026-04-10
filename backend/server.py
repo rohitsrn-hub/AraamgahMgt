@@ -1437,15 +1437,21 @@ async def amend_booking(request: AmendBookingRequest):
         check_out = date_type.fromisoformat(amendment_data.get("check_out_date", booking["check_out_date"]))
         nights = (check_out - check_in).days
         
+        print("=== BACKEND COST CALCULATION ===")
+        print(f"Check-in: {check_in}, Check-out: {check_out}, Nights: {nights}")
+        
         # Get room categories (either new or existing)
         room_categories = amendment_data.get("room_categories", booking.get("room_categories", []))
+        print(f"Room categories: {room_categories}")
         
         # Calculate total for each category
         cat_i_count = sum(1 for cat in room_categories if cat == "Cat I")
         cat_ii_count = sum(1 for cat in room_categories if cat == "Cat II")
+        print(f"Cat I count: {cat_i_count}, Cat II count: {cat_ii_count}")
         
         # Use is_org to determine rates
         is_org = booking.get("is_org", False)
+        print(f"Is Org: {is_org}")
         
         if is_org:
             cat_i_rate = settings.get("cat_i_rate", 800)
@@ -1454,8 +1460,14 @@ async def amend_booking(request: AmendBookingRequest):
             cat_i_rate = settings.get("def_civ_cat_i_rate", settings.get("cat_i_rate", 800))
             cat_ii_rate = settings.get("def_civ_cat_ii_rate", settings.get("cat_ii_rate", 600))
         
+        print(f"Cat I rate: {cat_i_rate}, Cat II rate: {cat_ii_rate}")
+        
         new_total = (cat_i_count * cat_i_rate + cat_ii_count * cat_ii_rate) * nights
         old_total = booking.get("total_amount", 0)
+        
+        print(f"Calculation: ({cat_i_count} × {cat_i_rate} + {cat_ii_count} × {cat_ii_rate}) × {nights} = {new_total}")
+        print(f"Old Total: {old_total}, New Total: {new_total}, Difference: {new_total - old_total}")
+        print("=== END BACKEND CALCULATION ===")
         
         amendment_data["total_amount"] = new_total
         
