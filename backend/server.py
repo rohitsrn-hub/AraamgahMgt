@@ -245,8 +245,6 @@ class Guest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    rank: Optional[str] = None
-    unit: Optional[str] = None
     contact_number: Optional[str] = None
     id_proof_type: Optional[str] = None
     id_proof_number: Optional[str] = None
@@ -255,8 +253,6 @@ class Guest(BaseModel):
 
 class GuestCreate(BaseModel):
     name: str
-    rank: Optional[str] = None
-    unit: Optional[str] = None
     contact_number: str
     id_proof_type: Optional[str] = None
     id_proof_number: Optional[str] = None
@@ -270,9 +266,9 @@ class Booking(BaseModel):
     guest_id: str
     guest_name: str
     guest_contact: Optional[str] = None
-    guest_rank: Optional[str] = None
-    guest_unit: Optional[str] = None
-    guest_service_status: Optional[str] = None  # "Serving" or "Retired"
+    # NEW: Organization classification (replaces rank/command system)
+    is_org: bool = False  # True = Organization personnel, False = Non-Org
+    org_color: Optional[str] = None  # Color category for Org guests (Red, Green, etc.)
     room_ids: List[str] = []
     room_numbers: List[str] = []
     room_categories: List[str] = []
@@ -297,18 +293,14 @@ class Booking(BaseModel):
     upi_phone: Optional[str] = None
     extra_beds: int = 0
     extra_bed_charge: float = 0.0
-    service_type: Optional[str] = None
-    command_hq: Optional[str] = None
-    army_number: Optional[str] = None
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
     aadhaar_number: Optional[str] = None
-    identity_card_number: Optional[str] = None
     wife_count: int = 0
     children_count: int = 0
     family_members: List[dict] = Field(default_factory=list)
-    room_guest_mapping: List[dict] = Field(default_factory=list)  # NEW: Room-wise guest assignments
+    room_guest_mapping: List[dict] = Field(default_factory=list)  # Room-wise guest assignments
     room_rent_total: float = 0.0
     license_fee_total: float = 0.0
     notes: Optional[str] = None
@@ -320,9 +312,9 @@ class Booking(BaseModel):
 class BookingCreate(BaseModel):
     guest_name: str
     guest_contact: Optional[str] = None
-    guest_rank: Optional[str] = None
-    guest_unit: Optional[str] = None
-    guest_service_status: Optional[str] = None
+    # NEW: Organization classification
+    is_org: bool = False  # Organization personnel or Non-Org
+    org_color: Optional[str] = None  # Color category (only for Org guests)
     room_ids: List[str]
     num_guests: int = 1
     num_rooms: int = 1
@@ -338,14 +330,10 @@ class BookingCreate(BaseModel):
     bank_account: Optional[str] = None
     upi_id: Optional[str] = None
     upi_phone: Optional[str] = None
-    service_type: Optional[str] = None
-    command_hq: Optional[str] = None
-    army_number: Optional[str] = None
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
     aadhaar_number: Optional[str] = None
-    identity_card_number: Optional[str] = None
     wife_count: int = 0
     children_count: int = 0
     family_members: List[dict] = Field(default_factory=list)
@@ -361,10 +349,8 @@ class CheckInRequest(BaseModel):
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
-    identity_card_number: Optional[str] = None
-    guest_service_status: Optional[str] = None
-    service_type: Optional[str] = None
-    command_hq: Optional[str] = None
+    # Organization color (if not set during booking)
+    org_color: Optional[str] = None
     bank_name: Optional[str] = None
     bank_ifsc: Optional[str] = None
     bank_account: Optional[str] = None
@@ -379,6 +365,8 @@ class CheckOutRequest(BaseModel):
     final_payment: float = 0.0
     payment_mode: Optional[str] = None
     notes: Optional[str] = None
+    # Organization color (to be filled at checkout if Org guest)
+    org_color: Optional[str] = None
 
 class CancelBookingRequest(BaseModel):
     booking_id: str
@@ -526,22 +514,45 @@ def serialize_response(doc: dict) -> dict:
         result[k] = v
     return result
 
-async def get_room_rate(category: RoomCategory, guest_rank: Optional[str] = None) -> float:
-    """Get room rate from settings, applying Def Civ rate if applicable"""
+async def get_room_rate(category: RoomCategory, is_org: bool = True, is_license_fee: bool = False) -> float:
+    """
+    Get room rate from settings based on Org/Non-Org classification
+    
+    Args:
+        category: Room category (CAT_I or CAT_II)
+        is_org: True for Organization personnel, False for Non-Org
+        is_license_fee: If True, return license fee instead of room rent
+    
+    Returns:
+        float: Room rent or license fee amount
+    """
     settings = await db.app_settings.find_one({}, {"_id": 0})
-    is_def_civ = guest_rank and guest_rank.strip().lower() == "def civ"
+    
     if settings:
-        if category == RoomCategory.CAT_I:
-            if is_def_civ:
-                return settings.get("def_civ_cat_i_rate", settings.get("cat_i_rate", 600.0))
-            return settings.get("cat_i_rate", 500.0)
+        if is_org:
+            # Organization personnel - use Cat I or Cat II rates
+            if category == RoomCategory.CAT_I:
+                if is_license_fee:
+                    return settings.get("cat_i_license_fee", 30.0)
+                return settings.get("cat_i_room_rent", 470.0)
+            else:  # CAT_II
+                if is_license_fee:
+                    return settings.get("cat_ii_license_fee", 15.0)
+                return settings.get("cat_ii_room_rent", 385.0)
         else:
-            if is_def_civ:
-                return settings.get("def_civ_cat_ii_rate", settings.get("cat_ii_rate", 400.0))
-            return settings.get("cat_ii_rate", 300.0)
-    if is_def_civ:
-        return 600.0 if category == RoomCategory.CAT_I else 400.0
-    return 500.0 if category == RoomCategory.CAT_I else 300.0
+            # Non-Org - use Non-Org rates
+            if is_license_fee:
+                return settings.get("non_org_license_fee", 30.0)
+            return settings.get("non_org_room_rent", 570.0)
+    
+    # Fallback defaults if settings not found
+    if is_org:
+        if category == RoomCategory.CAT_I:
+            return 30.0 if is_license_fee else 470.0
+        else:
+            return 15.0 if is_license_fee else 385.0
+    else:
+        return 30.0 if is_license_fee else 570.0
 
 def calculate_nights(check_in: str, check_out: str) -> int:
     """Calculate number of nights between dates"""
@@ -866,8 +877,9 @@ async def create_booking(booking: BookingCreate):
         if overlapping:
             raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
 
-        rate = await get_room_rate(RoomCategory(room["category"]), booking.guest_rank)
-        total_amount += rate * nights
+        rate = await get_room_rate(RoomCategory(room["category"]), booking.is_org)
+        license_fee = await get_room_rate(RoomCategory(room["category"]), booking.is_org, is_license_fee=True)
+        total_amount += (rate + license_fee) * nights
         room_numbers.append(room["room_number"])
         room_categories.append(room["category"])
 
@@ -878,8 +890,6 @@ async def create_booking(booking: BookingCreate):
     if not guest:
         guest_obj = Guest(
             name=booking.guest_name,
-            rank=booking.guest_rank,
-            unit=booking.guest_unit,
             contact_number=booking.guest_contact
         )
         guest_doc = serialize_doc(guest_obj.model_dump())
@@ -894,9 +904,8 @@ async def create_booking(booking: BookingCreate):
         guest_id=guest["id"],
         guest_name=booking.guest_name,
         guest_contact=booking.guest_contact,
-        guest_rank=booking.guest_rank,
-        guest_unit=booking.guest_unit,
-        guest_service_status=booking.guest_service_status,
+        is_org=booking.is_org,
+        org_color=booking.org_color,
         room_ids=booking.room_ids,
         room_numbers=room_numbers,
         room_categories=room_categories,
@@ -916,14 +925,10 @@ async def create_booking(booking: BookingCreate):
         bank_account=booking.bank_account,
         upi_id=booking.upi_id,
         upi_phone=booking.upi_phone,
-        service_type=booking.service_type,
-        command_hq=booking.command_hq,
-        army_number=booking.army_number,
         guest_age=booking.guest_age,
         guest_sex=booking.guest_sex,
         guest_address=booking.guest_address,
         aadhaar_number=booking.aadhaar_number,
-        identity_card_number=booking.identity_card_number,
         wife_count=booking.wife_count,
         children_count=booking.children_count,
         family_members=booking.family_members,
