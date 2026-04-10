@@ -219,11 +219,11 @@ export default function GuestDetailsTab({ settings }) {
                     <tr>
                       <th>Booking No</th>
                       <th>Room(s)</th>
-                      <th>Rank</th>
+                      <th>Type</th>
+                      <th>Color</th>
                       <th>Name</th>
                       <th>Age</th>
                       <th>Sex</th>
-                      <th>Unit</th>
                       <th>Relationship</th>
                       <th>Address</th>
                       <th>Aadhaar No</th>
@@ -239,11 +239,21 @@ export default function GuestDetailsTab({ settings }) {
                       <tr key={idx} className={guest.relationship === "Self" ? "bg-blue-50 font-semibold" : ""}>
                         <td className="font-medium">{guest.booking_number}</td>
                         <td>{guest.room_numbers}</td>
-                        <td>{guest.rank}</td>
+                        <td>
+                          {guest.is_org ? (
+                            <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">Org</span>
+                          ) : guest.is_org === "—" ? "—" : (
+                            <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600">Non-Org</span>
+                          )}
+                        </td>
+                        <td>
+                          {guest.org_color && guest.org_color !== "—" ? (
+                            <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700">{guest.org_color}</span>
+                          ) : "—"}
+                        </td>
                         <td>{guest.name}</td>
                         <td className="text-center">{guest.age}</td>
                         <td className="text-center">{guest.sex}</td>
-                        <td>{guest.unit}</td>
                         <td>
                           <span className={`px-2 py-1 rounded text-xs font-medium ${
                             guest.relationship === 'Self' ? 'bg-blue-100 text-blue-700' :

@@ -271,11 +271,9 @@ export default function RoomOccupancyTab({ settings }) {
                                     <thead className="bg-indigo-100">
                                       <tr>
                                         <th className="text-left p-2 font-semibold">Booking No</th>
-                                        <th className="text-left p-2 font-semibold">Army No</th>
-                                        <th className="text-left p-2 font-semibold">Rank</th>
                                         <th className="text-left p-2 font-semibold">Name</th>
-                                        <th className="text-left p-2 font-semibold">Unit</th>
-                                        <th className="text-left p-2 font-semibold">Command</th>
+                                        <th className="text-left p-2 font-semibold">Type</th>
+                                        <th className="text-left p-2 font-semibold">Color</th>
                                         <th className="text-center p-2 font-semibold">From</th>
                                         <th className="text-center p-2 font-semibold">To</th>
                                         <th className="text-center p-2 font-semibold">Days</th>
@@ -291,11 +289,17 @@ export default function RoomOccupancyTab({ settings }) {
                                       {room.bookings_detail.map((booking, idx) => (
                                         <tr key={idx} className="border-t border-indigo-100 hover:bg-indigo-50">
                                           <td className="p-2 font-medium">{booking.booking_number}</td>
-                                          <td className="p-2">{booking.army_number}</td>
-                                          <td className="p-2">{booking.rank}</td>
                                           <td className="p-2">{booking.name}</td>
-                                          <td className="p-2">{booking.unit}</td>
-                                          <td className="p-2">{booking.command}</td>
+                                          <td className="p-2">
+                                            <span className={`text-xs px-2 py-0.5 rounded ${booking.is_org ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
+                                              {booking.is_org ? "Org" : "Non-Org"}
+                                            </span>
+                                          </td>
+                                          <td className="p-2">
+                                            {booking.org_color ? (
+                                              <span className="text-xs px-2 py-0.5 rounded bg-purple-100 text-purple-700">{booking.org_color}</span>
+                                            ) : "—"}
+                                          </td>
                                           <td className="p-2 text-center">{booking.from_date}</td>
                                           <td className="p-2 text-center">{booking.to_date}</td>
                                           <td className="p-2 text-center font-semibold">{booking.days}</td>

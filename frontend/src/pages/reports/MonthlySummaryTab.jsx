@@ -136,9 +136,9 @@ export default function MonthlySummaryTab({ settings }) {
             <CardContent>
               <div className="space-y-3">
                 {[
-                  { label: "JCO (Cat I Rooms)", key: "jco", color: "text-blue-700" },
-                  { label: "OR (Cat II Rooms)", key: "or", color: "text-purple-700" },
-                  { label: "Def Civ", key: "def_civ", color: "text-orange-700" }
+                  { label: "Org (Cat I)", key: "org_cat_i", color: "text-blue-700" },
+                  { label: "Org (Cat II)", key: "org_cat_ii", color: "text-purple-700" },
+                  { label: "Non-Org", key: "non_org", color: "text-orange-700" }
                 ].map(({ label, key, color }) => {
                   const lf = report.license_fees?.[key] || {};
                   return (
@@ -168,9 +168,9 @@ export default function MonthlySummaryTab({ settings }) {
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Row label="JCO Room Rent" value={`${report.jco_days} × ₹${report.rates?.cat_i_room_rent || 470} = ₹${((report.jco_days || 0) * (report.rates?.cat_i_room_rent || 470)).toFixed(2)}`} />
-                  <Row label="OR Room Rent" value={`${report.or_days} × ₹${report.rates?.cat_ii_room_rent || 385} = ₹${((report.or_days || 0) * (report.rates?.cat_ii_room_rent || 385)).toFixed(2)}`} />
-                  <Row label="Def Civ Room Rent" value={`${report.def_civ_days} × ₹${report.rates?.def_civ_room_rent || 570} = ₹${((report.def_civ_days || 0) * (report.rates?.def_civ_room_rent || 570)).toFixed(2)}`} />
+                  <Row label="Org (Cat I) Room Rent" value={`${report.org_cat_i_days || 0} × ₹${report.rates?.cat_i_room_rent || 470} = ₹${((report.org_cat_i_days || 0) * (report.rates?.cat_i_room_rent || 470)).toFixed(2)}`} />
+                  <Row label="Org (Cat II) Room Rent" value={`${report.org_cat_ii_days || 0} × ₹${report.rates?.cat_ii_room_rent || 385} = ₹${((report.org_cat_ii_days || 0) * (report.rates?.cat_ii_room_rent || 385)).toFixed(2)}`} />
+                  <Row label="Non-Org Room Rent" value={`${report.non_org_days || 0} × ₹${report.rates?.non_org_room_rent || 570} = ₹${((report.non_org_days || 0) * (report.rates?.non_org_room_rent || 570)).toFixed(2)}`} />
                   <Row label="Room Rent Sub-Total" value={`₹${(report.room_rent_total || 0).toFixed(2)}`} bold />
                   <Row label="License Fee Total" value={`₹${(report.total_license_fee || 0).toFixed(2)}`} bold />
                   <Row label="Extra Beds" value={`${report.extra_beds_total || 0} × ₹75 = ₹${(report.extra_bed_amount || 0).toFixed(2)}`} />
