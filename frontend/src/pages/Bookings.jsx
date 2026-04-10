@@ -34,7 +34,8 @@ import {
   FilePdf,
   UserPlus,
   Trash,
-  WarningCircle
+  WarningCircle,
+  NotePencil
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useLocation } from "react-router-dom";
@@ -92,6 +93,27 @@ export default function Bookings() {
   const [createdBookingData, setCreatedBookingData] = useState(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [bookingToDelete, setBookingToDelete] = useState(null);
+  const [showAmend, setShowAmend] = useState(false);
+  const [amendBooking, setAmendBooking] = useState(null);
+  const [amendForm, setAmendForm] = useState({
+    check_in_date: null,
+    check_out_date: null,
+    room_ids: [],
+    num_rooms: 1,
+    total_members: 1,
+    member_ages: [0],
+    additional_advance: 0,
+    payment_mode: "",
+    payment_id: "",
+    bank_name: "",
+    bank_ifsc: "",
+    bank_account: "",
+    upi_id: "",
+    upi_phone: "",
+    amendment_reason: ""
+  });
+  const [availableRoomsForAmend, setAvailableRoomsForAmend] = useState([]);
+  const [loadingRoomsForAmend, setLoadingRoomsForAmend] = useState(false);
 
   // Guest History
   const [showGuestHistory, setShowGuestHistory] = useState(false);
@@ -1167,6 +1189,150 @@ export default function Bookings() {
       toast.error("No confirmed or checked-in bookings to print");
       return;
     }
+
+
+  // Amendment handlers
+  const handleOpenAmend = (booking) => {
+    setAmendBooking(booking);
+    setAmendForm({
+      check_in_date: parseISO(booking.check_in_date),
+      check_out_date: parseISO(booking.check_out_date),
+      room_ids: booking.room_ids || [],
+      num_rooms: booking.num_rooms || 1,
+      total_members: booking.total_members || 1,
+      member_ages: booking.member_ages || [0],
+      additional_advance: 0,
+      payment_mode: "",
+      payment_id: "",
+      bank_name: "",
+      bank_ifsc: "",
+      bank_account: "",
+      upi_id: "",
+      upi_phone: "",
+      amendment_reason: ""
+    });
+    setShowAmend(true);
+  };
+
+  const fetchAvailableRoomsForAmend = async (checkIn, checkOut, excludeBookingId) => {
+    if (!checkIn || !checkOut) { setAvailableRoomsForAmend([]); return; }
+    setLoadingRoomsForAmend(true);
+    try {
+      const response = await axios.get(`${API}/dashboard/room-availability`, {
+        params: {
+          check_in_date: format(checkIn, "yyyy-MM-dd"),
+          check_out_date: format(checkOut, "yyyy-MM-dd")
+        }
+      });
+      setAvailableRoomsForAmend(response.data.available_rooms || []);
+    } catch (error) {
+      toast.error("Failed to check room availability");
+      setAvailableRoomsForAmend([]);
+    } finally {
+      setLoadingRoomsForAmend(false);
+    }
+  };
+
+  const calculateAmendmentCost = () => {
+    if (!amendBooking || !amendForm.check_in_date || !amendForm.check_out_date || amendForm.room_ids.length === 0) {
+      return { oldTotal: 0, newTotal: 0, difference: 0, nights: 0 };
+    }
+
+    const nights = Math.max(1, Math.floor((amendForm.check_out_date - amendForm.check_in_date) / (1000 * 60 * 60 * 24)));
+    
+    // Get selected rooms for amendment
+    const selectedRooms = availableRoomsForAmend.filter(r => amendForm.room_ids.includes(r.id));
+    
+    // Calculate new total
+    let newTotal = 0;
+    selectedRooms.forEach(room => {
+      const isNonOrg = !amendBooking.is_org;
+      let rate;
+      if (room.category === "Cat I") {
+        rate = isNonOrg ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate;
+      } else {
+        rate = isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate;
+      }
+      newTotal += (rate || 0) * nights;
+    });
+
+    const oldTotal = amendBooking.total_amount || 0;
+    const difference = newTotal - oldTotal;
+
+    return { oldTotal, newTotal, difference, nights };
+  };
+
+  const handleAmendBooking = async () => {
+    try {
+      const costAnalysis = calculateAmendmentCost();
+      
+      // Validate additional advance if cost increased
+      if (costAnalysis.difference > 0 && amendForm.additional_advance < costAnalysis.difference) {
+        toast.error(`Additional advance required: ₹${costAnalysis.difference}`);
+        return;
+      }
+
+      // Validate payment details if additional advance required
+      if (costAnalysis.difference > 0 && amendForm.additional_advance > 0) {
+        if (!amendForm.payment_mode) {
+          toast.error("Please select payment mode");
+          return;
+        }
+        if (!isPaymentDetailsFilled(amendForm.payment_mode, amendForm)) {
+          toast.error("Please fill payment details");
+          return;
+        }
+      }
+
+      const payload = {
+        booking_id: amendBooking.id,
+        check_in_date: format(amendForm.check_in_date, "yyyy-MM-dd"),
+        check_out_date: format(amendForm.check_out_date, "yyyy-MM-dd"),
+        room_ids: amendForm.room_ids,
+        num_rooms: amendForm.num_rooms,
+        total_members: amendForm.total_members,
+        member_ages: amendForm.member_ages,
+        additional_advance: amendForm.additional_advance,
+        payment_mode: amendForm.payment_mode || null,
+        payment_id: amendForm.payment_id || null,
+        bank_name: amendForm.bank_name || null,
+        bank_ifsc: amendForm.bank_ifsc || null,
+        bank_account: amendForm.bank_account || null,
+        upi_id: amendForm.upi_id || null,
+        upi_phone: amendForm.upi_phone || null,
+        amendment_reason: amendForm.amendment_reason || null
+      };
+
+      const response = await axios.post(`${API}/bookings/amend`, payload);
+      
+      toast.success(`Booking amended successfully!`);
+      
+      // Show changes summary
+      if (response.data.changes && response.data.changes.length > 0) {
+        setTimeout(() => {
+          toast.info(
+            `Changes: ${response.data.changes.join("; ")}`,
+            { duration: 8000 }
+          );
+        }, 500);
+      }
+
+      setShowAmend(false);
+      setAmendBooking(null);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to amend booking");
+    }
+  };
+
+  const isPaymentDetailsFilled = (mode, formData) => {
+    if (!mode) return false;
+    if (mode === "Cash") return true;
+    if (mode === "UPI") return formData.upi_id || formData.upi_phone;
+    if (mode === "Bank Transfer") return formData.bank_name && formData.bank_account;
+    return false;
+  };
+
     
     try {
       const result = generateBookingSlips(eligibleBookings);
@@ -1425,6 +1591,13 @@ export default function Bookings() {
                                 title={!canCheckInToday(booking) ? `Check-in available from ${new Date(booking.check_in_date).toLocaleDateString('en-IN')}` : 'Check In'}
                                 data-testid={`checkin-btn-${booking.id}`}>
                                 <SignIn size={16} className="mr-1" />Check In
+                              </Button>
+                              <Button size="sm" variant="outline"
+                                onClick={() => handleOpenAmend(booking)}
+                                className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                title="Amend booking (dates, rooms, party)"
+                                data-testid={`amend-btn-${booking.id}`}>
+                                <NotePencil size={16} className="mr-1" />Amend
                               </Button>
                               <Button size="sm" variant="outline"
                                 onClick={() => openCancelDialog(booking)}
@@ -3411,4 +3584,280 @@ ECSAG Shillong`;
       </Dialog>
     </div>
   );
+
+
+      {/* ===== AMEND BOOKING DIALOG ===== */}
+      <Dialog open={showAmend} onOpenChange={(open) => {
+        if (!open) {
+          setAmendBooking(null);
+          setAvailableRoomsForAmend([]);
+        }
+        setShowAmend(open);
+      }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <NotePencil size={24} className="text-blue-500" />
+              Amend Booking
+            </DialogTitle>
+          </DialogHeader>
+          
+          {amendBooking && (
+            <div className="space-y-6 py-4">
+              {/* Current Booking Info */}
+              <div className="p-4 bg-slate-50 rounded-lg border">
+                <h4 className="font-semibold text-sm mb-2">Current Booking</h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div><span className="text-slate-600">Booking:</span> <span className="font-medium">{amendBooking.booking_number}</span></div>
+                  <div><span className="text-slate-600">Guest:</span> <span className="font-medium">{amendBooking.guest_name}</span></div>
+                  <div><span className="text-slate-600">Check-in:</span> {format(parseISO(amendBooking.check_in_date), "dd MMM yyyy")}</div>
+                  <div><span className="text-slate-600">Check-out:</span> {format(parseISO(amendBooking.check_out_date), "dd MMM yyyy")}</div>
+                  <div><span className="text-slate-600">Rooms:</span> {amendBooking.room_numbers?.join(", ")}</div>
+                  <div><span className="text-slate-600">Amount:</span> <span className="font-medium">₹{amendBooking.total_amount}</span></div>
+                </div>
+              </div>
+
+              {/* Amendment Form */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-sm">Amend Details</h4>
+                
+                {/* Dates */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Check-in Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full mt-1 justify-start text-left font-normal">
+                          <Calendar size={16} className="mr-2" />
+                          {amendForm.check_in_date ? format(amendForm.check_in_date, "dd MMM yyyy") : "Select date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <DayPicker
+                          mode="single"
+                          selected={amendForm.check_in_date}
+                          onSelect={(date) => {
+                            setAmendForm({...amendForm, check_in_date: date});
+                            if (date && amendForm.check_out_date) {
+                              fetchAvailableRoomsForAmend(date, amendForm.check_out_date, amendBooking.id);
+                            }
+                          }}
+                          disabled={(date) => date < new Date()}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                  
+                  <div>
+                    <Label>Check-out Date</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full mt-1 justify-start text-left font-normal">
+                          <Calendar size={16} className="mr-2" />
+                          {amendForm.check_out_date ? format(amendForm.check_out_date, "dd MMM yyyy") : "Select date"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <DayPicker
+                          mode="single"
+                          selected={amendForm.check_out_date}
+                          onSelect={(date) => {
+                            setAmendForm({...amendForm, check_out_date: date});
+                            if (amendForm.check_in_date && date) {
+                              fetchAvailableRoomsForAmend(amendForm.check_in_date, date, amendBooking.id);
+                            }
+                          }}
+                          disabled={(date) => !amendForm.check_in_date || date <= amendForm.check_in_date}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+
+                {/* Room Selection */}
+                {loadingRoomsForAmend ? (
+                  <div className="text-center py-4 text-slate-500">Loading available rooms...</div>
+                ) : availableRoomsForAmend.length > 0 ? (
+                  <div>
+                    <Label>Select Rooms ({amendForm.room_ids.length} selected)</Label>
+                    <div className="grid grid-cols-3 gap-2 mt-2 max-h-48 overflow-y-auto p-2 border rounded">
+                      {availableRoomsForAmend.map(room => (
+                        <div
+                          key={room.id}
+                          onClick={() => {
+                            const isSelected = amendForm.room_ids.includes(room.id);
+                            setAmendForm({
+                              ...amendForm,
+                              room_ids: isSelected 
+                                ? amendForm.room_ids.filter(id => id !== room.id)
+                                : [...amendForm.room_ids, room.id],
+                              num_rooms: isSelected ? amendForm.room_ids.length - 1 : amendForm.room_ids.length + 1
+                            });
+                          }}
+                          className={`p-2 border rounded cursor-pointer text-center text-sm ${
+                            amendForm.room_ids.includes(room.id) 
+                              ? 'bg-blue-100 border-blue-500' 
+                              : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="font-medium">{room.room_number}</div>
+                          <div className="text-xs text-slate-600">{room.category}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : amendForm.check_in_date && amendForm.check_out_date ? (
+                  <div className="text-center py-4 text-slate-500">No rooms available for selected dates</div>
+                ) : null}
+
+                {/* Party Composition */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Total Members</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={amendForm.total_members}
+                      onChange={(e) => {
+                        const count = parseInt(e.target.value) || 1;
+                        const newAges = Array(count).fill(0).map((_, i) => amendForm.member_ages[i] || 0);
+                        setAmendForm({...amendForm, total_members: count, member_ages: newAges});
+                      }}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label>Member Ages (comma-separated)</Label>
+                    <Input
+                      value={amendForm.member_ages.join(", ")}
+                      onChange={(e) => {
+                        const ages = e.target.value.split(",").map(a => parseInt(a.trim()) || 0);
+                        setAmendForm({...amendForm, member_ages: ages});
+                      }}
+                      placeholder="30, 28, 5, 3"
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
+
+                {/* Cost Analysis */}
+                {amendForm.room_ids.length > 0 && amendForm.check_in_date && amendForm.check_out_date && (
+                  <div className="p-4 bg-slate-50 rounded-lg border">
+                    <h4 className="font-semibold text-sm mb-2">Cost Analysis</h4>
+                    {(() => {
+                      const cost = calculateAmendmentCost();
+                      return (
+                        <div className="space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span>Current Amount:</span>
+                            <span className="font-medium">₹{cost.oldTotal}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>New Amount ({cost.nights} nights):</span>
+                            <span className="font-medium">₹{cost.newTotal}</span>
+                          </div>
+                          <div className={`flex justify-between pt-2 border-t font-semibold ${
+                            cost.difference > 0 ? 'text-red-600' : cost.difference < 0 ? 'text-green-600' : ''
+                          }`}>
+                            <span>Difference:</span>
+                            <span>{cost.difference > 0 ? '+' : ''}₹{cost.difference}</span>
+                          </div>
+                          {cost.difference > 0 && (
+                            <p className="text-xs text-amber-600 mt-2">⚠️ Additional advance payment required</p>
+                          )}
+                          {cost.difference < 0 && (
+                            <p className="text-xs text-green-600 mt-2">✓ Refund will be processed at check-in</p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Payment Section (if cost increased) */}
+                {calculateAmendmentCost().difference > 0 && (
+                  <div className="space-y-3 p-4 border rounded-lg">
+                    <h4 className="font-semibold text-sm">Additional Payment</h4>
+                    <div>
+                      <Label>Additional Advance (₹)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={amendForm.additional_advance}
+                        onChange={(e) => setAmendForm({...amendForm, additional_advance: parseFloat(e.target.value) || 0})}
+                        className="mt-1"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">Required: ₹{calculateAmendmentCost().difference}</p>
+                    </div>
+                    
+                    <div>
+                      <Label>Payment Mode</Label>
+                      <Select value={amendForm.payment_mode} onValueChange={(v) => setAmendForm({...amendForm, payment_mode: v, payment_id: ""})}>
+                        <SelectTrigger className="mt-1">
+                          <SelectValue placeholder="Select payment mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Cash">Cash</SelectItem>
+                          <SelectItem value="UPI">UPI</SelectItem>
+                          <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {amendForm.payment_mode === "UPI" && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label>UPI ID</Label>
+                          <Input value={amendForm.upi_id} onChange={(e) => setAmendForm({...amendForm, upi_id: e.target.value})} className="mt-1" />
+                        </div>
+                        <div>
+                          <Label>UPI Phone</Label>
+                          <Input value={amendForm.upi_phone} onChange={(e) => setAmendForm({...amendForm, upi_phone: e.target.value})} className="mt-1" />
+                        </div>
+                      </div>
+                    )}
+
+                    {amendForm.payment_mode === "Bank Transfer" && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label>Bank Name</Label>
+                          <Input value={amendForm.bank_name} onChange={(e) => setAmendForm({...amendForm, bank_name: e.target.value})} className="mt-1" />
+                        </div>
+                        <div>
+                          <Label>Account Number</Label>
+                          <Input value={amendForm.bank_account} onChange={(e) => setAmendForm({...amendForm, bank_account: e.target.value})} className="mt-1" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Amendment Reason */}
+                <div>
+                  <Label>Reason for Amendment (Optional)</Label>
+                  <Textarea
+                    value={amendForm.amendment_reason}
+                    onChange={(e) => setAmendForm({...amendForm, amendment_reason: e.target.value})}
+                    placeholder="e.g., Guest requested date change"
+                    className="mt-1"
+                    rows={2}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAmend(false)}>Cancel</Button>
+            <Button 
+              onClick={handleAmendBooking}
+              className="bg-blue-500 hover:bg-blue-600"
+              disabled={!amendForm.check_in_date || !amendForm.check_out_date || amendForm.room_ids.length === 0}
+            >
+              Confirm Amendment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 }
