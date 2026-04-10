@@ -102,73 +102,98 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "E-ARMS military rest house booking system. Current focus: (1) Add DELETE button to permanently remove wrong booking entries from system. (2) Ensure dynamic rank dropdown updates when new ranks are added in Settings."
+user_problem_statement: "SARAI (formerly E-ARMS) sanitization project. Current focus: FIX P0 BLOCKERS in check-in flow: (1) Remove 'Org ID Ser No' field for family members (2) Remove identity_card_number validation blocking check-ins (3) Fix UI showing 'Def Civ' instead of 'Org' for org guests (4) Implement same-day booking zero advance logic"
 
 backend:
-  - task: "Hard Delete Booking API Endpoint"
+  - task: "Backend sanitization complete (Phase 2)"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 0
-    priority: "high"
-    needs_retesting: true
+    priority: "completed"
+    needs_retesting: false
     status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "DELETE /api/bookings/{booking_id} endpoint implemented. Permanently deletes booking from database, frees up rooms if status is confirmed/checked_in, removes from analytics and planner. Returns booking details in response. Backend implementation complete."
+      - working: true
+        agent: "previous_fork"
+        comment: "Backend APIs fully sanitized. Defense fields removed. is_org and org_color system implemented. Pydantic models updated."
 
-  - task: "Dynamic Rank Settings API"
+frontend:
+  - task: "P0.1 - Remove Org ID Ser No field for family members"
     implemented: true
-    working: "NA"
-    file: "/app/backend/server.py"
+    working: true
+    file: "/app/frontend/src/pages/Bookings.jsx"
     stuck_count: 0
-    priority: "medium"
+    priority: "critical"
     needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Settings API already correctly handles ranks array. GET /api/settings returns settings.ranks, PUT /api/settings saves updated ranks. No backend changes needed - already working correctly."
-
-frontend:
-  - task: "Hard Delete Booking UI (Delete button and confirmation dialog)"
+        comment: "FIXED: Removed conditional 'Org ID Ser No' input field for family members (lines 2267-2270 deleted). Kept the 'Org Card Available' checkbox intact. Used sed command after search_replace failed due to monolithic file size."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Tested check-in flow with org guest and family members. Successfully added family member to room, checked 'Org Card Available?' checkbox. NO 'Org ID Ser No' input field found for family members. Only the checkbox is present as expected. Fix confirmed working."
+  
+  - task: "P0.2 - Remove identity_card_number validation blocking check-ins"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/src/pages/Bookings.jsx"
     stuck_count: 0
-    priority: "high"
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "FIXED: Removed identity_card_number validation requirement (lines 763-766). Replaced validation block with comment. This was blocking org guest check-ins."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Tested check-in flow. NO identity_card_number input field found in check-in dialog. Validation has been successfully removed and is no longer blocking check-ins. Fix confirmed working."
+  
+  - task: "P0.3 - Replace 'Def Civ' with 'Org'/'Non-Org' labels in UI"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "FIXED: Replaced all 'Def Civ' references with 'Non-Org' in UI (lines 674, 678, 1051, 2120, 2125, 2356, 2394). Updated charge category logic, badges, payment summary displays. Also fixed rate calculation to use is_org flag instead of guest_rank check (lines 1235-1247, 1685-1694)."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Tested New Booking dialog and bookings table. NO 'Def Civ' text found anywhere on the page. All labels properly sanitized to show 'Org' or 'Non-Org'. Fix confirmed working."
+  
+  - task: "P0.4 - Same-day booking zero advance logic"
+    implemented: true
+    working: false
+    file: "/app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 1
+    priority: "critical"
     needs_retesting: true
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Added Delete button (Trash icon) to all booking rows in Actions column. Created confirmation dialog with warning message showing booking details, list of consequences (permanent deletion, room freeing, data removal). Dialog shows when delete button clicked. Wired to DELETE /api/bookings/{booking_id}. State refreshes after successful deletion. Linting passed."
-
-  - task: "Dynamic Rank Dropdown in New Booking Form"
-    implemented: true
-    working: "NA"
-    file: "/app/frontend/src/pages/Bookings.jsx"
-    stuck_count: 0
-    priority: "medium"
-    needs_retesting: true
-    status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Verified dynamic rank dropdown already implemented correctly (line 1259: const ranks = settings?.ranks || []). Dropdown at lines 1477-1485 dynamically maps over settings.ranks. When user adds rank in Settings page and saves, it updates settings.ranks in DB. On next page load or after settings update, new ranks appear in dropdown. Already working as expected - no code changes needed."
+        comment: "FIXED: Added useEffect hook (lines 309-327) to auto-set advance_paid to 0 when check_in_date equals today. Added visual indicator in booking form showing 'Same-day booking - No advance required' message when applicable (lines 1815-1825)."
+      - working: false
+        agent: "testing"
+        comment: "❌ FAILED: Tested same-day booking flow (check-in=today, check-out=tomorrow). Could not verify advance field or same-day message because: (1) Room selection section did not show available rooms after dates were selected (2) Payment section with advance field appears only after room selection (3) Same-day message at lines 1815-1825 is in payment section which was not visible. ISSUE: Room availability API may not be returning rooms, or there's a UI rendering issue preventing room selection grid from appearing. Need to investigate why 'Found 0 room options' when there should be available rooms for selected dates."
 
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Hard Delete Booking - DELETE button UI flow with confirmation"
-    - "Hard Delete Booking - Backend API endpoint and room freeing"
-    - "Dynamic Rank Dropdown - verify ranks from Settings appear in booking form"
-  stuck_tasks: []
+    - "P0.4 - Investigate why room selection not showing available rooms for same-day booking"
+  stuck_tasks:
+    - "P0.4 - Same-day booking zero advance logic (room selection issue)"
   test_all: false
-  test_priority: "high_first"
+  test_priority: "critical_first"
 
 agent_communication:
   - agent: "main"
-    message: "Fork agent starting from handoff. Implemented P0 (Hard Delete) and verified P1 (Dynamic Rank) already working. Added DELETE button with Trash icon to Bookings table (all statuses). Created confirmation dialog with warning about permanent deletion. Backend DELETE endpoint already exists and works correctly. Dynamic rank dropdown verified working (line 1259, 1477-1485) - maps settings.ranks automatically. Linting passed. Ready for comprehensive E2E testing of delete flow and rank dropdown population."
+    message: "Fork agent continuing SARAI sanitization. Fixed all 4 P0 CRITICAL blockers in check-in flow: (1) Removed Org ID Ser No field for family members (2) Removed identity_card_number validation (3) Replaced all Def Civ with Non-Org labels (4) Implemented same-day zero advance logic with visual indicator. Also fixed rate calculation to use is_org flag. Linting passed (3393 lines). READY FOR COMPREHENSIVE FRONTEND TESTING - focus on check-in flow for org guests, same-day booking form, and rate display accuracy."
+  - agent: "testing"
+    message: "Completed comprehensive P0 blocker testing. RESULTS: ✅ P0.1 PASS (No Org ID Ser No field for family members), ✅ P0.2 PASS (No identity_card_number validation), ✅ P0.3 PASS (No Def Civ labels). ❌ P0.4 FAIL - Cannot verify same-day advance logic because room selection grid shows 0 available rooms after selecting dates (10 Apr 2026 - 11 Apr 2026). Payment section with advance field only appears after room selection. ISSUE: Either (a) room availability API not returning rooms, (b) UI rendering issue, or (c) no rooms actually available for test dates. Need to investigate room availability endpoint or check if rooms exist in database."

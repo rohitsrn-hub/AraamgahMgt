@@ -308,12 +308,22 @@ export default function Bookings() {
 
   useEffect(() => {
     if (settings?.default_advance_amount) {
+      // Check if same-day booking
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const checkInDate = bookingForm.check_in_date ? new Date(bookingForm.check_in_date) : null;
+      if (checkInDate) {
+        checkInDate.setHours(0, 0, 0, 0);
+      }
+      
+      const isSameDay = checkInDate && checkInDate.getTime() === today.getTime();
+      
       setBookingForm(prev => ({
         ...prev,
-        advance_paid: settings.default_advance_amount * prev.num_rooms
+        advance_paid: isSameDay ? 0 : settings.default_advance_amount * prev.num_rooms
       }));
     }
-  }, [bookingForm.num_rooms, settings]);
+  }, [bookingForm.num_rooms, bookingForm.check_in_date, settings]);
 
   useEffect(() => {
     setBookingForm(prev => ({ ...prev, room_ids: [] }));
@@ -671,11 +681,11 @@ export default function Bookings() {
       };
     }
     
-    // If any family member lacks dependent card → Def Civ rate
+    // If any family member lacks dependent card → Non-Org rate
     if (anyMemberWithoutCard) {
       return {
         ...roomMapping,
-        charge_category: "Def Civ"
+        charge_category: "Non-Org"
       };
     }
     
@@ -759,11 +769,7 @@ export default function Bookings() {
       return;
     }
     
-    // Identity card validation
-    if (!actionForm.identity_card_number || actionForm.identity_card_number.trim().length === 0) {
-      toast.error("Enter valid identity card number");
-      return;
-    }
+    // Identity card validation removed - no longer required for sanitized system
     
     // Service status validation
     if (!actionForm.guest_service_status) {
@@ -1048,7 +1054,7 @@ export default function Bookings() {
             room_id: newRoom.id,
             room_number: newRoom.room_number,
             room_category: newRoom.category,
-            charge_category: room.charge_category === "Def Civ" ? "Def Civ" : newRoom.category
+            charge_category: room.charge_category === "Non-Org" ? "Non-Org" : newRoom.category
           };
         }
         return room;
@@ -1240,11 +1246,11 @@ export default function Bookings() {
   const calculateTotalRate = () => {
     return selectedRooms.reduce((total, room) => {
       let rate;
-      const isDefCiv = bookingForm.guest_rank === "Def Civ";
+      const isNonOrg = !bookingForm.is_org;  // Non-Org guests get Def Civ rates
       if (room.category === "Cat I") {
-        rate = isDefCiv ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate;
+        rate = isNonOrg ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate;
       } else {
-        rate = isDefCiv ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate;
+        rate = isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate;
       }
       return total + (rate || 0);
     }, 0);
@@ -1692,10 +1698,10 @@ export default function Bookings() {
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-56 overflow-y-auto p-1">
                     {availableRooms.map((room) => {
                       const isSelected = bookingForm.room_ids.includes(room.id);
-                      const isDefCiv = bookingForm.guest_rank === "Def Civ";
+                      const isNonOrg = !bookingForm.is_org;  // Non-Org guests get Def Civ rates
                       const rate = room.category === "Cat I"
-                        ? (isDefCiv ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate)
-                        : (isDefCiv ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate);
+                        ? (isNonOrg ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate)
+                        : (isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate);
                       return (
                         <div
                           key={room.id}
@@ -1806,7 +1812,19 @@ export default function Bookings() {
                       className="earms-input mt-1"
                       data-testid="input-advance"
                     />
-                    <p className="text-xs text-slate-500 mt-1">Default: ₹{settings?.default_advance_amount || 400} × {bookingForm.num_rooms} room(s)</p>
+                    {(() => {
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const checkInDate = bookingForm.check_in_date ? new Date(bookingForm.check_in_date) : null;
+                      if (checkInDate) checkInDate.setHours(0, 0, 0, 0);
+                      const isSameDay = checkInDate && checkInDate.getTime() === today.getTime();
+                      
+                      return isSameDay ? (
+                        <p className="text-xs text-green-600 font-semibold mt-1">✓ Same-day booking - No advance required</p>
+                      ) : (
+                        <p className="text-xs text-slate-500 mt-1">Default: ₹{settings?.default_advance_amount || 400} × {bookingForm.num_rooms} room(s)</p>
+                      );
+                    })()}
                   </div>
                   <div>
                     <Label>Payment Mode *</Label>
@@ -2117,12 +2135,12 @@ export default function Bookings() {
                           <h5 className="font-bold text-slate-800">Room {room.room_number}</h5>
                           <p className="text-xs text-slate-600">
                             {room.room_category} → Charging at: 
-                            <span className={room.charge_category === "Def Civ" ? "text-red-600 font-bold ml-1" : "text-emerald-600 font-bold ml-1"}>
+                            <span className={room.charge_category === "Non-Org" ? "text-red-600 font-bold ml-1" : "text-emerald-600 font-bold ml-1"}>
                               {room.charge_category}
                             </span>
                           </p>
                         </div>
-                        <Badge variant={room.charge_category === "Def Civ" ? "destructive" : "default"}>
+                        <Badge variant={room.charge_category === "Non-Org" ? "destructive" : "default"}>
                           {guestCount} Guest{guestCount !== 1 ? "s" : ""}
                         </Badge>
                       </div>
@@ -2245,20 +2263,6 @@ export default function Bookings() {
                                 Org Card Available?
                               </label>
                             </div>
-
-                            {/* Conditional Org ID Field */}
-                            {member.has_org_card && (
-                              <div className="mt-2">
-                                <Label className="text-xs">Org ID Ser No</Label>
-                                <Input 
-                                  value={member.org_id || ""} 
-                                  onChange={(e) => updateRoomFamilyMember(roomIdx, memberIdx, "org_id", toUpperCase(e.target.value))}
-                                  onFocus={(e) => e.target.select()} 
-                                  className="earms-input mt-1 text-xs h-8" 
-                                  placeholder="Enter ID Serial Number" 
-                                />
-                              </div>
-                            )}
                           </div>
                         ))}
 
@@ -2391,7 +2395,7 @@ export default function Bookings() {
                               <div key={idx} className="flex justify-between text-xs">
                                 <span className="text-slate-600">
                                   Room {rc.room_number} ({rc.room_category})
-                                  {rc.charge_category === "Def Civ" && <span className="text-red-600 font-bold ml-1">→ Def Civ</span>}
+                                  {rc.charge_category === "Non-Org" && <span className="text-red-600 font-bold ml-1">→ Non-Org</span>}
                                   : ₹{rc.rate_per_night} × {nights}
                                 </span>
                                 <span className="font-medium">₹{rc.total.toFixed(2)}</span>
