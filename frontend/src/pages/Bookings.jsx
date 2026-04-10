@@ -1222,6 +1222,12 @@ export default function Bookings() {
       upi_phone: "",
       amendment_reason: ""
     });
+    // Fetch available rooms for the booking's current dates
+    fetchAvailableRoomsForAmend(
+      parseISO(booking.check_in_date),
+      parseISO(booking.check_out_date),
+      booking.id
+    );
     console.log("Setting showAmend to true");
     setShowAmend(true);
   };
@@ -1230,13 +1236,15 @@ export default function Bookings() {
     if (!checkIn || !checkOut) { setAvailableRoomsForAmend([]); return; }
     setLoadingRoomsForAmend(true);
     try {
-      const response = await axios.get(`${API}/dashboard/room-availability`, {
+      // Use /api/rooms/available with exclude_booking_id to include currently booked rooms
+      const response = await axios.get(`${API}/rooms/available`, {
         params: {
-          check_in_date: format(checkIn, "yyyy-MM-dd"),
-          check_out_date: format(checkOut, "yyyy-MM-dd")
+          check_in: format(checkIn, "yyyy-MM-dd"),
+          check_out: format(checkOut, "yyyy-MM-dd"),
+          exclude_booking_id: excludeBookingId
         }
       });
-      setAvailableRoomsForAmend(response.data.available_rooms || []);
+      setAvailableRoomsForAmend(response.data || []);
     } catch (error) {
       toast.error("Failed to check room availability");
       setAvailableRoomsForAmend([]);
@@ -1295,6 +1303,12 @@ export default function Bookings() {
           ...prev,
           additional_advance: cost.difference
         }));
+      } else if (cost.difference <= 0) {
+        // For refunds or no change, set additional_advance to 0
+        setAmendForm(prev => ({
+          ...prev,
+          additional_advance: 0
+        }));
       }
     }
   }, [amendForm.check_in_date, amendForm.check_out_date, amendForm.room_ids, availableRoomsForAmend]);
@@ -1303,32 +1317,35 @@ export default function Bookings() {
     try {
       const costAnalysis = calculateAmendmentCost();
       
-      // Validate additional advance if cost increased
-      if (costAnalysis.difference > 0 && amendForm.additional_advance < costAnalysis.difference) {
-        toast.error(`Additional advance required: ₹${costAnalysis.difference}`);
-        return;
-      }
-
-      // Validate payment details if additional advance required
-      if (costAnalysis.difference > 0 && amendForm.additional_advance > 0) {
-        if (!amendForm.payment_mode) {
-          toast.error("Please select payment mode");
+      // Only validate payment details if cost increased (refunds don't need payment validation)
+      if (costAnalysis.difference > 0) {
+        // Validate additional advance if cost increased
+        if (amendForm.additional_advance < costAnalysis.difference) {
+          toast.error(`Additional advance required: ₹${costAnalysis.difference}`);
           return;
         }
-        
-        // Validate payment details based on mode
-        if (amendForm.payment_mode === "UPI") {
-          if (!amendForm.upi_id && !amendForm.upi_phone) {
-            toast.error("Please fill UPI ID or UPI Phone");
+
+        // Validate payment details if additional advance required
+        if (amendForm.additional_advance > 0) {
+          if (!amendForm.payment_mode) {
+            toast.error("Please select payment mode");
             return;
           }
-        } else if (amendForm.payment_mode === "Bank Transfer") {
-          if (!amendForm.bank_name || !amendForm.bank_account) {
-            toast.error("Please fill Bank Name and Account Number");
-            return;
+          
+          // Validate payment details based on mode
+          if (amendForm.payment_mode === "UPI") {
+            if (!amendForm.upi_id && !amendForm.upi_phone) {
+              toast.error("Please fill UPI ID or UPI Phone");
+              return;
+            }
+          } else if (amendForm.payment_mode === "Bank Transfer") {
+            if (!amendForm.bank_name || !amendForm.bank_account) {
+              toast.error("Please fill Bank Name and Account Number");
+              return;
+            }
           }
+          // Cash mode doesn't need additional details
         }
-        // Cash mode doesn't need additional details
       }
 
       const payload = {
@@ -1339,14 +1356,14 @@ export default function Bookings() {
         num_rooms: amendForm.num_rooms,
         total_members: amendForm.total_members,
         member_ages: amendForm.member_ages,
-        additional_advance: amendForm.additional_advance,
-        payment_mode: amendForm.payment_mode || null,
-        payment_id: amendForm.payment_id || null,
-        bank_name: amendForm.bank_name || null,
-        bank_ifsc: amendForm.bank_ifsc || null,
-        bank_account: amendForm.bank_account || null,
-        upi_id: amendForm.upi_id || null,
-        upi_phone: amendForm.upi_phone || null,
+        additional_advance: costAnalysis.difference > 0 ? amendForm.additional_advance : 0,
+        payment_mode: costAnalysis.difference > 0 ? (amendForm.payment_mode || null) : null,
+        payment_id: costAnalysis.difference > 0 ? (amendForm.payment_id || null) : null,
+        bank_name: costAnalysis.difference > 0 ? (amendForm.bank_name || null) : null,
+        bank_ifsc: costAnalysis.difference > 0 ? (amendForm.bank_ifsc || null) : null,
+        bank_account: costAnalysis.difference > 0 ? (amendForm.bank_account || null) : null,
+        upi_id: costAnalysis.difference > 0 ? (amendForm.upi_id || null) : null,
+        upi_phone: costAnalysis.difference > 0 ? (amendForm.upi_phone || null) : null,
         amendment_reason: amendForm.amendment_reason || null
       };
 

@@ -181,15 +181,27 @@ frontend:
         agent: "testing"
         comment: "✅ VERIFIED: Re-tested P0.4 after main agent's refactored useEffect. ALL TESTS PASSED (8/8 steps). (1) Room selection grid now renders correctly with 12 available rooms - CRITICAL FIX CONFIRMED. (2) Same-day advance logic working: advance auto-sets to ₹0 with green message '✓ Same-day booking - No advance required'. (3) Date change logic working: changing to future dates updates advance to ₹400 with 'Default: ₹400 × 1 room(s)' message, same-day message disappears. (4) Reset logic working: changing back to same-day resets advance to ₹0 and same-day message reappears. The refactored useEffect (lines 309-327) successfully resolved the state update conflict that was preventing room grid rendering. P0.4 is now fully functional."
 
+  - task: "P0.5 - Amend Booking refund scenario fix"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/pages/Bookings.jsx, /app/backend/server.py"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "fork_main"
+        comment: "FIXED: Amended booking feature was failing when amendment resulted in a refund (cost decrease). Fixed frontend validation (lines 1302-1355) to skip payment details requirement when costAnalysis.difference <= 0. Updated useEffect auto-populate (lines 1289-1303) to set additional_advance to 0 for refund scenarios. Modified payload to only send payment details when cost increases. Backend was already handling refunds correctly (lines 1510-1512). User reported error when trying to amend booking with refund due - needs testing to verify fix works for both cost increase and decrease scenarios."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 3
+  test_sequence: 4
   run_ui: true
 
 test_plan:
   current_focus:
-    - "All P0 blockers resolved - ready for user acceptance testing"
+    - "P0.5 Amend Booking refund scenario - needs comprehensive testing for both cost increase and decrease"
   stuck_tasks: []
   test_all: false
   test_priority: "critical_first"
@@ -201,3 +213,5 @@ agent_communication:
     message: "✅ P0.4 RE-TEST COMPLETE - ALL TESTS PASSED (8/8). Main agent's refactored useEffect successfully fixed the room selection grid rendering issue. Comprehensive testing confirms: (1) Room grid renders with 12 available rooms (2) Same-day advance logic: ₹0 + green message (3) Future date logic: ₹400 + default message (4) Reset logic: ₹0 + same-day message reappears. ALL 4 P0 CRITICAL BLOCKERS NOW VERIFIED WORKING: P0.1 ✅ (No Org ID Ser No for family), P0.2 ✅ (No identity_card_number validation), P0.3 ✅ (No Def Civ labels), P0.4 ✅ (Same-day zero advance). SARAI sanitization project P0 phase COMPLETE. Ready for user acceptance testing."
   - agent: "testing"
     message: "Completed comprehensive P0 blocker testing. RESULTS: ✅ P0.1 PASS (No Org ID Ser No field for family members), ✅ P0.2 PASS (No identity_card_number validation), ✅ P0.3 PASS (No Def Civ labels). ❌ P0.4 FAIL - Cannot verify same-day advance logic because room selection grid shows 0 available rooms after selecting dates (10 Apr 2026 - 11 Apr 2026). Payment section with advance field only appears after room selection. ISSUE: Either (a) room availability API not returning rooms, (b) UI rendering issue, or (c) no rooms actually available for test dates. Need to investigate room availability endpoint or check if rooms exist in database."
+  - agent: "fork_main"
+    message: "NEW P0 BLOCKER FIXED: P0.5 Amend Booking refund scenario. User reported error when trying to amend booking resulting in refund. CHANGES: (1) Frontend validation in handleAmendBooking now skips payment details requirement when costAnalysis.difference <= 0 (2) Auto-populate useEffect sets additional_advance to 0 for refund/no-change scenarios (3) Payload only sends payment details when cost increases. Backend was already handling refunds correctly. NEEDS TESTING for both scenarios: (a) Amendment with cost increase (additional payment) (b) Amendment with cost decrease (refund due). Testing focus: Amend button in bookings table, Cost Analysis section, Payment section visibility, Backend /api/bookings/amend endpoint."
