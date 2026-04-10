@@ -1433,6 +1433,8 @@ async def amend_booking(request: AmendBookingRequest):
         if not settings:
             settings = {}
         
+        print(f"DEBUG: Settings fetched: {bool(settings)}, Keys: {list(settings.keys()) if settings else []}")
+        
         check_in = date_type.fromisoformat(amendment_data.get("check_in_date", booking["check_in_date"]))
         check_out = date_type.fromisoformat(amendment_data.get("check_out_date", booking["check_out_date"]))
         nights = (check_out - check_in).days
