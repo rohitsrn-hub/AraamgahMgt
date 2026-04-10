@@ -24,9 +24,9 @@ import {
 const DEFAULT_FMN_1 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/7i02eeq8_Eastern_Command%2C_Indian_Army.png";
 const DEFAULT_FMN_2 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/ltoeqxal_101_Area%2C_Indian_Army.svg.png";
 
-const DEFAULT_RANKS = [
-  "Sep/Dfr/Swr", "Nk", "Hav", "Sgt", "PO", "Nb Sub", "JWO", "CPO",
-  "Sub", "WO", "CA", "SM", "MCPO", "Hony Lt or Eqvt", "Hony Capt or Eqvt", "Def Civ"
+const DEFAULT_COLORS = [
+  "Red", "Green", "Brown", "Orange", "Yellow", 
+  "Violet", "Black", "Blue", "White", "Light Blue"
 ];
 
 export default function Settings({ settings, onUpdate }) {
@@ -41,12 +41,12 @@ export default function Settings({ settings, onUpdate }) {
     cat_i_license_fee: settings?.cat_i_license_fee || 30,
     cat_ii_room_rent: settings?.cat_ii_room_rent || 385,
     cat_ii_license_fee: settings?.cat_ii_license_fee || 15,
-    def_civ_room_rent: settings?.def_civ_room_rent || 570,
-    def_civ_license_fee: settings?.def_civ_license_fee || 30,
+    non_org_room_rent: settings?.non_org_room_rent || settings?.def_civ_room_rent || 570,
+    non_org_license_fee: settings?.non_org_license_fee || settings?.def_civ_license_fee || 30,
     cat_i_rooms_count: settings?.cat_i_rooms_count || 6,
     cat_ii_rooms_count: settings?.cat_ii_rooms_count || 9,
     default_advance_amount: settings?.default_advance_amount || 400,
-    ranks: settings?.ranks || [...DEFAULT_RANKS],
+    colors: settings?.colors || [...DEFAULT_COLORS],
     cancellation_policy: settings?.cancellation_policy || [
       { days_before: 7, charge_percent: 0 },
       { days_before: 3, charge_percent: 25 },
@@ -55,7 +55,7 @@ export default function Settings({ settings, onUpdate }) {
     ]
   });
   const [saving, setSaving] = useState(false);
-  const [newRank, setNewRank] = useState("");
+  const [newColor, setNewColor] = useState("");
   
   // P4: Room Categories Management
   const [categories, setCategories] = useState(
@@ -94,22 +94,22 @@ export default function Settings({ settings, onUpdate }) {
     setFormData({ ...formData, cancellation_policy: formData.cancellation_policy.filter((_, i) => i !== index) });
   };
 
-  const addRank = () => {
-    const trimmed = newRank.trim();
+  const addColor = () => {
+    const trimmed = newColor.trim();
     if (!trimmed) return;
-    if (formData.ranks.includes(trimmed)) { toast.error("Rank already exists"); return; }
-    setFormData({ ...formData, ranks: [...formData.ranks, trimmed] });
-    setNewRank("");
-    toast.success(`Rank "${trimmed}" added. Click "Save Settings" below to persist!`, { duration: 5000 });
+    if (formData.colors.includes(trimmed)) { toast.error("Color already exists"); return; }
+    setFormData({ ...formData, colors: [...formData.colors, trimmed] });
+    setNewColor("");
+    toast.success(`Color "${trimmed}" added. Click "Save Settings" below to persist!`, { duration: 5000 });
   };
 
-  const removeRank = (rank) => {
-    setFormData({ ...formData, ranks: formData.ranks.filter(r => r !== rank) });
-    toast.info(`Rank "${rank}" removed. Click "Save Settings" to persist!`, { duration: 5000 });
+  const removeColor = (color) => {
+    setFormData({ ...formData, colors: formData.colors.filter(c => c !== color) });
+    toast.info(`Color "${color}" removed. Click "Save Settings" to persist!`, { duration: 5000 });
   };
 
-  const resetRanks = () => {
-    setFormData({ ...formData, ranks: [...DEFAULT_RANKS] });
+  const resetColors = () => {
+    setFormData({ ...formData, colors: [...DEFAULT_COLORS] });
   };
 
   // P4: Category Management Functions
@@ -503,9 +503,9 @@ export default function Settings({ settings, onUpdate }) {
           </div>
           <div className="grid md:grid-cols-3 gap-4">
             {[
-              { label: "Cat I (JCO)", rentKey: "cat_i_room_rent", feeKey: "cat_i_license_fee", bgClass: "bg-blue-50 border-blue-200", textClass: "text-blue-800", totalClass: "text-blue-700" },
-              { label: "Cat II (OR)", rentKey: "cat_ii_room_rent", feeKey: "cat_ii_license_fee", bgClass: "bg-purple-50 border-purple-200", textClass: "text-purple-800", totalClass: "text-purple-700" },
-              { label: "Def Civ", rentKey: "def_civ_room_rent", feeKey: "def_civ_license_fee", bgClass: "bg-orange-50 border-orange-200", textClass: "text-orange-800", totalClass: "text-orange-700" }
+              { label: "Org (Cat I)", rentKey: "cat_i_room_rent", feeKey: "cat_i_license_fee", bgClass: "bg-blue-50 border-blue-200", textClass: "text-blue-800", totalClass: "text-blue-700" },
+              { label: "Org (Cat II)", rentKey: "cat_ii_room_rent", feeKey: "cat_ii_license_fee", bgClass: "bg-purple-50 border-purple-200", textClass: "text-purple-800", totalClass: "text-purple-700" },
+              { label: "Non-Org", rentKey: "non_org_room_rent", feeKey: "non_org_license_fee", bgClass: "bg-orange-50 border-orange-200", textClass: "text-orange-800", totalClass: "text-orange-700" }
             ].map(({ label, rentKey, feeKey, bgClass, textClass, totalClass }) => (
               <div key={rentKey} className={`p-4 rounded-xl border ${bgClass}`}>
                 <h4 className={`font-semibold mb-3 ${textClass}`}>{label}</h4>
@@ -528,30 +528,30 @@ export default function Settings({ settings, onUpdate }) {
         </CardContent>
       </Card>
 
-      {/* Ranks Management */}
-      <Card className="earms-card" data-testid="ranks-section">
+      {/* Colors Management */}
+      <Card className="earms-card" data-testid="colors-section">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Star size={24} className="text-amber-500" weight="duotone" />
-            Rank List
+            <Star size={24} className="text-purple-500" weight="duotone" />
+            Color Categories
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-slate-500 mb-4">
-            Configure the list of ranks shown in the booking form dropdown. These ranks are also used to identify Def Civ guests for special pricing.
+            Configure the color categories for Organization guests. These are used for classification and grouping in reports.
           </p>
           <div className="flex flex-wrap gap-2 mb-4">
-            {formData.ranks.map((rank) => (
+            {formData.colors.map((color) => (
               <div
-                key={rank}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium border ${rank === "Def Civ" ? "bg-orange-100 border-orange-300 text-orange-800" : "bg-slate-100 border-slate-200 text-slate-700"}`}
-                data-testid={`rank-chip-${rank}`}
+                key={color}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium border bg-purple-100 border-purple-300 text-purple-800"
+                data-testid={`color-chip-${color}`}
               >
-                {rank}
+                {color}
                 <button
-                  onClick={() => removeRank(rank)}
-                  className="ml-1 text-slate-400 hover:text-red-500 transition-colors"
-                  data-testid={`remove-rank-${rank}`}
+                  onClick={() => removeColor(color)}
+                  className="ml-1 text-purple-400 hover:text-red-500 transition-colors"
+                  data-testid={`remove-color-${color}`}
                 >
                   ×
                 </button>
@@ -560,29 +560,29 @@ export default function Settings({ settings, onUpdate }) {
           </div>
           <div className="flex gap-2 mb-3">
             <Input
-              value={newRank}
-              onChange={(e) => setNewRank(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") addRank(); }}
-              placeholder="Add new rank..."
+              value={newColor}
+              onChange={(e) => setNewColor(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addColor(); }}
+              placeholder="Add new color..."
               className="earms-input"
-              data-testid="input-new-rank"
+              data-testid="input-new-color"
             />
-            <Button onClick={addRank} variant="outline" data-testid="add-rank-btn">
+            <Button onClick={addColor} variant="outline" data-testid="add-color-btn">
               <Plus size={18} className="mr-1" /> Add
             </Button>
           </div>
           <div className="flex items-center justify-between">
             <Button
               variant="outline"
-              onClick={resetRanks}
+              onClick={resetColors}
               className="text-sm text-slate-500 border-dashed"
-              data-testid="reset-ranks-btn"
+              data-testid="reset-colors-btn"
             >
-              Reset to Default Ranks
+              Reset to Default (10 colors)
             </Button>
           </div>
-          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <p className="text-sm text-amber-800 font-medium flex items-center gap-2">
+          <div className="mt-4 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+            <p className="text-sm text-purple-800 font-medium flex items-center gap-2">
               <Info size={16} weight="fill" />
               Remember to click "Save Settings" button at the bottom of the page to persist changes!
             </p>
