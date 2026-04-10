@@ -1199,6 +1199,7 @@ export default function Bookings() {
 
   // Amendment handlers
   const handleOpenAmend = (booking) => {
+    console.log("Opening amend dialog for booking:", booking);
     setAmendBooking(booking);
     setAmendForm({
       check_in_date: parseISO(booking.check_in_date),
@@ -1217,6 +1218,7 @@ export default function Bookings() {
       upi_phone: "",
       amendment_reason: ""
     });
+    console.log("Setting showAmend to true");
     setShowAmend(true);
   };
 
@@ -3570,12 +3572,11 @@ ECSAG Shillong`;
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-
 
       {/* ===== AMEND BOOKING DIALOG ===== */}
+      {console.log("Rendering amend dialog, showAmend:", showAmend, "amendBooking:", amendBooking)}
       <Dialog open={showAmend} onOpenChange={(open) => {
+        console.log("Amendment dialog onOpenChange called, open:", open);
         if (!open) {
           setAmendBooking(null);
           setAvailableRoomsForAmend([]);
@@ -3848,4 +3849,6 @@ ECSAG Shillong`;
         </DialogContent>
       </Dialog>
 
+    </div>
+  );
 }
