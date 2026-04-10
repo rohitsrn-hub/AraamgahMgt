@@ -1429,11 +1429,12 @@ async def amend_booking(request: AmendBookingRequest):
     if "check_in_date" in amendment_data or "check_out_date" in amendment_data or "room_ids" in amendment_data:
         from datetime import date as date_type
         
-        settings = await db.settings.find_one({}, {"_id": 0})
+        # FIX: Use correct collection name 'app_settings'
+        settings = await db.app_settings.find_one({}, {"_id": 0})
         if not settings:
             settings = {}
         
-        print(f"DEBUG: Settings fetched: {bool(settings)}, Keys: {list(settings.keys()) if settings else []}")
+        print(f"DEBUG: Settings fetched from app_settings: {bool(settings)}, Keys: {list(settings.keys()) if settings else []}")
         
         check_in = date_type.fromisoformat(amendment_data.get("check_in_date", booking["check_in_date"]))
         check_out = date_type.fromisoformat(amendment_data.get("check_out_date", booking["check_out_date"]))
