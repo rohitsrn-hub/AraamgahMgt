@@ -1189,7 +1189,13 @@ export default function Bookings() {
       toast.error("No confirmed or checked-in bookings to print");
       return;
     }
-
+    
+    // Import and generate
+    import("../utils/pdfUtils").then(module => {
+      const filename = module.generateBookingSlips(eligibleBookings);
+      toast.success(`Generated ${eligibleBookings.length} booking slip(s): ${filename}`);
+    });
+  };
 
   // Amendment handlers
   const handleOpenAmend = (booking) => {
@@ -1322,24 +1328,6 @@ export default function Bookings() {
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to amend booking");
-    }
-  };
-
-  const isPaymentDetailsFilled = (mode, formData) => {
-    if (!mode) return false;
-    if (mode === "Cash") return true;
-    if (mode === "UPI") return formData.upi_id || formData.upi_phone;
-    if (mode === "Bank Transfer") return formData.bank_name && formData.bank_account;
-    return false;
-  };
-
-    
-    try {
-      const result = generateBookingSlips(eligibleBookings);
-      showPDFNotification(result, `Generated ${result.count} booking slip(s)`);
-    } catch (error) {
-      toast.error("Failed to generate booking slips");
-      console.error(error);
     }
   };
 
