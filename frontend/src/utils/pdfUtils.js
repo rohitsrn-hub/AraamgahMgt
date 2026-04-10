@@ -427,15 +427,15 @@ export function generateBookingSlips(bookings) {
     doc.text("SER NO:", 10, y);
     doc.text((index + 1).toString(), 30, y);
     
-    // NO (Army Number)
+    // NO (Army Number) - BLANK
     y += 6;
     doc.text("NO:", 10, y);
-    doc.text(booking.army_number || "N/A", 30, y);
+    doc.line(30, y, 100, y); // Blank line for manual entry
     
-    // Rank
+    // Rank - BLANK
     y += 6;
     doc.text("RANK:", 10, y);
-    doc.text(booking.guest_rank || "N/A", 30, y);
+    doc.line(30, y, 100, y); // Blank line for manual entry
     
     // Name
     y += 6;
@@ -444,10 +444,10 @@ export function generateBookingSlips(bookings) {
     doc.text((booking.guest_name || "").toUpperCase(), 30, y);
     doc.setFont("helvetica", "normal");
     
-    // Unit
+    // Unit - BLANK
     y += 6;
     doc.text("UNIT:", 10, y);
-    doc.text(booking.guest_unit || "N/A", 30, y);
+    doc.line(30, y, 100, y); // Blank line for manual entry
     
     // Right column
     y = startY + 18;
@@ -479,9 +479,9 @@ export function generateBookingSlips(bookings) {
     // Full width fields
     y += 8;
     
-    // I-Card Number
+    // I-Card Number - BLANK
     doc.text("ICARD NO:", 10, y);
-    doc.text(booking.identity_card_number || booking.aadhaar_number || "N/A", 40, y);
+    doc.line(40, y, 100, y); // Blank line for manual entry
     
     // Mobile Number
     doc.text("MOBILE NO:", 110, y);
@@ -502,12 +502,12 @@ export function generateBookingSlips(bookings) {
     doc.text("CONTACT MOBILE NO:", 10, y);
     doc.line(60, y, 200, y); // Blank line for manual entry
     
-    // D.Card No / Aadhar Card No
+    // D.Card No / Aadhar Card No - BLANK
     y += 6;
     doc.text("D.CARD NO/AADHAR CARD NO:", 10, y);
-    doc.text(booking.aadhaar_number || "N/A", 70, y);
+    doc.line(70, y, 200, y); // Blank line for manual entry
     
-    // D/Card Issued By
+    // D/Card Issued By - BLANK
     y += 6;
     doc.text("D/CARD ISSUED BY:", 10, y);
     doc.line(55, y, 200, y); // Blank line for manual entry
@@ -966,15 +966,27 @@ export function generateOrgDataForm(booking) {
   // Sensitive Data Fields (Blank for manual filling)
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text("SENSITIVE DATA (Fill with pen)", 15, y);
+  doc.text("MAIN GUEST SENSITIVE DATA (Fill with pen)", 15, y);
   
   y += 8;
 
   const fieldHeight = 20;
   const fieldWidth = pageWidth - 20;
 
-  // Rank field
+  // Identity Card No field (NEW)
   doc.setFillColor(255, 255, 255);
+  doc.rect(10, y, fieldWidth, fieldHeight);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("Identity Card No:", 13, y + 7);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(120, 120, 120);
+  doc.text("(Aadhaar / Voter ID / Driving License, etc.)", 13, y + 13);
+  doc.setTextColor(0, 0, 0);
+  y += fieldHeight + 3;
+
+  // Rank field
   doc.rect(10, y, fieldWidth, fieldHeight);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
@@ -1021,6 +1033,60 @@ export function generateOrgDataForm(booking) {
   doc.text("(e.g., Eastern Command, Northern Command, etc.)", 13, y + 13);
   doc.setTextColor(0, 0, 0);
   y += fieldHeight + 8;
+
+  // Family Members with Org Cards Section
+  const familyWithOrgCards = (booking.family_members || []).filter(fm => fm.has_org_card);
+  
+  if (familyWithOrgCards.length > 0) {
+    // Check if we need a new page
+    if (y > doc.internal.pageSize.height - 100) {
+      doc.addPage();
+      y = 20;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("FAMILY MEMBERS WITH ORG DEPENDENT CARD", 15, y);
+    y += 8;
+
+    familyWithOrgCards.forEach((member, idx) => {
+      // Check if we need a new page for this member
+      if (y > doc.internal.pageSize.height - 60) {
+        doc.addPage();
+        y = 20;
+      }
+
+      // Member box
+      doc.setFillColor(250, 250, 250);
+      doc.rect(10, y, fieldWidth, 45, "F");
+      doc.setDrawColor(150, 150, 150);
+      doc.rect(10, y, fieldWidth, 45);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.text(`Family Member ${idx + 1}:`, 13, y + 7);
+      
+      doc.setFont("helvetica", "normal");
+      doc.text(`Name: ${member.name || "—"}`, 13, y + 14);
+      doc.text(`Relation: ${member.relation || "—"}`, 13, y + 20);
+      doc.text(`Age: ${member.age || "—"}`, 13, y + 26);
+      doc.text(`Gender: ${member.sex || "—"}`, pageWidth / 2, y + 14);
+      doc.text(`Mobile: ${member.mobile || "—"}`, pageWidth / 2, y + 20);
+
+      // Blank field for Org Dep ID
+      doc.setFont("helvetica", "bold");
+      doc.text("Org Dep ID Card No:", 13, y + 36);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(120, 120, 120);
+      doc.text("(Fill manually)", 60, y + 36);
+      doc.setTextColor(0, 0, 0);
+      doc.line(13, y + 41, fieldWidth - 10, y + 41);
+
+      y += 50;
+    });
+
+    y += 5;
+  }
 
   // Signature section
   doc.setDrawColor(0, 0, 0);

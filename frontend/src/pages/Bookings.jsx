@@ -972,7 +972,7 @@ export default function Bookings() {
       staff_id: "",
       extra_beds: 0,
       notes: "",
-      guest_age: booking.guest_age || "",  // Autofill age from booking
+      guest_age: (booking.member_ages && booking.member_ages[0]) ? booking.member_ages[0].toString() : "",  // Autofill from M1 age
       guest_sex: booking.guest_sex || "M",  // Default to Male
       guest_address: "",
       family_members: []
@@ -1898,7 +1898,13 @@ export default function Bookings() {
               onClick={handleCreateBooking}
               className="earms-btn-primary"
               data-testid="submit-booking"
-              disabled={!bookingForm.guest_name || bookingForm.room_ids.length !== bookingForm.num_rooms || !bookingForm.check_in_date || !bookingForm.check_out_date || !bookingForm.payment_mode || !isPaymentDetailsFilled()}
+              disabled={
+                !bookingForm.guest_name || 
+                bookingForm.room_ids.length !== bookingForm.num_rooms || 
+                !bookingForm.check_in_date || 
+                !bookingForm.check_out_date || 
+                (bookingForm.advance_paid > 0 && (!bookingForm.payment_mode || !isPaymentDetailsFilled()))
+              }
             >
               Create Booking{bookingForm.num_rooms > 1 ? ` (${bookingForm.num_rooms} Rooms)` : ''}
             </Button>
