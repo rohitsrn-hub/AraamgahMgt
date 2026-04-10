@@ -7,7 +7,7 @@ import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { CalendarBlank, CheckCircle, ArrowRight, Pencil } from '@phosphor-icons/react';
 
-const API = process.env.REACT_APP_BACKEND_URL;
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Color palette for different rooms
 const ROOM_COLORS = [
