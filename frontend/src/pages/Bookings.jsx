@@ -1286,6 +1286,19 @@ export default function Bookings() {
     return { oldTotal, newTotal, difference, nights };
   };
 
+  // Auto-populate additional advance when cost increases
+  useEffect(() => {
+    if (amendForm.check_in_date && amendForm.check_out_date && amendForm.room_ids.length > 0) {
+      const cost = calculateAmendmentCost();
+      if (cost.difference > 0) {
+        setAmendForm(prev => ({
+          ...prev,
+          additional_advance: cost.difference
+        }));
+      }
+    }
+  }, [amendForm.check_in_date, amendForm.check_out_date, amendForm.room_ids, availableRoomsForAmend]);
+
   const handleAmendBooking = async () => {
     try {
       const costAnalysis = calculateAmendmentCost();
