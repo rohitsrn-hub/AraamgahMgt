@@ -116,6 +116,8 @@ export default function Bookings() {
   });
   const [availableRoomsForAmend, setAvailableRoomsForAmend] = useState([]);
   const [loadingRoomsForAmend, setLoadingRoomsForAmend] = useState(false);
+  const [amendCheckInOpen, setAmendCheckInOpen] = useState(false);
+  const [amendCheckOutOpen, setAmendCheckOutOpen] = useState(false);
 
   // Guest History
   const [showGuestHistory, setShowGuestHistory] = useState(false);
@@ -3616,24 +3618,25 @@ ECSAG Shillong`;
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>Check-in Date</Label>
-                    <Popover>
+                    <Popover open={amendCheckInOpen} onOpenChange={setAmendCheckInOpen}>
                       <PopoverTrigger asChild>
                         <Button variant="outline" className="w-full mt-1 justify-start text-left font-normal">
-                          <Calendar size={16} className="mr-2" />
+                          <CalendarBlank size={18} className="mr-2" />
                           {amendForm.check_in_date ? format(amendForm.check_in_date, "dd MMM yyyy") : "Select date"}
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
-                        <DayPicker
+                        <Calendar
                           mode="single"
                           selected={amendForm.check_in_date}
                           onSelect={(date) => {
-                            setAmendForm({...amendForm, check_in_date: date});
+                            setAmendForm({...amendForm, check_in_date: date, check_out_date: null, room_ids: []});
+                            setAmendCheckInOpen(false);
                             if (date && amendForm.check_out_date) {
                               fetchAvailableRoomsForAmend(date, amendForm.check_out_date, amendBooking.id);
                             }
                           }}
-                          disabled={(date) => date < new Date()}
+                          disabled={(date) => date < new Date(new Date().setHours(0,0,0,0))}
                         />
                       </PopoverContent>
                     </Popover>
@@ -3641,19 +3644,20 @@ ECSAG Shillong`;
                   
                   <div>
                     <Label>Check-out Date</Label>
-                    <Popover>
+                    <Popover open={amendCheckOutOpen} onOpenChange={setAmendCheckOutOpen}>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-full mt-1 justify-start text-left font-normal">
-                          <Calendar size={16} className="mr-2" />
+                        <Button variant="outline" className="w-full mt-1 justify-start text-left font-normal" disabled={!amendForm.check_in_date}>
+                          <CalendarBlank size={18} className="mr-2" />
                           {amendForm.check_out_date ? format(amendForm.check_out_date, "dd MMM yyyy") : "Select date"}
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
-                        <DayPicker
+                        <Calendar
                           mode="single"
                           selected={amendForm.check_out_date}
                           onSelect={(date) => {
                             setAmendForm({...amendForm, check_out_date: date});
+                            setAmendCheckOutOpen(false);
                             if (amendForm.check_in_date && date) {
                               fetchAvailableRoomsForAmend(amendForm.check_in_date, date, amendBooking.id);
                             }
