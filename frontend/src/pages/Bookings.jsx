@@ -16,6 +16,7 @@ import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
 import { generateCheckoutReceipt, generateRefundsPDF, generateBookingSlips } from "@/utils/pdfUtils";
 import FeedbackForm from "@/components/FeedbackForm";
+import RoomSegmentSelector from "@/components/RoomSegmentSelector";
 import { 
   Plus, 
   CalendarCheck, 
@@ -146,6 +147,8 @@ export default function Bookings() {
     org_color: "",         // NEW: Color category (only for Org guests)
     num_rooms: 1,
     room_ids: [],
+    room_segments: null,   // NEW: Mix & Match room segments
+    has_room_changes: false, // NEW: Flag for segmented bookings
     check_in_date: null,
     check_out_date: null,
     advance_paid: 0,
@@ -159,6 +162,10 @@ export default function Bookings() {
     total_members: 1,  // NEW: Total number of members including guest
     member_ages: [0]   // NEW: Array of ages for all members (default 1 member)
   });
+  
+  // NEW: State for Mix & Match room selection
+  const [showRoomSegmentSelector, setShowRoomSegmentSelector] = useState(false);
+  const [useSegmentedBooking, setUseSegmentedBooking] = useState(false);
 
   const [actionForm, setActionForm] = useState({
     staff_id: "",
@@ -499,13 +506,24 @@ export default function Bookings() {
       return;
     }
     
-    if (bookingForm.room_ids.length === 0) {
-      toast.error("Please select at least one room");
-      return;
-    }
-    if (bookingForm.room_ids.length !== bookingForm.num_rooms) {
-      toast.error(`Please select exactly ${bookingForm.num_rooms} room(s)`);
-      return;
+    // Room validation - support both traditional and segmented bookings
+    const isSegmented = useSegmentedBooking && bookingForm.room_segments;
+    if (!isSegmented) {
+      // Traditional booking validation
+      if (bookingForm.room_ids.length === 0) {
+        toast.error("Please select at least one room");
+        return;
+      }
+      if (bookingForm.room_ids.length !== bookingForm.num_rooms) {
+        toast.error(`Please select exactly ${bookingForm.num_rooms} room(s)`);
+        return;
+      }
+    } else {
+      // Segmented booking validation
+      if (!bookingForm.room_segments || bookingForm.room_segments.length === 0) {
+        toast.error("Please configure room segments");
+        return;
+      }
     }
     
     // Advance amount validation
@@ -559,6 +577,7 @@ export default function Bookings() {
         org_color: formData.org_color || null,
         aadhaar_number: formData.aadhaar_number,
         room_ids: formData.room_ids,
+        room_segments: formData.room_segments || null,  // NEW: Mix & Match support
         num_rooms: formData.num_rooms,
         check_in_date: format(formData.check_in_date, "yyyy-MM-dd"),
         check_out_date: format(formData.check_out_date, "yyyy-MM-dd"),
@@ -1922,11 +1941,20 @@ export default function Bookings() {
                 </div>
               ) : (
                 <>
-                  <div className="p-3 bg-blue-50 rounded-lg mb-3">
+                  <div className="p-3 bg-blue-50 rounded-lg mb-3 flex items-center justify-between">
                     <p className="text-sm text-blue-700 font-medium">
                       Select {bookingForm.num_rooms} room(s) — {bookingForm.room_ids.length} of {bookingForm.num_rooms} selected
                       {!bookingForm.is_org && <span className="ml-2 text-orange-600 font-semibold">(Non-Org rates apply)</span>}
                     </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowRoomSegmentSelector(true)}
+                      className="flex items-center gap-2 text-xs bg-white"
+                    >
+                      <CalendarBlank size={14} />
+                      Mix & Match Rooms
+                    </Button>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-56 overflow-y-auto p-1">
                     {availableRooms.map((room) => {
@@ -3906,6 +3934,41 @@ ECSAG Shillong`;
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mix & Match Room Segment Selector Dialog */}
+      <Dialog open={showRoomSegmentSelector} onOpenChange={setShowRoomSegmentSelector}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarBlank size={24} className="text-blue-500" />
+              Mix & Match Rooms - Smart Room Allocation
+            </DialogTitle>
+          </DialogHeader>
+          
+          {bookingForm.check_in_date && bookingForm.check_out_date && (
+            <RoomSegmentSelector
+              checkInDate={bookingForm.check_in_date}
+              checkOutDate={bookingForm.check_out_date}
+              numRooms={bookingForm.num_rooms}
+              isOrg={bookingForm.is_org}
+              settings={settings}
+              onAccept={(segmentData) => {
+                setBookingForm({
+                  ...bookingForm,
+                  room_segments: segmentData.room_segments,
+                  has_room_changes: segmentData.has_room_changes,
+                  room_ids: [] // Clear traditional room_ids when using segments
+                });
+                setUseSegmentedBooking(true);
+                setShowRoomSegmentSelector(false);
+                toast.success('Room combination selected successfully!');
+              }}
+              onCancel={() => setShowRoomSegmentSelector(false)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
 
     </div>
   );
