@@ -543,7 +543,9 @@ export default function Bookings() {
         bank_ifsc: formData.bank_ifsc,
         bank_account: formData.bank_account,
         upi_id: formData.upi_id,
-        upi_phone: formData.upi_phone
+        upi_phone: formData.upi_phone,
+        total_members: formData.total_members,
+        member_ages: formData.member_ages
       };
       const response = await axios.post(`${API}/bookings`, payload);
       const createdBooking = response.data;
@@ -844,11 +846,11 @@ export default function Bookings() {
       }
       
       setShowCheckIn(false);
-      setSelectedBooking(null);
-      resetActionForm();
-      setPhoneError("");
-      setRoomGuestMapping([]); // Reset room-guest mapping
-      fetchData();
+      setRoomGuestMapping([]); // Reset room-guest mapping first
+      setSelectedBooking(null); // Clear selected booking
+      resetActionForm(); // Reset form
+      setPhoneError(""); // Clear phone error
+      fetchData(); // Refresh booking list
     } catch (error) {
       toast.error(error.response?.data?.detail || "Check-in failed");
     }
@@ -1478,7 +1480,12 @@ export default function Bookings() {
           )}
         </CardContent>
       </Card>
-      <Dialog open={showNewBooking} onOpenChange={(open) => { setShowNewBooking(open); if (!open) resetBookingForm(); }}>
+      <Dialog open={showNewBooking} onOpenChange={(open) => { 
+        if (!open) {
+          resetBookingForm(); 
+        }
+        setShowNewBooking(open);
+      }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto" data-testid="new-booking-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1920,18 +1927,19 @@ export default function Bookings() {
       </Dialog>
 
       {/* ===== CHECK-IN DIALOG ===== */}
-      <Dialog open={showCheckIn} onOpenChange={(open) => { 
-        setShowCheckIn(open); 
+      <Dialog open={showCheckIn} onOpenChange={(open) => {
         if (!open) { 
           setSelectedBooking(null); 
           resetActionForm(); 
-          setPhoneError(""); 
-        } else if (selectedBooking?.guest_contact) {
-          // Pre-populate phone from booking data
+          setPhoneError("");
+          setRoomGuestMapping([]);
+        } else if (open && selectedBooking?.guest_contact) {
+          // Pre-populate phone from booking data only when explicitly opening
           const phoneOnly = selectedBooking.guest_contact.replace(/^\+91\s*/, "").replace(/\s/g, "");
           const formatted = formatIndianPhone(phoneOnly);
           setActionForm(prev => ({ ...prev, guest_contact: formatted }));
         }
+        setShowCheckIn(open);
       }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="checkin-dialog">
           <DialogHeader>

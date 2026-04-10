@@ -497,11 +497,6 @@ export function generateBookingSlips(bookings) {
     doc.text("CONTACT ADDRESS:", 10, y);
     doc.text(booking.guest_address || "N/A", 45, y, { maxWidth: 150 });
     
-    // Contact Mobile No - Fill with booking mobile
-    y += 6;
-    doc.text("CONTACT MOBILE NO:", 10, y);
-    doc.text(booking.guest_contact || "N/A", 60, y);
-    
     // ID Card No / Aadhar Card No - BLANK
     y += 6;
     doc.text("ID CARD NO/AADHAR CARD NO:", 10, y);
