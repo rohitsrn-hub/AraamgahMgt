@@ -1149,7 +1149,7 @@ export default function Bookings() {
   };
 
   const resetGuestHistorySearch = () => {
-    setGuestHistorySearch({ phone: "", army_number: "" });
+    setGuestHistorySearch({ phone: "" });
     setGuestHistoryData(null);
   };
 
@@ -1241,6 +1241,7 @@ export default function Bookings() {
     : 0;
 
   const ranks = settings?.ranks || [];
+  const colors = settings?.colors || ["Red", "Green", "Brown", "Orange", "Yellow", "Violet", "Black", "Blue", "White", "Light Blue"];
 
   if (loading) {
     return (
@@ -1358,7 +1359,18 @@ export default function Bookings() {
                       <td className="font-medium text-slate-800">{booking.booking_number}</td>
                       <td>
                         <div>{booking.guest_name}</div>
-                        {booking.guest_rank && <div className="text-xs text-slate-500">{booking.guest_rank}{booking.guest_service_status ? ` (${booking.guest_service_status})` : ""}</div>}
+                        {booking.is_org !== undefined && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${booking.is_org ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {booking.is_org ? "Org" : "Non-Org"}
+                            </span>
+                            {booking.org_color && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">
+                                {booking.org_color}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <Badge variant="outline">{getRoomDisplay(booking)}</Badge>
@@ -1457,21 +1469,6 @@ export default function Bookings() {
               </h3>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Rank</Label>
-                  {ranks.length > 0 ? (
-                    <Select value={bookingForm.guest_rank} onValueChange={(v) => setBookingForm({...bookingForm, guest_rank: v})}>
-                      <SelectTrigger className="earms-input mt-1" data-testid="select-guest-rank">
-                        <SelectValue placeholder="Select rank" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ranks.map(rank => <SelectItem key={rank} value={rank}>{rank}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input value={bookingForm.guest_rank} onChange={(e) => setBookingForm({...bookingForm, guest_rank: e.target.value})} onFocus={(e) => e.target.select()} placeholder="e.g., Havildar" className="earms-input mt-1" data-testid="input-guest-rank" />
-                  )}
-                </div>
-                <div>
                   <Label>Guest Name *</Label>
                   <Input value={bookingForm.guest_name} onChange={(e) => setBookingForm({...bookingForm, guest_name: e.target.value})} onFocus={(e) => e.target.select()} placeholder="Full name" className="earms-input mt-1" data-testid="input-guest-name" />
                 </div>
@@ -1489,14 +1486,39 @@ export default function Bookings() {
                   {bookingPhoneError && <p className="text-xs text-red-500 mt-1">{bookingPhoneError}</p>}
                   <p className="text-xs text-slate-500 mt-1">For WhatsApp booking confirmation</p>
                 </div>
-                <div>
-                  <Label>Army / Service Number</Label>
-                  <Input value={bookingForm.army_number} onChange={(e) => setBookingForm({...bookingForm, army_number: toUpperCase(e.target.value)})} onFocus={(e) => e.target.select()} placeholder="e.g., 15814432-F" className="earms-input mt-1" data-testid="input-army-number" />
+                
+                {/* NEW: Organization Classification */}
+                <div className="col-span-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="is-org"
+                      checked={bookingForm.is_org}
+                      onChange={(e) => setBookingForm({...bookingForm, is_org: e.target.checked, org_color: e.target.checked ? bookingForm.org_color : ""})}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                      data-testid="checkbox-is-org"
+                    />
+                    <Label htmlFor="is-org" className="cursor-pointer">Organization Guest</Label>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">Check if guest belongs to the organization</p>
                 </div>
-                <div>
-                  <Label>Unit Name</Label>
-                  <Input value={bookingForm.guest_unit} onChange={(e) => setBookingForm({...bookingForm, guest_unit: e.target.value})} onFocus={(e) => e.target.select()} placeholder="e.g., 2 PARA" className="earms-input mt-1" data-testid="input-guest-unit" />
-                </div>
+
+                {/* Color Dropdown - Only show if Org guest */}
+                {bookingForm.is_org && (
+                  <div>
+                    <Label>Color Category</Label>
+                    <Select value={bookingForm.org_color} onValueChange={(v) => setBookingForm({...bookingForm, org_color: v})}>
+                      <SelectTrigger className="earms-input mt-1" data-testid="select-org-color">
+                        <SelectValue placeholder="Select color (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {colors.map(color => <SelectItem key={color} value={color}>{color}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-slate-500 mt-1">Can be filled at check-in if unknown</p>
+                  </div>
+                )}
+
                 <div>
                   <Label>Number of Rooms *</Label>
                   <Input type="number" min="1" value={bookingForm.num_rooms} onChange={(e) => setBookingForm({...bookingForm, num_rooms: parseInt(e.target.value) || 1})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid="input-num-rooms" />
@@ -1650,7 +1672,7 @@ export default function Bookings() {
                   <div className="p-3 bg-blue-50 rounded-lg mb-3">
                     <p className="text-sm text-blue-700 font-medium">
                       Select {bookingForm.num_rooms} room(s) — {bookingForm.room_ids.length} of {bookingForm.num_rooms} selected
-                      {bookingForm.guest_rank === "Def Civ" && <span className="ml-2 text-orange-600 font-semibold">(Def Civ rates apply)</span>}
+                      {!bookingForm.is_org && <span className="ml-2 text-orange-600 font-semibold">(Non-Org rates apply)</span>}
                     </p>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-56 overflow-y-auto p-1">
@@ -1879,7 +1901,18 @@ export default function Bookings() {
               {/* Booking Summary */}
               <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
                 <p className="font-semibold text-emerald-800 text-lg">{selectedBooking.guest_name}</p>
-                {selectedBooking.guest_rank && <p className="text-sm text-emerald-700">{selectedBooking.guest_rank}{selectedBooking.guest_unit ? ` · ${selectedBooking.guest_unit}` : ""}</p>}
+                {selectedBooking.is_org !== undefined && (
+                  <div className="flex items-center gap-2 mt-1 mb-2">
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${selectedBooking.is_org ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {selectedBooking.is_org ? "Organization" : "Non-Org"}
+                    </span>
+                    {selectedBooking.org_color && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                        {selectedBooking.org_color}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <p className="text-sm text-emerald-600">Room {getRoomDisplay(selectedBooking)} · {getRoomCategories(selectedBooking)}</p>
                 <p className="text-sm text-emerald-600">{format(parseISO(selectedBooking.check_in_date), "dd MMM yyyy")} → {format(parseISO(selectedBooking.check_out_date), "dd MMM yyyy")}</p>
               </div>
@@ -1928,17 +1961,6 @@ export default function Bookings() {
                     {phoneError && <p className="text-xs text-red-500 mt-1">{phoneError}</p>}
                   </div>
                   <div>
-                    <Label>Identity Card No</Label>
-                    <Input 
-                      value={actionForm.identity_card_number} 
-                      onChange={(e) => setActionForm({...actionForm, identity_card_number: toUpperCase(e.target.value)})}
-                      onFocus={(e) => e.target.select()} 
-                      placeholder="e.g., F223529" 
-                      className="earms-input mt-1" 
-                      data-testid="input-checkin-identity-card" 
-                    />
-                  </div>
-                  <div>
                     <Label>Age</Label>
                     <Input type="number" min="18" max="100" value={actionForm.guest_age}
                       onChange={(e) => setActionForm({...actionForm, guest_age: e.target.value})}
@@ -1954,16 +1976,21 @@ export default function Bookings() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label>Service Status</Label>
-                    <Select value={actionForm.guest_service_status} onValueChange={(v) => setActionForm({...actionForm, guest_service_status: v})}>
-                      <SelectTrigger className="earms-input mt-1" data-testid="select-checkin-service-status"><SelectValue placeholder="Serving / Retired" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Serving">Serving</SelectItem>
-                        <SelectItem value="Retired">Retired</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  
+                  {/* Color Category for Org guests */}
+                  {selectedBooking?.is_org && (
+                    <div>
+                      <Label>Color Category</Label>
+                      <Select value={actionForm.org_color} onValueChange={(v) => setActionForm({...actionForm, org_color: v})}>
+                        <SelectTrigger className="earms-input mt-1" data-testid="select-checkin-org-color"><SelectValue placeholder="Select color" /></SelectTrigger>
+                        <SelectContent>
+                          {colors.map(color => <SelectItem key={color} value={color}>{color}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-slate-500 mt-1">Organization color classification</p>
+                    </div>
+                  )}
+                  
                   <div>
                     <Label>Address</Label>
                     <Input value={actionForm.guest_address} onChange={(e) => setActionForm({...actionForm, guest_address: e.target.value})}
@@ -1972,39 +1999,7 @@ export default function Bookings() {
                 </div>
               </div>
 
-              {/* Service Details */}
-              <div>
-                <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
-                  <CheckSquare size={16} className="text-blue-500" weight="fill" /> Service Details
-                </h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Type of Service</Label>
-                    <Select value={actionForm.service_type} onValueChange={(v) => setActionForm({...actionForm, service_type: v, command_hq: ""})}>
-                      <SelectTrigger className="earms-input mt-1" data-testid="select-checkin-service-type"><SelectValue placeholder="Select service" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Army">Army</SelectItem>
-                        <SelectItem value="Air Force">Air Force</SelectItem>
-                        <SelectItem value="Navy">Navy</SelectItem>
-                        <SelectItem value="SFC">SFC</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {actionForm.service_type === "Army" && (
-                    <div>
-                      <Label>Command HQ</Label>
-                      <Select value={actionForm.command_hq} onValueChange={(v) => setActionForm({...actionForm, command_hq: v})}>
-                        <SelectTrigger className="earms-input mt-1" data-testid="select-checkin-command-hq"><SelectValue placeholder="Select command" /></SelectTrigger>
-                        <SelectContent>
-                          {["Northern Command","Eastern Command","Western Command","Southern Command","South Western Command","Central Command","ARTRAC","SFC","Army HQ"].map(c => (
-                            <SelectItem key={c} value={c}>{c}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                </div>
-              </div>
+              {/* Service Details section removed - no longer capturing defense information */}
 
               {/* P2: Room Assignment Modification */}
               <div className="p-4 bg-amber-50 rounded-xl border border-amber-300">
@@ -2987,17 +2982,6 @@ export default function Bookings() {
                     maxLength={11}
                   />
                 </div>
-                <div>
-                  <Label>Army / Service Number</Label>
-                  <Input
-                    value={guestHistorySearch.army_number}
-                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, army_number: toUpperCase(e.target.value) }))}
-                    onFocus={(e) => e.target.select()}
-                    placeholder="e.g., 15814432-F"
-                    className="earms-input mt-1"
-                    data-testid="history-army-input"
-                  />
-                </div>
               </div>
 
               <div className="flex gap-3">
@@ -3043,28 +3027,16 @@ export default function Bookings() {
                         <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_contact}</p>
                       </div>
                     )}
-                    {guestHistoryData.guest_info.guest_rank && (
+                    {guestHistoryData.guest_info.is_org !== undefined && (
                       <div>
-                        <p className="text-slate-500">Rank</p>
-                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_rank}</p>
+                        <p className="text-slate-500">Classification</p>
+                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.is_org ? "Organization" : "Non-Organization"}</p>
                       </div>
                     )}
-                    {guestHistoryData.guest_info.army_number && (
+                    {guestHistoryData.guest_info.org_color && (
                       <div>
-                        <p className="text-slate-500">Army Number</p>
-                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.army_number}</p>
-                      </div>
-                    )}
-                    {guestHistoryData.guest_info.guest_unit && (
-                      <div>
-                        <p className="text-slate-500">Unit</p>
-                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_unit}</p>
-                      </div>
-                    )}
-                    {guestHistoryData.guest_info.guest_service_status && (
-                      <div>
-                        <p className="text-slate-500">Service Status</p>
-                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.guest_service_status}</p>
+                        <p className="text-slate-500">Color</p>
+                        <p className="font-medium text-slate-800">{guestHistoryData.guest_info.org_color}</p>
                       </div>
                     )}
                   </div>
@@ -3244,9 +3216,7 @@ Your booking has been confirmed! 🎉
 📋 *Booking Details:*
 • Booking No: ${createdBookingData.booking_number}
 • Guest: ${createdBookingData.guest_name}
-${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}` : ""}
-${createdBookingData.guest_unit ? `• Unit: ${createdBookingData.guest_unit}` : ""}
-• Room(s): ${(createdBookingData.room_numbers || []).join(", ")}
+${createdBookingData.is_org !== undefined ? `• Type: ${createdBookingData.is_org ? "Organization" : "Non-Organization"}\n` : ""}${createdBookingData.org_color ? `• Color: ${createdBookingData.org_color}\n` : ""}• Room(s): ${(createdBookingData.room_numbers || []).join(", ")}
 • Category: ${(createdBookingData.room_categories || []).filter((v, i, arr) => arr.indexOf(v) === i).join(", ")}
 
 📅 *Stay Period:*
