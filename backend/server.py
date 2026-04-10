@@ -264,6 +264,9 @@ class Booking(BaseModel):
     room_ids: List[str] = []
     room_numbers: List[str] = []
     room_categories: List[str] = []
+    # NEW: Mix & Match Rooms - per-night room assignments
+    room_segments: Optional[List[dict]] = None  # [{"night_date": "2026-04-11", "rooms": [...]}]
+    has_room_changes: bool = False  # Flag indicating if guest changes rooms during stay
     num_guests: int = 1
     num_rooms: int = 1
     check_in_date: str  # ISO date string
@@ -311,6 +314,8 @@ class BookingCreate(BaseModel):
     is_org: bool = False  # Organization personnel or Non-Org
     org_color: Optional[str] = None  # Color category (only for Org guests)
     room_ids: List[str]
+    # NEW: Mix & Match Rooms support
+    room_segments: Optional[List[dict]] = None  # Alternative to room_ids for segmented bookings
     num_guests: int = 1
     num_rooms: int = 1
     check_in_date: str
@@ -821,6 +826,215 @@ async def delete_room(room_id: str):
         raise HTTPException(status_code=404, detail="Room not found")
     return {"message": "Room deleted successfully"}
 
+@api_router.post("/rooms/find-optimal-combination")
+async def find_optimal_room_combination(
+    check_in: str = Query(..., description="Check-in date (YYYY-MM-DD)"),
+    check_out: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
+    num_rooms: int = Query(..., ge=1, description="Number of rooms needed per night"),
+    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check")
+):
+    """
+    Find optimal room combination for date range when single rooms aren't available for entire duration.
+    
+    Algorithm:
+    1. For each night, find available rooms
+    2. Prioritize rooms available for longest consecutive periods
+    3. Minimize total room changes during stay
+    4. Return structured segments with room assignments per night
+    
+    Example Response:
+    {
+        "optimal_combination": [
+            {
+                "night_date": "2026-04-11",
+                "rooms": [
+                    {"id": "...", "room_number": "C1-01", "category": "Cat I"},
+                    {"id": "...", "room_number": "C1-02", "category": "Cat I"}
+                ]
+            },
+            ...
+        ],
+        "total_room_changes": 2,
+        "availability_status": "full",
+        "message": "Optimal combination found with minimal room changes"
+    }
+    """
+    from datetime import datetime, timedelta
+    
+    # Parse dates
+    start_date = datetime.strptime(check_in, "%Y-%m-%d").date()
+    end_date = datetime.strptime(check_out, "%Y-%m-%d").date()
+    nights = (end_date - start_date).days
+    
+    if nights <= 0:
+        raise HTTPException(status_code=400, detail="Check-out must be after check-in")
+    
+    # Get all rooms
+    all_rooms = await db.rooms.find(
+        {"status": {"$ne": RoomStatus.MAINTENANCE.value}}, 
+        {"_id": 0}
+    ).to_list(100)
+    
+    # Build availability map for each night
+    # night_availability[night_date] = [available_room_objects]
+    night_availability = {}
+    
+    for i in range(nights):
+        night_date = start_date + timedelta(days=i)
+        night_date_str = night_date.strftime("%Y-%m-%d")
+        
+        # Get bookings that overlap with this specific night
+        booking_query = {
+            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+            "check_in_date": {"$lte": night_date_str},
+            "check_out_date": {"$gt": night_date_str}
+        }
+        
+        if exclude_booking_id:
+            booking_query["id"] = {"$ne": exclude_booking_id}
+        
+        overlapping_bookings = await db.bookings.find(booking_query, {"_id": 0}).to_list(1000)
+        
+        # Collect booked room IDs for this night
+        booked_room_ids = set()
+        for b in overlapping_bookings:
+            for rid in b.get("room_ids", []):
+                booked_room_ids.add(rid)
+            if b.get("room_id"):
+                booked_room_ids.add(b["room_id"])
+        
+        # Available rooms for this night
+        available_for_night = [
+            r for r in all_rooms 
+            if r["id"] not in booked_room_ids
+        ]
+        
+        night_availability[night_date_str] = available_for_night
+    
+    # Check if we have enough rooms for ANY night
+    min_available = min(len(rooms) for rooms in night_availability.values())
+    if min_available < num_rooms:
+        return {
+            "optimal_combination": [],
+            "total_room_changes": None,
+            "availability_status": "insufficient",
+            "message": f"Insufficient rooms. Need {num_rooms} rooms per night, but only {min_available} available on some nights.",
+            "night_availability_summary": {
+                date: len(rooms) for date, rooms in night_availability.items()
+            }
+        }
+    
+    # OPTIMIZATION ALGORITHM: Find room combination that minimizes changes
+    # Strategy: Greedy approach - find rooms available for longest consecutive periods
+    
+    # Calculate "availability spans" for each room
+    # span[room_id] = list of consecutive night ranges where room is available
+    room_spans = {}
+    for room in all_rooms:
+        room_id = room["id"]
+        consecutive_nights = []
+        current_span = []
+        
+        for i in range(nights):
+            night_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            available_rooms_tonight = night_availability[night_date]
+            
+            if any(r["id"] == room_id for r in available_rooms_tonight):
+                current_span.append(night_date)
+            else:
+                if current_span:
+                    consecutive_nights.append(current_span)
+                    current_span = []
+        
+        if current_span:
+            consecutive_nights.append(current_span)
+        
+        if consecutive_nights:
+            room_spans[room_id] = {
+                "room": room,
+                "spans": consecutive_nights,
+                "total_nights": sum(len(span) for span in consecutive_nights),
+                "max_consecutive": max(len(span) for span in consecutive_nights)
+            }
+    
+    # Greedy allocation: Pick rooms with longest availability first
+    # Sort rooms by max consecutive nights (descending)
+    sorted_rooms = sorted(
+        room_spans.items(),
+        key=lambda x: (x[1]["max_consecutive"], x[1]["total_nights"]),
+        reverse=True
+    )
+    
+    # Allocate rooms greedily
+    allocated_segments = {night: [] for night in night_availability.keys()}
+    used_rooms_per_night = {night: set() for night in night_availability.keys()}
+    
+    for _ in range(num_rooms):
+        # For each room slot, find the best room that hasn't been allocated yet
+        best_room = None
+        best_coverage = 0
+        
+        for room_id, span_data in sorted_rooms:
+            # Check how many nights this room can cover without being already allocated
+            coverage = 0
+            for span in span_data["spans"]:
+                for night in span:
+                    if room_id not in used_rooms_per_night[night] and len(allocated_segments[night]) < num_rooms:
+                        coverage += 1
+            
+            if coverage > best_coverage:
+                best_coverage = coverage
+                best_room = (room_id, span_data)
+        
+        if best_room:
+            room_id, span_data = best_room
+            room_obj = span_data["room"]
+            
+            # Allocate this room to all nights where it's available and not yet allocated
+            for span in span_data["spans"]:
+                for night in span:
+                    if room_id not in used_rooms_per_night[night] and len(allocated_segments[night]) < num_rooms:
+                        allocated_segments[night].append({
+                            "id": room_obj["id"],
+                            "room_number": room_obj["room_number"],
+                            "category": room_obj["category"]
+                        })
+                        used_rooms_per_night[night].add(room_id)
+    
+    # Build final segments structure
+    optimal_combination = []
+    for i in range(nights):
+        night_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        optimal_combination.append({
+            "night_date": night_date,
+            "rooms": allocated_segments[night_date]
+        })
+    
+    # Calculate total room changes
+    total_changes = 0
+    for i in range(1, nights):
+        prev_rooms = set(r["id"] for r in optimal_combination[i-1]["rooms"])
+        curr_rooms = set(r["id"] for r in optimal_combination[i]["rooms"])
+        if prev_rooms != curr_rooms:
+            total_changes += 1
+    
+    # Determine status
+    all_nights_fulfilled = all(len(segment["rooms"]) == num_rooms for segment in optimal_combination)
+    status = "full" if all_nights_fulfilled else "partial"
+    
+    return {
+        "optimal_combination": optimal_combination,
+        "total_room_changes": total_changes,
+        "availability_status": status,
+        "message": f"Found optimal combination with {total_changes} room change(s)" if status == "full" else "Partial availability",
+        "summary": {
+            "total_nights": nights,
+            "rooms_per_night": num_rooms,
+            "total_room_changes": total_changes
+        }
+    }
+
+
 # ============= BOOKINGS =============
 
 @api_router.get("/bookings", response_model=List[dict])
@@ -850,6 +1064,68 @@ async def get_booking(booking_id: str):
         raise HTTPException(status_code=404, detail="Booking not found")
     return booking
 
+async def process_room_segments(room_segments: List[dict], check_in_date: str, check_out_date: str, is_org: bool):
+    """
+    Process room segments for mix & match bookings.
+    
+    Returns:
+        tuple: (room_ids, room_numbers, room_categories, total_amount, has_room_changes)
+    """
+    from datetime import datetime, timedelta
+    
+    # Extract all unique room IDs from segments
+    all_room_ids = set()
+    for segment in room_segments:
+        for room in segment.get("rooms", []):
+            all_room_ids.add(room["id"])
+    
+    room_ids = list(all_room_ids)
+    room_numbers = []
+    room_categories = []
+    
+    # Validate that all rooms exist
+    for rid in room_ids:
+        room = await db.rooms.find_one({"id": rid}, {"_id": 0})
+        if not room:
+            raise HTTPException(status_code=404, detail=f"Room {rid} not found")
+        if room["status"] == RoomStatus.MAINTENANCE.value:
+            raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
+        room_numbers.append(room["room_number"])
+        room_categories.append(room["category"])
+    
+    # Calculate total amount from segments
+    total_amount = 0.0
+    start_date = datetime.strptime(check_in_date, "%Y-%m-%d").date()
+    end_date = datetime.strptime(check_out_date, "%Y-%m-%d").date()
+    nights = (end_date - start_date).days
+    
+    # Validate segments coverage
+    if len(room_segments) != nights:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid room segments: Need {nights} night(s) but got {len(room_segments)} segment(s)"
+        )
+    
+    # Calculate cost for each night
+    for segment in room_segments:
+        for room_data in segment.get("rooms", []):
+            room_category = RoomCategory(room_data["category"])
+            rate = await get_room_rate(room_category, is_org)
+            license_fee = await get_room_rate(room_category, is_org, is_license_fee=True)
+            total_amount += rate + license_fee
+    
+    # Check if rooms change during stay
+    has_room_changes = False
+    for i in range(1, len(room_segments)):
+        prev_room_ids = set(r["id"] for r in room_segments[i-1]["rooms"])
+        curr_room_ids = set(r["id"] for r in room_segments[i]["rooms"])
+        if prev_room_ids != curr_room_ids:
+            has_room_changes = True
+            break
+    
+    return room_ids, room_numbers, room_categories, total_amount, has_room_changes
+
+
 @api_router.post("/bookings")
 async def create_booking(booking: BookingCreate):
     # Normalize uppercase fields FIRST (army_number, bank_ifsc)
@@ -867,40 +1143,59 @@ async def create_booking(booking: BookingCreate):
     if booking.upi_phone and not validate_indian_mobile(booking.upi_phone):
         raise HTTPException(status_code=400, detail="Invalid UPI phone number. Must be 10 digits starting with 6-9")
     
-    if not booking.room_ids or len(booking.room_ids) == 0:
-        raise HTTPException(status_code=400, detail="At least one room must be selected")
+    # Determine booking type: traditional (room_ids) or segmented (room_segments)
+    is_segmented = booking.room_segments is not None and len(booking.room_segments) > 0
+    
+    if not is_segmented:
+        # Traditional booking validation
+        if not booking.room_ids or len(booking.room_ids) == 0:
+            raise HTTPException(status_code=400, detail="At least one room must be selected")
 
-    # Validate all rooms exist and are available
-    room_numbers = []
-    room_categories = []
-    total_amount = 0.0
-    nights = calculate_nights(booking.check_in_date, booking.check_out_date)
+        # Validate all rooms exist and are available
+        room_numbers = []
+        room_categories = []
+        total_amount = 0.0
+        nights = calculate_nights(booking.check_in_date, booking.check_out_date)
 
-    for rid in booking.room_ids:
-        room = await db.rooms.find_one({"id": rid}, {"_id": 0})
-        if not room:
-            raise HTTPException(status_code=404, detail=f"Room {rid} not found")
-        if room["status"] == RoomStatus.MAINTENANCE.value:
-            raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
+        for rid in booking.room_ids:
+            room = await db.rooms.find_one({"id": rid}, {"_id": 0})
+            if not room:
+                raise HTTPException(status_code=404, detail=f"Room {rid} not found")
+            if room["status"] == RoomStatus.MAINTENANCE.value:
+                raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
 
-        # Check for overlapping bookings (check both old room_id and new room_ids fields)
-        overlapping = await db.bookings.find_one({
-            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
-            "$or": [
-                {"room_ids": rid},
-                {"room_id": rid}  # backward compat with old records
-            ],
-            "check_in_date": {"$lte": booking.check_out_date},
-            "check_out_date": {"$gte": booking.check_in_date}
-        })
-        if overlapping:
-            raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
+            # Check for overlapping bookings (check both old room_id and new room_ids fields)
+            overlapping = await db.bookings.find_one({
+                "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+                "$or": [
+                    {"room_ids": rid},
+                    {"room_id": rid}  # backward compat with old records
+                ],
+                "check_in_date": {"$lte": booking.check_out_date},
+                "check_out_date": {"$gte": booking.check_in_date}
+            })
+            if overlapping:
+                raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
 
-        rate = await get_room_rate(RoomCategory(room["category"]), booking.is_org)
-        license_fee = await get_room_rate(RoomCategory(room["category"]), booking.is_org, is_license_fee=True)
-        total_amount += (rate + license_fee) * nights
-        room_numbers.append(room["room_number"])
-        room_categories.append(room["category"])
+            rate = await get_room_rate(RoomCategory(room["category"]), booking.is_org)
+            license_fee = await get_room_rate(RoomCategory(room["category"]), booking.is_org, is_license_fee=True)
+            total_amount += (rate + license_fee) * nights
+            room_numbers.append(room["room_number"])
+            room_categories.append(room["category"])
+        
+        has_room_changes = False
+        room_segments = None
+    
+    else:
+        # Segmented booking (Mix & Match)
+        room_ids, room_numbers, room_categories, total_amount, has_room_changes = await process_room_segments(
+            booking.room_segments,
+            booking.check_in_date,
+            booking.check_out_date,
+            booking.is_org
+        )
+        booking.room_ids = room_ids  # For backward compatibility
+        room_segments = booking.room_segments
 
     # Create or find guest
     guest = None
@@ -928,6 +1223,8 @@ async def create_booking(booking: BookingCreate):
         room_ids=booking.room_ids,
         room_numbers=room_numbers,
         room_categories=room_categories,
+        room_segments=room_segments,
+        has_room_changes=has_room_changes,
         num_guests=booking.num_guests,
         num_rooms=len(booking.room_ids),
         check_in_date=booking.check_in_date,
