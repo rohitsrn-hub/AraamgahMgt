@@ -183,15 +183,18 @@ frontend:
 
   - task: "P0.5 - Amend Booking refund scenario fix"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/frontend/src/pages/Bookings.jsx, /app/backend/server.py"
     stuck_count: 0
     priority: "critical"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "fork_main"
         comment: "FIXED: Amended booking feature was failing when amendment resulted in a refund (cost decrease). Fixed frontend validation (lines 1302-1355) to skip payment details requirement when costAnalysis.difference <= 0. Updated useEffect auto-populate (lines 1289-1303) to set additional_advance to 0 for refund scenarios. Modified payload to only send payment details when cost increases. Backend was already handling refunds correctly (lines 1510-1512). User reported error when trying to amend booking with refund due - needs testing to verify fix works for both cost increase and decrease scenarios."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: ALL TESTS PASSED. Comprehensive testing of P0.5 Amend Booking feature completed successfully. REFUND SCENARIO (cost decrease): BK0083 4 nights (₹1600) → 2 nights (₹800) = ₹-800 refund - Cost Analysis shows correct green difference, refund message displayed, payment section hidden, amendment processed without errors. PAYMENT SCENARIO (cost increase): 4 nights 1 room (₹1600) → 2 nights 2 rooms (₹1800) = +₹200 payment - Cost Analysis shows correct red difference, payment section visible, additional advance auto-populated, validation enforced, amendment processed correctly. ADDITIONAL FIXES by testing agent: (1) handleOpenAmend now calls fetchAvailableRoomsForAmend to load rooms on dialog open (2) Changed room availability API from /dashboard/room-availability to /rooms/available with exclude_booking_id to include currently booked rooms. Backend /api/bookings/amend endpoint handles both positive and negative cost differences correctly. P0.5 COMPLETE and WORKING."
 
 metadata:
   created_by: "main_agent"
@@ -201,7 +204,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "P0.5 Amend Booking refund scenario - needs comprehensive testing for both cost increase and decrease"
+    - "All P0 blockers (P0.1 - P0.5) resolved and tested successfully"
   stuck_tasks: []
   test_all: false
   test_priority: "critical_first"
