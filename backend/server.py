@@ -24,7 +24,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # Create the main app without a prefix
-app = FastAPI(title="E-ARMS API", description="ECSAG Automated Room Management System")
+app = FastAPI(title="SARAI API", description="Shillong Aramgah Room Automation Interface")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -53,18 +53,14 @@ def validate_indian_mobile(mobile: str) -> bool:
     return bool(re.match(r'^[6-9]\d{9}$', cleaned))
 
 def normalize_uppercase_fields(data: dict) -> dict:
-    """Force uppercase on ID fields (army_number, dependent_id, bank_ifsc)"""
-    if "army_number" in data and data["army_number"]:
-        data["army_number"] = data["army_number"].upper()
+    """Force uppercase on ID fields (bank_ifsc, org_id for family members)"""
     if "bank_ifsc" in data and data["bank_ifsc"]:
         data["bank_ifsc"] = data["bank_ifsc"].upper()
-    if "dependent_id" in data and data["dependent_id"]:
-        data["dependent_id"] = data["dependent_id"].upper()
-    # For family members in check-in
+    # For family members - normalize org_id (formerly dependent_id)
     if "family_members" in data:
         for member in data["family_members"]:
-            if "dependent_id" in member and member["dependent_id"]:
-                member["dependent_id"] = member["dependent_id"].upper()
+            if "org_id" in member and member["org_id"]:
+                member["org_id"] = member["org_id"].upper()
     return data
 
 # ============= HELPER FUNCTIONS =============
@@ -122,14 +118,10 @@ class CancellationSlab(BaseModel):
     hours_before: int  # Hours before check-in
     charge_percent: float  # Percentage of advance to deduct
 
-DEFAULT_RANKS = [
-    "Sep/Dfr/Swr", "Nk", "Hav", "Sgt", "PO", "Nb Sub", "JWO", "CPO",
-    "Sub", "WO", "CA", "SM", "MCPO", "Hony Lt or Eqvt", "Hony Capt or Eqvt", "Def Civ"
-]
-
-COMMAND_ORDER = [
-    "E Command", "N Command", "W Command", "S Command", "SW Command",
-    "C Command", "ARTRAC", "Army HQ", "SFC", "Navy", "Air Force", "Def Civ", "Others"
+# Color categories for Organization guests
+COLOR_OPTIONS = [
+    "Red", "Green", "Brown", "Orange", "Yellow", 
+    "Violet", "Black", "Blue", "White", "Light Blue"
 ]
 
 class AppSettings(BaseModel):
@@ -151,7 +143,7 @@ class AppSettings(BaseModel):
     cat_i_rooms_count: int = 6
     cat_ii_rooms_count: int = 9
     default_advance_amount: float = 400.0
-    ranks: List[str] = Field(default_factory=lambda: DEFAULT_RANKS.copy())
+    colors: List[str] = Field(default_factory=lambda: COLOR_OPTIONS.copy())
     cancellation_policy: List[dict] = Field(default_factory=lambda: [
         {"hours_before": 96, "charge_percent": 0},
         {"hours_before": 48, "charge_percent": 50},
@@ -197,7 +189,7 @@ class AppSettingsUpdate(BaseModel):
     cat_i_rooms_count: Optional[int] = None
     cat_ii_rooms_count: Optional[int] = None
     default_advance_amount: Optional[float] = None
-    ranks: Optional[List[str]] = None
+    colors: Optional[List[str]] = None
     cancellation_policy: Optional[List[dict]] = None
 
 class SetupRequest(BaseModel):
@@ -216,7 +208,7 @@ class SetupRequest(BaseModel):
     cat_i_rooms_count: int = 6
     cat_ii_rooms_count: int = 9
     default_advance_amount: float = 400.0
-    ranks: Optional[List[str]] = None
+    colors: Optional[List[str]] = None
     cancellation_policy: Optional[List[dict]] = None
 
 # Room
@@ -568,7 +560,7 @@ def calculate_nights(check_in: str, check_out: str) -> int:
 # Health check
 @api_router.get("/")
 async def root():
-    return {"message": "E-ARMS API is running", "version": "1.0.0"}
+    return {"message": "SARAI API is running", "version": "1.0.0"}
 
 # ============= APP SETTINGS =============
 
@@ -613,7 +605,7 @@ async def complete_setup(request: SetupRequest):
         cat_i_rooms_count=request.cat_i_rooms_count,
         cat_ii_rooms_count=request.cat_ii_rooms_count,
         default_advance_amount=request.default_advance_amount,
-        ranks=request.ranks or DEFAULT_RANKS.copy(),
+        colors=request.colors or COLOR_OPTIONS.copy(),
         cancellation_policy=request.cancellation_policy or default_cancellation_policy
     )
     
@@ -1042,10 +1034,7 @@ async def check_in(request: CheckInRequest):
         "guest_age": request.guest_age,
         "guest_sex": request.guest_sex,
         "guest_address": request.guest_address,
-        "identity_card_number": request.identity_card_number,
-        "guest_service_status": request.guest_service_status,
-        "service_type": request.service_type,
-        "command_hq": request.command_hq,
+        "org_color": request.org_color,  # Organization color if Org guest
         "bank_name": request.bank_name,
         "bank_ifsc": request.bank_ifsc,
         "bank_account": request.bank_account,
@@ -1324,30 +1313,26 @@ async def delete_booking(booking_id: str):
 
 @api_router.get("/bookings/guest-history")
 async def get_guest_history(
-    phone_number: Optional[str] = Query(None, description="Guest phone number"),
-    army_number: Optional[str] = Query(None, description="Army/Service number")
+    phone_number: Optional[str] = Query(None, description="Guest phone number")
 ):
     """
-    Get booking history for a guest by phone number or army number.
+    Get booking history for a guest by phone number.
     Returns all bookings, statistics, and guest information.
     """
-    if not phone_number and not army_number:
+    if not phone_number:
         raise HTTPException(
             status_code=400, 
-            detail="Please provide either phone_number or army_number"
+            detail="Please provide phone_number"
         )
     
-    # Build query
-    query = {}
-    if phone_number:
-        # Remove spaces and format for search (support multiple formats)
-        phone_clean = phone_number.replace(" ", "").replace("+91", "").replace("-", "")
-        query["$or"] = [
+    # Build query - search by phone number
+    phone_clean = phone_number.replace(" ", "").replace("+91", "").replace("-", "")
+    query = {
+        "$or": [
             {"guest_contact": {"$regex": phone_clean, "$options": "i"}},
             {"guest_contact": {"$regex": f"\\+91.*{phone_clean}", "$options": "i"}}
         ]
-    elif army_number:
-        query["army_number"] = {"$regex": army_number, "$options": "i"}
+    }
     
     # Fetch all bookings for this guest
     bookings = await db.bookings.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
@@ -1365,10 +1350,8 @@ async def get_guest_history(
     guest_info = {
         "guest_name": first_booking.get("guest_name"),
         "guest_contact": first_booking.get("guest_contact"),
-        "army_number": first_booking.get("army_number"),
-        "guest_rank": first_booking.get("guest_rank"),
-        "guest_unit": first_booking.get("guest_unit"),
-        "guest_service_status": first_booking.get("guest_service_status")
+        "is_org": first_booking.get("is_org", False),
+        "org_color": first_booking.get("org_color")
     }
     
     # Calculate statistics
@@ -2013,10 +1996,9 @@ async def create_feedback(fb: FeedbackCreate):
         "booking_id": fb.booking_id,
         "booking_number": booking.get("booking_number", ""),
         "guest_name": booking.get("guest_name", ""),
-        "guest_rank": booking.get("guest_rank"),
-        "guest_unit": booking.get("guest_unit"),
         "guest_contact": booking.get("guest_contact"),
-        "service_status": booking.get("guest_service_status"),
+        "is_org": booking.get("is_org", False),
+        "org_color": booking.get("org_color"),
         "check_in_date": booking.get("check_in_date", ""),
         "check_out_date": booking.get("check_out_date", ""),
         "duration_nights": nights,
@@ -2105,15 +2087,15 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
 
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
     
-    command_map = {
-        "Northern Command": "N Command", "Eastern Command": "E Command",
-        "Western Command": "W Command", "Southern Command": "S Command",
-        "South Western Command": "SW Command", "Central Command": "C Command",
-        "ARTRAC": "ARTRAC", "SFC": "SFC", "Army HQ": "Army HQ"
-    }
+    # Color-based grouping for Org guests + Non-Org category
+    colors_list = settings.get("colors", COLOR_OPTIONS)
+    color_stats = {color: {"guests": 0, "days": 0} for color in colors_list}
+    color_stats["Non-Org"] = {"guests": 0, "days": 0}  # For non-organization guests
+    color_stats["Unassigned"] = {"guests": 0, "days": 0}  # For Org guests without color yet
     
-    commands = {cmd: {"guests": 0, "days": 0} for cmd in COMMAND_ORDER}
-    jco_days = 0; or_days = 0; def_civ_days = 0
+    org_cat_i_days = 0  # Organization Cat I
+    org_cat_ii_days = 0  # Organization Cat II
+    non_org_days = 0  # Non-Org (all categories)
     extra_beds_total = 0
     
     for bk in bookings:
@@ -2125,52 +2107,50 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         if nights == 0:
             continue
         
-        rank = (bk.get("guest_rank") or "").strip().lower()
-        is_def_civ = rank == "def civ"
-        svc = bk.get("service_type", "")
+        is_org = bk.get("is_org", False)
+        org_color = bk.get("org_color")
         
-        if is_def_civ:
-            cmd_key = "Def Civ"
-        elif svc == "Air Force":
-            cmd_key = "Air Force"
-        elif svc == "Navy":
-            cmd_key = "Navy"
-        elif svc == "SFC":
-            cmd_key = "SFC"
-        elif svc == "Army":
-            cmd_key = command_map.get(bk.get("command_hq", ""), "Army HQ")
+        # Categorize by Org/Non-Org and color
+        if is_org:
+            if org_color and org_color in color_stats:
+                color_key = org_color
+            else:
+                color_key = "Unassigned"  # Org guest but no color assigned yet
         else:
-            cmd_key = "Others"
+            color_key = "Non-Org"
         
-        if cmd_key in commands:
-            commands[cmd_key]["guests"] += 1
-            commands[cmd_key]["days"] += nights
+        if color_key in color_stats:
+            color_stats[color_key]["guests"] += 1
+            color_stats[color_key]["days"] += nights
         
+        # Calculate room-days by category for revenue
         cats = bk.get("room_categories", [])
-        if is_def_civ:
-            def_civ_days += nights * max(1, len(cats))
-        else:
+        if is_org:
+            # Organization rates - Cat I or Cat II
             for cat in (cats or ["Cat II"]):
                 if cat == "Cat I":
-                    jco_days += nights
+                    org_cat_i_days += nights
                 else:
-                    or_days += nights
+                    org_cat_ii_days += nights
+        else:
+            # Non-Org rates (flat rate regardless of category)
+            non_org_days += nights * max(1, len(cats))
         
         extra_beds_total += bk.get("extra_beds", 0) * nights
     
     s = settings
     cat_i_lf = s.get("cat_i_license_fee", 30)
     cat_ii_lf = s.get("cat_ii_license_fee", 15)
-    def_civ_lf = s.get("def_civ_license_fee", 30)
+    non_org_lf = s.get("non_org_license_fee", 30)
     cat_i_rr = s.get("cat_i_room_rent", 470)
     cat_ii_rr = s.get("cat_ii_room_rent", 385)
-    def_civ_rr = s.get("def_civ_room_rent", 570)
+    non_org_rr = s.get("non_org_room_rent", 570)
     
-    room_rent_total = round(jco_days * cat_i_rr + or_days * cat_ii_rr + def_civ_days * def_civ_rr, 2)
-    lf_jco = round(jco_days * cat_i_lf, 2)
-    lf_or = round(or_days * cat_ii_lf, 2)
-    lf_def_civ = round(def_civ_days * def_civ_lf, 2)
-    total_license_fee = round(lf_jco + lf_or + lf_def_civ, 2)
+    room_rent_total = round(org_cat_i_days * cat_i_rr + org_cat_ii_days * cat_ii_rr + non_org_days * non_org_rr, 2)
+    lf_org_cat_i = round(org_cat_i_days * cat_i_lf, 2)
+    lf_org_cat_ii = round(org_cat_ii_days * cat_ii_lf, 2)
+    lf_non_org = round(non_org_days * non_org_lf, 2)
+    total_license_fee = round(lf_org_cat_i + lf_org_cat_ii + lf_non_org, 2)
     extra_bed_amount = round(extra_beds_total * 75, 2)
     grand_total = round(room_rent_total + total_license_fee + extra_bed_amount, 2)
     
@@ -2187,7 +2167,7 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     ), 2)
     
     total_rooms = s.get("cat_i_rooms_count", 6) + s.get("cat_ii_rooms_count", 9)
-    total_booked_days = sum(v["days"] for v in commands.values())
+    total_booked_days = sum(v["days"] for v in color_stats.values())
     avg_occ = round(total_booked_days / (total_rooms * days_in_month) * 100, 2) if total_rooms * days_in_month > 0 else 0
     
     no_shows = await db.bookings.count_documents({
@@ -2199,18 +2179,18 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         "month": month, "year": year,
         "month_name": cal_mod.month_name[month],
         "days_in_month": days_in_month, "total_rooms": total_rooms,
-        "command_breakdown": [
-            {"command": c, "guests": commands[c]["guests"], "days": commands[c]["days"]}
-            for c in COMMAND_ORDER if commands[c]["guests"] > 0 or commands[c]["days"] > 0
+        "color_breakdown": [
+            {"color": c, "guests": color_stats[c]["guests"], "days": color_stats[c]["days"]}
+            for c in color_stats.keys() if color_stats[c]["guests"] > 0 or color_stats[c]["days"] > 0
         ],
-        "total_guests": sum(v["guests"] for v in commands.values()),
+        "total_guests": sum(v["guests"] for v in color_stats.values()),
         "total_days": total_booked_days,
-        "jco_days": jco_days, "or_days": or_days, "def_civ_days": def_civ_days,
+        "org_cat_i_days": org_cat_i_days, "org_cat_ii_days": org_cat_ii_days, "non_org_days": non_org_days,
         "extra_beds_total": extra_beds_total,
         "license_fees": {
-            "jco": {"days": jco_days, "rate": cat_i_lf, "total": lf_jco},
-            "or": {"days": or_days, "rate": cat_ii_lf, "total": lf_or},
-            "def_civ": {"days": def_civ_days, "rate": def_civ_lf, "total": lf_def_civ}
+            "org_cat_i": {"days": org_cat_i_days, "rate": cat_i_lf, "total": lf_org_cat_i},
+            "org_cat_ii": {"days": org_cat_ii_days, "rate": cat_ii_lf, "total": lf_org_cat_ii},
+            "non_org": {"days": non_org_days, "rate": non_org_lf, "total": lf_non_org}
         },
         "room_rent_total": room_rent_total,
         "total_license_fee": total_license_fee,
@@ -2223,10 +2203,8 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         "total_booked_days": total_booked_days,
         "avg_occupancy": avg_occ,
         "rates": {
-            "cat_i_rate": s.get("cat_i_rate", 500), "cat_ii_rate": s.get("cat_ii_rate", 400),
-            "def_civ_rate": s.get("def_civ_cat_i_rate", 600),
-            "cat_i_room_rent": cat_i_rr, "cat_ii_room_rent": cat_ii_rr, "def_civ_room_rent": def_civ_rr,
-            "cat_i_license_fee": cat_i_lf, "cat_ii_license_fee": cat_ii_lf, "def_civ_license_fee": def_civ_lf
+            "cat_i_room_rent": cat_i_rr, "cat_ii_room_rent": cat_ii_rr, "non_org_room_rent": non_org_rr,
+            "cat_i_license_fee": cat_i_lf, "cat_ii_license_fee": cat_ii_lf, "non_org_license_fee": non_org_lf
         }
     }
 
@@ -2298,10 +2276,10 @@ async def get_room_occupancy_report(
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
     cat_i_rr = settings.get("cat_i_room_rent", 470)
     cat_ii_rr = settings.get("cat_ii_room_rent", 385)
-    def_civ_rr = settings.get("def_civ_room_rent", 570)
+    non_org_rr = settings.get("non_org_room_rent", 570)
     cat_i_lf = settings.get("cat_i_license_fee", 30)
     cat_ii_lf = settings.get("cat_ii_license_fee", 15)
-    def_civ_lf = settings.get("def_civ_license_fee", 30)
+    non_org_lf = settings.get("non_org_license_fee", 30)
     
     # Calculate room-wise occupancy
     room_details = []
@@ -2336,15 +2314,17 @@ async def get_room_occupancy_report(
             occupied_days += nights
             
             # Calculate revenue for this booking
-            rank = (bk.get("guest_rank") or "").strip().lower()
-            is_def_civ = rank == "def civ"
+            is_org = bk.get("is_org", False)
             
-            if is_def_civ:
-                rate_per_day = def_civ_rr + def_civ_lf
-            elif category == "Cat I":
-                rate_per_day = cat_i_rr + cat_i_lf
+            if is_org:
+                # Organization rates based on category
+                if category == "Cat I":
+                    rate_per_day = cat_i_rr + cat_i_lf
+                else:
+                    rate_per_day = cat_ii_rr + cat_ii_lf
             else:
-                rate_per_day = cat_ii_rr + cat_ii_lf
+                # Non-Org flat rate
+                rate_per_day = non_org_rr + non_org_lf
             
             booking_revenue = nights * rate_per_day
             room_revenue += booking_revenue
@@ -2355,11 +2335,9 @@ async def get_room_occupancy_report(
             # Build detailed booking info for expandable row
             bookings_detail.append({
                 "booking_number": bk.get("booking_number", "N/A"),
-                "army_number": bk.get("army_number", "N/A"),
-                "rank": bk.get("guest_rank", "N/A"),
+                "is_org": is_org,
+                "org_color": bk.get("org_color", "N/A"),
                 "name": bk.get("guest_name", "N/A"),
-                "unit": bk.get("guest_unit", "N/A"),
-                "command": bk.get("command_hq", "N/A"),
                 "from_date": bk["check_in_date"],
                 "to_date": bk["check_out_date"],
                 "days": nights,
@@ -2469,20 +2447,22 @@ async def get_room_allotment_report(
         nights = (checkout - checkin).days
         
         # Calculate total amount
-        rank = (bk.get("guest_rank") or "").strip().lower()
-        is_def_civ = rank == "def civ"
+        is_org = bk.get("is_org", False)
         cats = bk.get("room_categories", [])
         num_rooms = len(bk.get("room_ids", [])) or 1
         
-        if is_def_civ:
-            room_rent = settings.get("def_civ_room_rent", 570)
-            license_fee = settings.get("def_civ_license_fee", 30)
-        elif "Cat I" in cats:
-            room_rent = settings.get("cat_i_room_rent", 470)
-            license_fee = settings.get("cat_i_license_fee", 30)
+        if is_org:
+            # Organization rates based on category
+            if "Cat I" in cats:
+                room_rent = settings.get("cat_i_room_rent", 470)
+                license_fee = settings.get("cat_i_license_fee", 30)
+            else:
+                room_rent = settings.get("cat_ii_room_rent", 385)
+                license_fee = settings.get("cat_ii_license_fee", 15)
         else:
-            room_rent = settings.get("cat_ii_room_rent", 385)
-            license_fee = settings.get("cat_ii_license_fee", 15)
+            # Non-Org flat rate
+            room_rent = settings.get("non_org_room_rent", 570)
+            license_fee = settings.get("non_org_license_fee", 30)
         
         total_amount = (room_rent + license_fee) * nights * num_rooms
         total_amount += bk.get("extra_beds", 0) * 75 * nights
@@ -2491,14 +2471,14 @@ async def get_room_allotment_report(
         self_count = 1  # Main guest
         wife_count = 0
         child_count = 0
-        dependents_count = 0  # Those WITH dependent_id
-        non_dependents_count = 0  # Those WITHOUT dependent_id
+        dependents_count = 0  # Those WITH org_id (formerly dependent_id)
+        non_dependents_count = 0  # Those WITHOUT org_id
         
         family_members = bk.get("family_members", [])
         for fm in family_members:
             relation = (fm.get("relation") or "").lower()
-            has_dependent_card = fm.get("has_dependent_card", False)
-            dependent_id = fm.get("dependent_id", "")
+            has_org_card = fm.get("has_org_card", False)
+            org_id = fm.get("org_id", "")
             
             # Count by relationship
             if "w/o" in relation or "wife" in relation:
@@ -2507,7 +2487,7 @@ async def get_room_allotment_report(
                 child_count += 1
             
             # Count dependents vs non-dependents
-            if has_dependent_card and dependent_id:
+            if has_org_card and org_id:
                 dependents_count += 1
             else:
                 non_dependents_count += 1
@@ -2515,12 +2495,9 @@ async def get_room_allotment_report(
         allotments.append({
             "booking_id": bk["id"],
             "booking_number": bk.get("booking_number", "N/A"),
-            "army_number": bk.get("army_number", "N/A"),
             "guest_name": bk.get("guest_name", "N/A"),
-            "guest_rank": bk.get("guest_rank", "N/A"),
-            "guest_unit": bk.get("guest_unit", "N/A"),
-            "command_hq": bk.get("command_hq", "N/A"),
-            "service_type": bk.get("service_type", "N/A"),
+            "is_org": is_org,
+            "org_color": bk.get("org_color", "N/A"),
             "room_numbers": bk.get("room_numbers", []),
             "room_categories": bk.get("room_categories", []),
             "check_in_date": bk["check_in_date"],
@@ -2531,7 +2508,7 @@ async def get_room_allotment_report(
             "child_count": child_count,
             "dependents": dependents_count,
             "non_dependents": non_dependents_count,
-            "identity_card_no": bk.get("identity_card_number") or bk.get("aadhaar_number", "N/A"),
+            "aadhaar_no": bk.get("aadhaar_number", "N/A"),
             "mobile_no": bk.get("guest_contact", "N/A"),
             "total_amount": round(total_amount, 2)
         })
@@ -2614,20 +2591,22 @@ async def get_guest_details_report(
         total_nights += nights
         
         # Calculate total amount
-        rank = (bk.get("guest_rank") or "").strip().lower()
-        is_def_civ = rank == "def civ"
+        is_org = bk.get("is_org", False)
         cats = bk.get("room_categories", [])
         num_rooms = len(bk.get("room_ids", [])) or 1
         
-        if is_def_civ:
-            room_rent = settings.get("def_civ_room_rent", 570)
-            license_fee = settings.get("def_civ_license_fee", 30)
-        elif "Cat I" in cats:
-            room_rent = settings.get("cat_i_room_rent", 470)
-            license_fee = settings.get("cat_i_license_fee", 30)
+        if is_org:
+            # Organization rates based on category
+            if "Cat I" in cats:
+                room_rent = settings.get("cat_i_room_rent", 470)
+                license_fee = settings.get("cat_i_license_fee", 30)
+            else:
+                room_rent = settings.get("cat_ii_room_rent", 385)
+                license_fee = settings.get("cat_ii_license_fee", 15)
         else:
-            room_rent = settings.get("cat_ii_room_rent", 385)
-            license_fee = settings.get("cat_ii_license_fee", 15)
+            # Non-Org flat rate
+            room_rent = settings.get("non_org_room_rent", 570)
+            license_fee = settings.get("non_org_license_fee", 30)
         
         total_amount = (room_rent + license_fee) * nights * num_rooms
         total_amount += bk.get("extra_beds", 0) * 75 * nights
@@ -2637,11 +2616,11 @@ async def get_guest_details_report(
         guest_party_members.append({
             "booking_number": bk.get("booking_number", "N/A"),
             "room_numbers": ", ".join(bk.get("room_numbers", [])),
-            "rank": bk.get("guest_rank", "N/A"),
+            "is_org": "Org" if is_org else "Non-Org",
+            "org_color": bk.get("org_color", "—"),
             "name": bk.get("guest_name", "N/A"),
             "age": bk.get("guest_age") or "—",
             "sex": bk.get("guest_sex") or "—",
-            "unit": bk.get("guest_unit") or "—",
             "relationship": "Self",
             "address": bk.get("guest_address") or "—",
             "aadhaar_no": bk.get("aadhaar_number") or "—",
@@ -2659,11 +2638,11 @@ async def get_guest_details_report(
             guest_party_members.append({
                 "booking_number": bk.get("booking_number", "N/A"),
                 "room_numbers": ", ".join(bk.get("room_numbers", [])),
-                "rank": "—",  # Family members don't have rank
+                "is_org": "—",  # Family members inherit from main guest
+                "org_color": "—",
                 "name": fm.get("name", "—"),
                 "age": fm.get("age", "—"),
                 "sex": fm.get("sex", "—"),
-                "unit": "—",  # Family members inherit main guest's unit
                 "relationship": fm.get("relation", "—").title(),
                 "address": bk.get("guest_address") or "—",  # Same as main guest
                 "aadhaar_no": "—",  # Not stored for family members
@@ -2695,7 +2674,7 @@ async def health_check():
         await db.command("ping")
         return {
             "status": "healthy",
-            "service": "E-ARMS Backend",
+            "service": "SARAI Backend",
             "database": "connected"
         }
     except Exception as e:
@@ -2714,7 +2693,24 @@ app.add_middleware(
 # ============= STARTUP & SHUTDOWN EVENTS =============
 @app.on_event("startup")
 async def startup_event():
-    """Initialize scheduler and check for missed backups on startup"""
+    """Initialize scheduler, run migrations, and check for missed backups on startup"""
+    logger.info("🚀 Application starting up...")
+    
+    try:
+        # Run one-time database migrations
+        logger.info("🔄 Running database migrations...")
+        migration_result = await run_startup_migrations(db)
+        
+        if migration_result["status"] == "success":
+            logger.info(f"✅ Migration completed: {migration_result['message']}")
+        elif migration_result["status"] == "already_completed":
+            logger.info("✅ Migrations already completed")
+        else:
+            logger.warning(f"⚠️ Migration status: {migration_result['status']}")
+    except Exception as e:
+        logger.error(f"❌ Migration failed: {str(e)}", exc_info=True)
+        logger.warning("⚠️ Application will continue despite migration failure")
+    
     try:
         # Initialize backup scheduler
         scheduler_service.init_scheduler(db)
@@ -2726,6 +2722,8 @@ async def startup_event():
             logger.warning(f"Backup warning: {missed_check.get('message')}")
     except Exception as e:
         logger.error(f"Startup initialization error: {str(e)}")
+    
+    logger.info("✅ Application startup complete")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
@@ -3010,33 +3008,3 @@ async def delete_migration_archive():
 
 # ============= INCLUDE ROUTER (MUST BE AFTER ALL ROUTES) =============
 app.include_router(api_router)
-
-
-# ============= STARTUP EVENT =============
-@app.on_event("startup")
-async def startup_event():
-    """Run on application startup"""
-    logger.info("🚀 Application starting up...")
-    
-    # Run one-time migrations
-    try:
-        logger.info("🔄 Running database migrations...")
-        migration_result = await run_startup_migrations(db)
-        
-        if migration_result["status"] == "success":
-            logger.info(f"✅ Migration completed: {migration_result['message']}")
-        elif migration_result["status"] == "already_completed":
-            logger.info("✅ Migrations already completed")
-        else:
-            logger.warning(f"⚠️ Migration status: {migration_result['status']}")
-    except Exception as e:
-        logger.error(f"❌ Migration failed: {str(e)}", exc_info=True)
-        # Don't crash the app if migration fails
-        logger.warning("⚠️ Application will continue despite migration failure")
-    
-    # Start scheduler
-    scheduler_service.start_scheduler(db)
-    logger.info("✅ Application startup complete")
-
-
-
