@@ -2705,17 +2705,24 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
             color_stats[color_key]["days"] += nights
         
         # Calculate room-days by category for revenue
+        # Each room contributes 1 night per night stayed
+        num_rooms = len(bk.get("room_ids", []))
+        if num_rooms == 0:
+            num_rooms = 1  # Fallback for old bookings
+        
         cats = bk.get("room_categories", [])
         if is_org:
             # Organization rates - Cat I or Cat II
-            for cat in (cats or ["Cat II"]):
-                if cat == "Cat I":
-                    org_cat_i_days += nights
-                else:
-                    org_cat_ii_days += nights
+            # Count each category once (not per night)
+            cat_i_count = cats.count("Cat I")
+            cat_ii_count = cats.count("Cat II")
+            
+            org_cat_i_days += cat_i_count * nights
+            org_cat_ii_days += cat_ii_count * nights
         else:
             # Non-Org rates (flat rate regardless of category)
-            non_org_days += nights * max(1, len(cats))
+            # All rooms get same rate, so just count total room-nights
+            non_org_days += num_rooms * nights
         
         extra_beds_total += bk.get("extra_beds", 0) * nights
     
