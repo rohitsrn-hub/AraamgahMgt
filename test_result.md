@@ -211,10 +211,25 @@ frontend:
         agent: "testing"
         comment: "✅ VERIFIED: ALL TESTS PASSED (12 backend tests, full frontend UI validation). Backend API /api/rooms/find-optimal-combination returns correct optimal combinations for single/multi-room bookings with proper cost calculation. Frontend RoomSegmentSelector displays calendar view with color-coded rooms (blue/green/purple etc), status badges (Same/Change), total cost calculation, Accept/Customize modes. Database persistence confirmed: room_segments array, has_room_changes flag, room_ids populated for backward compatibility. Edge cases tested: insufficient availability (returns 'insufficient' status), single night booking, long stay (7 nights), multi-room bookings (2, 3 rooms). BUG FIXED during testing: API URL in RoomSegmentSelector.jsx was missing /api prefix (line 10) - causing 404 errors. User flow working end-to-end: New Booking → Fill details → Select dates → Click Mix & Match → View optimal combination → Accept/Customize → Create booking with room_segments. Test file created: /app/backend/tests/test_mix_match_rooms.py. P1 COMPLETE and FULLY WORKING."
 
+  - task: "P2 - PDF Updates for Segmented Bookings"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/utils/pdfUtils.js, /app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "fork_main"
+        comment: "IMPLEMENTED: Updated PDF generation functions to handle segmented bookings. BOOKING SLIP PDF (generateBookingSlips, lines 392-550): Added conditional display for Room Number field - shows '(See room schedule below)' when has_room_changes=true. Added new ROOM SCHEDULE section before signatures showing per-night room assignments in compact two-column layout (e.g., '26 Apr: C1-01, C1-02'). ORG DATA FORM PDF (generateOrgDataForm, lines 936+): Updated room display to show unique rooms with '(varies)' indicator for segmented bookings. All changes are backward compatible - traditional bookings without room_segments display normally."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: ALL PDF TESTS PASSED (4 tests). generateBookingSlips correctly handles segmented bookings - Room Number field shows '(See room schedule below)', ROOM SCHEDULE section displays per-night assignments in compact format. generateOrgDataForm shows unique rooms with '(varies)' for segmented bookings. generateCheckoutReceipt (Bill PDF) verified working. Backward compatibility confirmed - traditional bookings generate PDFs correctly without room schedule section. BUGS FIXED during testing: (1) CRITICAL: isDefCiv undefined in generateCheckoutReceipt line 90 - changed to isNonOrg with proper rate lookup (was breaking Bill PDF for all bookings), (2) MINOR: Toast message showing '[object Object]' in handlePrintBookingSlips line 1218 - changed to result.filename. Created test bookings: BK0088 (segmented), BK0089 (traditional). P2 COMPLETE and FULLY WORKING."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 5
+  test_sequence: 6
   run_ui: true
 
 test_plan:
