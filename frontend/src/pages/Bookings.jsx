@@ -236,6 +236,7 @@ export default function Bookings() {
       setShowNewBooking(true);
       clearParams();
     } else if (action === 'pending-refunds') {
+      fetchPendingRefunds();
       setShowPendingRefunds(true);
       clearParams();
     } else if (action === 'checkin') {
@@ -329,7 +330,7 @@ export default function Bookings() {
         }
       }
     }
-  }, [location.search, bookings, navigate]);
+  }, [location.search, bookings, navigate, fetchPendingRefunds]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -357,14 +358,14 @@ export default function Bookings() {
     }
   }, []);
 
-  const fetchPendingRefunds = async () => {
+  const fetchPendingRefunds = useCallback(async () => {
     try {
       const res = await axios.get(`${API}/refunds`, { params: { status: "pending" } });
       setPendingRefunds(res.data);
     } catch (error) {
       toast.error("Failed to load pending refunds");
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (settings?.default_advance_amount && bookingForm.check_in_date) {
