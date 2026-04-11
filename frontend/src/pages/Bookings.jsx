@@ -38,7 +38,9 @@ import {
   UserPlus,
   Trash,
   WarningCircle,
-  NotePencil
+  NotePencil,
+  Pencil,
+  CheckCircle
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useLocation } from "react-router-dom";
@@ -2786,6 +2788,72 @@ export default function Bookings() {
                   </div>
                 )}
               </div>
+              
+              {/* Detailed Bill Calculation */}
+              {(actionForm.extra_beds_checkout > 0 || actionForm.extra_bed_days > 0 || true) && (
+                <div className="p-4 bg-green-50 rounded-xl border border-green-300">
+                  <h4 className="font-semibold text-green-800 mb-3">Total Bill Calculation</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Room Charges (from booking):</span>
+                      <span className="font-medium">₹{selectedBooking.total_amount - (selectedBooking.advance_paid || 0)}</span>
+                    </div>
+                    {selectedBooking.extra_beds > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Extra Beds (at check-in):</span>
+                        <span className="font-medium">₹{selectedBooking.extra_bed_charge || 0}</span>
+                      </div>
+                    )}
+                    {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-600">Additional Extra Beds (during stay):</span>
+                        <span className="font-medium">₹{actionForm.extra_beds_checkout * actionForm.extra_bed_days * 75}</span>
+                      </div>
+                    )}
+                    <div className="border-t border-green-300 pt-2 mt-2">
+                      <div className="flex justify-between">
+                        <span className="font-semibold text-green-900">Total Amount Due:</span>
+                        <span className="text-xl font-bold text-green-700">
+                          ₹{(() => {
+                            const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
+                            return (selectedBooking.balance_amount || 0) + extraBedCharge;
+                          })()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Amend and Confirm Buttons */}
+                  <div className="flex gap-2 mt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        // Allow manual editing - don't auto-fill
+                        setActionForm({...actionForm, final_payment: actionForm.final_payment || 0});
+                      }}
+                      className="flex items-center gap-1"
+                    >
+                      <Pencil size={14} />
+                      Amend Amount
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
+                        const totalDue = (selectedBooking.balance_amount || 0) + extraBedCharge;
+                        setActionForm({...actionForm, final_payment: totalDue});
+                        toast.success(`Amount confirmed: ₹${totalDue}`);
+                      }}
+                      className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
+                    >
+                      <CheckCircle size={14} />
+                      Confirm Amount
+                    </Button>
+                  </div>
+                </div>
+              )}
+              
               <div>
                 <Label>Staff Member *</Label>
                 <Select value={actionForm.staff_id} onValueChange={(v) => setActionForm({...actionForm, staff_id: v})}>
@@ -3026,7 +3094,14 @@ export default function Bookings() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowCheckOut(false)}>Cancel</Button>
-            <Button onClick={handleProceedToFeedback} className="bg-blue-500 hover:bg-blue-600" data-testid="confirm-checkout">Proceed to Feedback</Button>
+            <Button 
+              onClick={handleProceedToFeedback} 
+              className="bg-blue-500 hover:bg-blue-600" 
+              data-testid="confirm-checkout"
+              disabled={!actionForm.payment_mode || !actionForm.final_payment || actionForm.final_payment === 0}
+            >
+              Proceed to Feedback
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
