@@ -16,6 +16,19 @@ from enum import Enum
 from services import backup_service, restore_service, scheduler_service
 from services.migration_service import run_startup_migrations
 
+# Import utils
+from utils import (
+    validate_ifsc,
+    validate_indian_mobile,
+    normalize_uppercase_fields,
+    generate_booking_number,
+    serialize_datetime,
+    serialize_doc,
+    serialize_response,
+    calculate_nights,
+    get_room_rate
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -37,56 +50,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ============= VALIDATION HELPERS =============
-import re
-
-def validate_ifsc(ifsc: str) -> bool:
-    """Validate IFSC code format: 4 letters + 0 + 6 alphanumeric"""
-    if not ifsc:
-        return True  # Optional field
-    return bool(re.match(r'^[A-Z]{4}0[A-Z0-9]{6}$', ifsc))
-
-def validate_indian_mobile(mobile: str) -> bool:
-    """Validate Indian mobile number (10 digits starting with 6-9)"""
-    if not mobile:
-        return True  # Optional field
-    cleaned = mobile.replace(" ", "").replace("+91", "").replace("-", "")
-    return bool(re.match(r'^[6-9]\d{9}$', cleaned))
-
-def normalize_uppercase_fields(data: dict) -> dict:
-    """Force uppercase on ID fields (bank_ifsc, org_id for family members)"""
-    if "bank_ifsc" in data and data["bank_ifsc"]:
-        data["bank_ifsc"] = data["bank_ifsc"].upper()
-    # For family members - normalize org_id (formerly dependent_id)
-    if "family_members" in data:
-        for member in data["family_members"]:
-            if "org_id" in member and member["org_id"]:
-                member["org_id"] = member["org_id"].upper()
-    return data
-
 # ============= HELPER FUNCTIONS =============
-async def generate_booking_number():
-    """Generate sequential booking number starting from BK0001"""
-    # Get the latest booking number
-    latest_booking = await db.bookings.find_one(
-        {},
-        {"_id": 0, "booking_number": 1},
-        sort=[("created_at", -1)]
-    )
-    
-    if not latest_booking or not latest_booking.get("booking_number"):
-        return "BK0001"
-    
-    try:
-        # Extract the number from the booking number (e.g., BK0001 -> 1)
-        current_number = int(latest_booking["booking_number"].replace("BK", ""))
-        next_number = current_number + 1
-        # Format with leading zeros (e.g., 1 -> BK0001)
-        return f"BK{next_number:04d}"
-    except (ValueError, KeyError):
-        # Fallback to counting all bookings if format is unexpected
-        count = await db.bookings.count_documents({})
-        return f"BK{count + 1:04d}"
+# Note: Helper functions moved to utils/ for better organization
 
 # ============= ENUMS =============
 class RoomCategory(str, Enum):
@@ -519,84 +484,8 @@ class Payment(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # ============= HELPER FUNCTIONS =============
-
-def serialize_datetime(obj):
-    """Convert datetime to ISO string for MongoDB storage"""
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    return obj
-
-def serialize_doc(doc: dict) -> dict:
-    """Serialize document for MongoDB storage"""
-    result = {}
-    for k, v in doc.items():
-        if k == '_id':  # Skip MongoDB ObjectId
-            continue
-        if isinstance(v, datetime):
-            result[k] = v.isoformat()
-        else:
-            result[k] = v
-    return result
-
-def serialize_response(doc: dict) -> dict:
-    """Serialize document for API response, excluding _id"""
-    if doc is None:
-        return None
-    result = {}
-    for k, v in doc.items():
-        if k == '_id':  # Skip MongoDB ObjectId
-            continue
-        result[k] = v
-    return result
-
-async def get_room_rate(category: RoomCategory, is_org: bool = True, is_license_fee: bool = False) -> float:
-    """
-    Get room rate from settings based on Org/Non-Org classification
-    
-    Args:
-        category: Room category (CAT_I or CAT_II)
-        is_org: True for Organization personnel, False for Non-Org
-        is_license_fee: If True, return license fee instead of room rent
-    
-    Returns:
-        float: Room rent or license fee amount
-    """
-    settings = await db.app_settings.find_one({}, {"_id": 0})
-    
-    if settings:
-        if is_org:
-            # Organization personnel - use Cat I or Cat II rates
-            if category == RoomCategory.CAT_I:
-                if is_license_fee:
-                    return settings.get("cat_i_license_fee", 30.0)
-                return settings.get("cat_i_room_rent", 470.0)
-            else:  # CAT_II
-                if is_license_fee:
-                    return settings.get("cat_ii_license_fee", 15.0)
-                return settings.get("cat_ii_room_rent", 385.0)
-        else:
-            # Non-Org - use Non-Org rates
-            if is_license_fee:
-                return settings.get("non_org_license_fee", 30.0)
-            return settings.get("non_org_room_rent", 570.0)
-    
-    # Fallback defaults if settings not found
-    if is_org:
-        if category == RoomCategory.CAT_I:
-            return 30.0 if is_license_fee else 470.0
-        else:
-            return 15.0 if is_license_fee else 385.0
-    else:
-        return 30.0 if is_license_fee else 570.0
-
-def calculate_nights(check_in: str, check_out: str) -> int:
-    """Calculate number of nights between dates"""
-    try:
-        ci = datetime.fromisoformat(check_in.replace('Z', '+00:00'))
-        co = datetime.fromisoformat(check_out.replace('Z', '+00:00'))
-        return max(1, (co - ci).days)
-    except (ValueError, TypeError):
-        return 1
+# Note: Helper functions moved to utils/ for better organization
+import re
 
 # ============= API ROUTES =============
 
@@ -1121,8 +1010,8 @@ async def process_room_segments(room_segments: List[dict], check_in_date: str, c
     for segment in room_segments:
         for room_data in segment.get("rooms", []):
             room_category = RoomCategory(room_data["category"])
-            rate = await get_room_rate(room_category, is_org)
-            license_fee = await get_room_rate(room_category, is_org, is_license_fee=True)
+            rate = await get_room_rate(db, room_category, is_org)
+            license_fee = await get_room_rate(db, room_category, is_org, is_license_fee=True)
             total_amount += rate + license_fee
     
     # Check if rooms change during stay
@@ -1188,8 +1077,8 @@ async def create_booking(booking: BookingCreate):
             if overlapping:
                 raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
 
-            rate = await get_room_rate(RoomCategory(room["category"]), booking.is_org)
-            license_fee = await get_room_rate(RoomCategory(room["category"]), booking.is_org, is_license_fee=True)
+            rate = await get_room_rate(db, RoomCategory(room["category"]), booking.is_org)
+            license_fee = await get_room_rate(db, RoomCategory(room["category"]), booking.is_org, is_license_fee=True)
             total_amount += (rate + license_fee) * nights
             room_numbers.append(room["room_number"])
             room_categories.append(room["category"])
@@ -1222,7 +1111,7 @@ async def create_booking(booking: BookingCreate):
         guest = guest_doc
 
     # Generate sequential booking number
-    booking_number = await generate_booking_number()
+    booking_number = await generate_booking_number(db)
 
     booking_obj = Booking(
         booking_number=booking_number,
