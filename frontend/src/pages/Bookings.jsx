@@ -2735,6 +2735,37 @@ export default function Bookings() {
                   <p className="text-xs text-amber-600">Extra Beds (at check-in): {selectedBooking.extra_beds} × ₹75 = ₹{selectedBooking.extra_bed_charge}</p>
                 )}
                 <p className="text-sm font-medium text-amber-600 mt-2">Balance Due: ₹{selectedBooking.balance_amount}</p>
+                
+                {/* Stay Duration Info */}
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <span className="text-slate-500">Check-In Date:</span>
+                      <p className="font-medium text-slate-700">
+                        {selectedBooking.actual_check_in 
+                          ? format(new Date(selectedBooking.actual_check_in), "dd MMM yyyy")
+                          : selectedBooking.check_in_date}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Check-Out Date:</span>
+                      <p className="font-medium text-slate-700">{format(new Date(), "dd MMM yyyy")}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Total Duration:</span>
+                      <p className="font-semibold text-blue-600">
+                        {(() => {
+                          const checkIn = selectedBooking.actual_check_in 
+                            ? new Date(selectedBooking.actual_check_in)
+                            : new Date(selectedBooking.check_in_date);
+                          const checkOut = new Date();
+                          const nights = Math.ceil((checkOut - checkIn) / 86400000);
+                          return `${nights} day${nights !== 1 ? 's' : ''}`;
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
               
               {/* Extra Bed Usage During Stay */}
@@ -3098,7 +3129,31 @@ export default function Bookings() {
               onClick={handleProceedToFeedback} 
               className="bg-blue-500 hover:bg-blue-600" 
               data-testid="confirm-checkout"
-              disabled={!actionForm.payment_mode || !actionForm.final_payment || actionForm.final_payment === 0}
+              disabled={(() => {
+                // Basic validation
+                if (!actionForm.payment_mode || !actionForm.final_payment || actionForm.final_payment === 0) {
+                  return true;
+                }
+                
+                // Mode-specific validation
+                if (actionForm.payment_mode === "UPI") {
+                  // Require transaction ID for UPI
+                  return !actionForm.payment_id || actionForm.payment_id.trim() === "";
+                }
+                
+                if (actionForm.payment_mode === "Card") {
+                  // Require transaction ID for Card
+                  return !actionForm.payment_id || actionForm.payment_id.trim() === "";
+                }
+                
+                if (actionForm.payment_mode === "Bank Transfer") {
+                  // Require transaction ID for Bank Transfer
+                  return !actionForm.payment_id || actionForm.payment_id.trim() === "";
+                }
+                
+                // Cash mode doesn't require transaction ID
+                return false;
+              })()}
             >
               Proceed to Feedback
             </Button>

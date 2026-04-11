@@ -51,11 +51,15 @@ export function generateCheckoutReceipt(booking, settings) {
   const roomNums = (booking.room_numbers || []).join(", ") || booking.room_number || "N/A";
   
   // Use actual check-in/check-out dates if available, otherwise fall back to booking dates
-  const checkInDate = booking.actual_check_in || booking.check_in_date;
-  const checkOutDate = booking.actual_check_out || booking.check_out_date;
+  const checkInDateRaw = booking.actual_check_in || booking.check_in_date;
+  const checkOutDateRaw = booking.actual_check_out || booking.check_out_date;
+  
+  // Format dates to display only date part (no time)
+  const checkInDate = format(new Date(checkInDateRaw), "yyyy-MM-dd");
+  const checkOutDate = format(new Date(checkOutDateRaw), "yyyy-MM-dd");
   
   const nights = Math.ceil(
-    (new Date(checkOutDate) - new Date(checkInDate)) / 86400000
+    (new Date(checkOutDateRaw) - new Date(checkInDateRaw)) / 86400000
   );
 
   // Guest info
