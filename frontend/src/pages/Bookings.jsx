@@ -4094,7 +4094,10 @@ ECSAG Shillong`;
                             <p className="text-xs text-amber-600 mt-2">⚠️ Additional advance payment required</p>
                           )}
                           {cost.difference < 0 && (
-                            <p className="text-xs text-green-600 mt-2">✓ Refund will be processed at check-in</p>
+                            <p className="text-xs text-green-600 mt-2">✓ Amount reduced. Refund of ₹{Math.abs(cost.difference)} will be processed at check-in</p>
+                          )}
+                          {cost.difference === 0 && (
+                            <p className="text-xs text-blue-600 mt-2">✓ No payment change required</p>
                           )}
                         </div>
                       );
