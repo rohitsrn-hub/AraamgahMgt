@@ -275,12 +275,12 @@ export function generateRefundsPDF(refunds) {
     alternateRowStyles: { fillColor: LIGHT_GRAY },
     columnStyles: { 
       0: { cellWidth: 8, halign: 'center' }, 
-      1: { cellWidth: 22 },
-      2: { cellWidth: 32 },
-      3: { cellWidth: 20, halign: 'right' },
-      4: { cellWidth: 22 },
-      5: { cellWidth: 25 },
-      6: { cellWidth: 45 }
+      1: { cellWidth: 20 },
+      2: { cellWidth: 28 },
+      3: { cellWidth: 18, halign: 'right' },
+      4: { cellWidth: 20 },
+      5: { cellWidth: 22 },
+      6: { cellWidth: 40 }
     },
     margin: { left: 10, right: 10 }
   });
@@ -307,8 +307,8 @@ export function generateRefundsPDF(refunds) {
     styles: { fontSize: 9, cellPadding: 3 },
     headStyles: { fillColor: [51, 51, 51], textColor: 255, fontSize: 9, fontStyle: 'bold' },
     columnStyles: { 
-      0: { cellWidth: 100, fontStyle: 'bold' },
-      1: { cellWidth: 74, halign: 'right', fontStyle: 'bold', textColor: [200, 0, 0] }
+      0: { cellWidth: 90, fontStyle: 'bold' },
+      1: { cellWidth: 66, halign: 'right', fontStyle: 'bold', textColor: [200, 0, 0] }
     },
     margin: { left: 10, right: 10 },
     theme: 'grid'

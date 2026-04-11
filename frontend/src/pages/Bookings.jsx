@@ -3375,7 +3375,7 @@ export default function Bookings() {
               onClick={handleCancel}
               variant="destructive"
               data-testid="confirm-cancel"
-              disabled={!refundInfo}
+              disabled={!refundInfo || !actionForm.reason || actionForm.reason.trim() === ""}
             >
               Confirm Cancellation
             </Button>
