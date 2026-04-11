@@ -1007,6 +1007,8 @@ export default function Bookings() {
   const openCancelDialog = async (booking) => {
     setSelectedBooking(booking);
     setRefundInfo(null);
+    // Reset reason field when opening cancel dialog
+    setActionForm(prev => ({ ...prev, reason: "", refund_amount: 0 }));
     setShowCancel(true);
     try {
       const res = await axios.get(`${API}/bookings/${booking.id}/calculate-refund`);

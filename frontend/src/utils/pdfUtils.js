@@ -304,11 +304,11 @@ export function generateRefundsPDF(refunds) {
       ["Total Bookings Cancelled", totalBookings.toString()],
       ["Total Amount to be Refunded", `₹${totalAmount.toFixed(2)}`]
     ],
-    styles: { fontSize: 9, cellPadding: 3 },
-    headStyles: { fillColor: [51, 51, 51], textColor: 255, fontSize: 9, fontStyle: 'bold' },
+    styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak', cellWidth: 'wrap' },
+    headStyles: { fillColor: [51, 51, 51], textColor: 255, fontSize: 8, fontStyle: 'bold' },
     columnStyles: { 
-      0: { cellWidth: 90, fontStyle: 'bold' },
-      1: { cellWidth: 66, halign: 'right', fontStyle: 'bold', textColor: [200, 0, 0] }
+      0: { cellWidth: 82, fontStyle: 'bold' },
+      1: { cellWidth: 74, halign: 'right', fontStyle: 'bold', textColor: [200, 0, 0], overflow: 'linebreak' }
     },
     margin: { left: 10, right: 10 },
     theme: 'grid'
