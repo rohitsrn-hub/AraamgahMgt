@@ -1501,12 +1501,12 @@ async def check_out(request: CheckOutRequest):
 
 @api_router.get("/bookings/{booking_id}/calculate-refund")
 async def calculate_refund(booking_id: str):
-    """Calculate refund amount based on cancellation policy (hours-based)
+    """Calculate refund amount based on cancellation policy
     
-    Policy:
-    - >96 hours before check-in: 0% charge (100% refund)
-    - 48-96 hours before check-in: 50% charge (50% refund)
-    - <48 hours before check-in: 100% charge (0% refund)
+    Policy (flexible - supports both hours_before and days_before):
+    - >96 hours (4 days) before check-in: 0% charge (100% refund)
+    - 48-96 hours (2-4 days) before check-in: 50% charge (50% refund)
+    - <48 hours (2 days) before check-in: 100% charge (0% refund)
     """
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     if not booking:
@@ -1528,9 +1528,13 @@ async def calculate_refund(booking_id: str):
     hours_until_checkin = (check_in_date - now).total_seconds() / 3600
     
     # Find applicable charge percent
+    # Support both hours_before and days_before formats
     charge_percent = 100  # Default: no refund
-    for slab in sorted(cancellation_policy, key=lambda x: x["hours_before"], reverse=True):
-        if hours_until_checkin >= slab["hours_before"]:
+    for slab in sorted(cancellation_policy, key=lambda x: x.get("hours_before", x.get("days_before", 0) * 24), reverse=True):
+        # Convert days to hours if needed
+        threshold_hours = slab.get("hours_before") if "hours_before" in slab else slab.get("days_before", 0) * 24
+        
+        if hours_until_checkin >= threshold_hours:
             charge_percent = slab["charge_percent"]
             break
     
