@@ -83,7 +83,7 @@ async def perform_full_backup(db) -> Dict:
         # Save metadata to DB
         metadata = {
             "backup_id": backup_id,
-            "timestamp": timestamp,
+            "timestamp": timestamp.isoformat(),  # Convert to ISO string
             "backup_type": "FULL",
             "record_count": record_count,
             "file_path": str(file_path),
@@ -103,7 +103,7 @@ async def perform_full_backup(db) -> Dict:
         # Save failed metadata
         metadata = {
             "backup_id": str(uuid4()),
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),  # Convert to ISO string
             "backup_type": "FULL",
             "status": "FAILED",
             "error_message": str(e),
@@ -178,7 +178,7 @@ async def perform_incremental_backup(db) -> Dict:
         # Save metadata to DB
         metadata = {
             "backup_id": backup_id,
-            "timestamp": timestamp,
+            "timestamp": timestamp.isoformat(),  # Convert to ISO string
             "backup_type": "INCREMENTAL",
             "record_count": record_count,
             "file_path": str(file_path),
@@ -198,7 +198,7 @@ async def perform_incremental_backup(db) -> Dict:
         logger.error(f"Incremental backup failed: {str(e)}")
         metadata = {
             "backup_id": str(uuid4()),
-            "timestamp": datetime.now(timezone.utc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),  # Convert to ISO string
             "backup_type": "INCREMENTAL",
             "status": "FAILED",
             "error_message": str(e),

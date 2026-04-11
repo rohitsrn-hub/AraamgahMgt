@@ -219,7 +219,8 @@ export function generateCheckoutReceipt(booking, settings) {
 export function generateRefundsPDF(refunds) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = doc.internal.pageSize.width;
-  let y = addHeader(doc, "PENDING REFUNDS REPORT", `Generated: ${format(new Date(), "dd MMM yyyy")}`);
+  const currentDate = format(new Date(), "dd MMM yyyy");
+  let y = addHeader(doc, `REFUNDS DUE AS ON ${currentDate.toUpperCase()}`, "SARAI - Shillong Aramgah Room Automation Interface");
   y += 5;
 
   if (refunds.length === 0) {
@@ -227,7 +228,7 @@ export function generateRefundsPDF(refunds) {
     doc.text("No pending refunds at this time.", W / 2, y + 20, { align: "center" });
     addFooter(doc);
     
-    const filename = "ECSAG_pending_refunds.pdf";
+    const filename = `SARAI_Refunds_Due_${format(new Date(), "ddMMMyyy")}.pdf`;
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
     
@@ -239,36 +240,84 @@ export function generateRefundsPDF(refunds) {
     return { blobUrl, filename, count: 0 };
   }
 
+  // Main refunds table with detailed columns
   autoTable(doc, {
     startY: y,
-    head: [["#", "Booking No", "Guest Name", "Amount (₹)", "Bank Name", "Account No", "IFSC / UPI"]],
-    body: refunds.map((r, i) => [
-      i + 1,
-      r.booking_number,
-      r.guest_name,
-      `₹${r.amount}`,
-      r.bank_name || "—",
-      r.bank_account || "—",
-      r.bank_ifsc || r.upi_id || r.upi_phone || r.upi_number || "—"
-    ]),
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: PRIMARY_COLOR, textColor: 255, fontSize: 8 },
+    head: [["#", "Booking ID", "Guest Name", "Amount (₹)", "Payment Mode", "Transaction ID", "Bank Details / UPI Details"]],
+    body: refunds.map((r, i) => {
+      // Build bank/UPI details string
+      let paymentDetails = "";
+      if (r.bank_name && r.bank_account) {
+        paymentDetails = `Bank: ${r.bank_name}\nAcc: ${r.bank_account}`;
+        if (r.bank_ifsc) paymentDetails += `\nIFSC: ${r.bank_ifsc}`;
+      } else if (r.upi_id) {
+        paymentDetails = `UPI ID: ${r.upi_id}`;
+      } else if (r.upi_phone) {
+        paymentDetails = `UPI Phone: ${r.upi_phone}`;
+      } else if (r.upi_number) {
+        paymentDetails = `UPI: ${r.upi_number}`;
+      } else {
+        paymentDetails = "—";
+      }
+
+      return [
+        i + 1,
+        r.booking_number || r.id || "—",
+        r.guest_name || "—",
+        r.amount ? `₹${r.amount.toFixed(0)}` : "₹0",
+        r.payment_mode || "—",
+        r.payment_id || r.transaction_id || "—",
+        paymentDetails
+      ];
+    }),
+    styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+    headStyles: { fillColor: PRIMARY_COLOR, textColor: 255, fontSize: 8, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: LIGHT_GRAY },
-    columnStyles: { 0: { cellWidth: 8 }, 3: { halign: "right" } },
+    columnStyles: { 
+      0: { cellWidth: 8, halign: 'center' }, 
+      1: { cellWidth: 22 },
+      2: { cellWidth: 32 },
+      3: { cellWidth: 20, halign: 'right' },
+      4: { cellWidth: 22 },
+      5: { cellWidth: 25 },
+      6: { cellWidth: 45 }
+    },
     margin: { left: 10, right: 10 }
   });
 
-  // Total
-  const total = refunds.reduce((sum, r) => sum + (r.amount || 0), 0);
-  const finalY = doc.lastAutoTable.finalY + 5;
+  // Summary table
+  const totalAmount = refunds.reduce((sum, r) => sum + (r.amount || 0), 0);
+  const totalBookings = refunds.length;
+  let finalY = doc.lastAutoTable.finalY + 10;
+
+  // Add summary heading
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text(`Total Pending Refunds: ₹${total.toFixed(2)}  (${refunds.length} guest(s))`, W - 10, finalY, { align: "right" });
+  doc.setFontSize(10);
+  doc.text("SUMMARY", 10, finalY);
+  finalY += 5;
+
+  // Summary table
+  autoTable(doc, {
+    startY: finalY,
+    head: [["Description", "Value"]],
+    body: [
+      ["Total Bookings Cancelled", totalBookings.toString()],
+      ["Total Amount to be Refunded", `₹${totalAmount.toFixed(2)}`]
+    ],
+    styles: { fontSize: 9, cellPadding: 3 },
+    headStyles: { fillColor: [51, 51, 51], textColor: 255, fontSize: 9, fontStyle: 'bold' },
+    columnStyles: { 
+      0: { cellWidth: 100, fontStyle: 'bold' },
+      1: { cellWidth: 74, halign: 'right', fontStyle: 'bold', textColor: [200, 0, 0] }
+    },
+    margin: { left: 10, right: 10 },
+    theme: 'grid'
+  });
 
   addFooter(doc);
   
   // Save and return blob URL
-  const filename = "ECSAG_pending_refunds.pdf";
+  const filename = `SARAI_Refunds_Due_${format(new Date(), "ddMMMyyy")}.pdf`;
   const pdfBlob = doc.output('blob');
   const blobUrl = URL.createObjectURL(pdfBlob);
   
