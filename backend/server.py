@@ -373,6 +373,9 @@ class CheckOutRequest(BaseModel):
     notes: Optional[str] = None
     # Organization color (to be filled at checkout if Org guest)
     org_color: Optional[str] = None
+    # Extra bed fields for actual usage at checkout
+    extra_beds_checkout: Optional[int] = 0
+    extra_bed_days: Optional[int] = 0
 
 class CancelBookingRequest(BaseModel):
     booking_id: str

@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { 
   Gear, 
-  Image, 
   CurrencyInr, 
   Buildings,
   FloppyDisk,
@@ -20,9 +19,6 @@ import {
   Star,
   Rocket
 } from "@phosphor-icons/react";
-
-const DEFAULT_FMN_1 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/7i02eeq8_Eastern_Command%2C_Indian_Army.png";
-const DEFAULT_FMN_2 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/ltoeqxal_101_Area%2C_Indian_Army.svg.png";
 
 const DEFAULT_COLORS = [
   "Red", "Green", "Brown", "Orange", "Yellow", 
@@ -244,72 +240,6 @@ export default function Settings({ settings, onUpdate }) {
           </CardContent>
         </Card>
       </div>
-
-      {/* Formation Signs */}
-      <Card className="earms-card" data-testid="formation-signs-section">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Image size={24} className="text-blue-500" weight="duotone" />
-            Formation Signs
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <Label className="text-slate-600 mb-2 block">Formation Sign 1 (Left Header)</Label>
-              <Input
-                type="url"
-                value={formData.fmn_sign_1_url}
-                onChange={(e) => setFormData({...formData, fmn_sign_1_url: e.target.value})}
-                onFocus={(e) => e.target.select()}
-                placeholder="Image URL"
-                className="earms-input"
-                data-testid="input-fmn-1"
-              />
-              <div className="mt-3 p-4 bg-slate-50 rounded-xl flex items-center justify-center">
-                <img src={formData.fmn_sign_1_url || DEFAULT_FMN_1} alt="Formation Sign 1" className="h-24 w-24 object-contain" />
-              </div>
-            </div>
-            <div>
-              <Label className="text-slate-600 mb-2 block">Formation Sign 2 (Right Header)</Label>
-              <Input
-                type="url"
-                value={formData.fmn_sign_2_url}
-                onChange={(e) => setFormData({...formData, fmn_sign_2_url: e.target.value})}
-                onFocus={(e) => e.target.select()}
-                placeholder="Image URL"
-                className="earms-input"
-                data-testid="input-fmn-2"
-              />
-              <div className="mt-3 p-4 bg-slate-50 rounded-xl flex items-center justify-center">
-                <img src={formData.fmn_sign_2_url || DEFAULT_FMN_2} alt="Formation Sign 2" className="h-24 w-24 object-contain" />
-              </div>
-            </div>
-          </div>
-          <div className="p-4 bg-blue-50 rounded-xl flex items-start gap-3">
-            <Info size={20} className="text-blue-500 mt-0.5" />
-            <div className="flex-1">
-              <p className="text-sm text-blue-700">Upload your formation sign images to a hosting service and paste the URLs here.</p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={() => {
-                  setFormData({
-                    ...formData,
-                    fmn_sign_1_url: DEFAULT_FMN_1,
-                    fmn_sign_2_url: DEFAULT_FMN_2
-                  });
-                  toast.success("Formation signs reset to official Eastern Command & 101 Area insignia");
-                }}
-              >
-                Reset to Official Signs
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* P4: Room Categories Configuration */}
       <Card className="earms-card" data-testid="room-categories-section">
