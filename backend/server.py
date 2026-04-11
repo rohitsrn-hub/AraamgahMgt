@@ -292,6 +292,8 @@ class Booking(BaseModel):
     extra_bed_days: Optional[int] = 0  # NEW: Days extra beds used during stay
     extra_bed_charge_checkout: Optional[float] = 0.0  # NEW: Charge for extra beds during stay
     final_payment: Optional[float] = 0.0  # NEW: Final payment amount at checkout
+    refund_due: Optional[float] = 0.0  # NEW: Refund amount due (from amendment or overpayment)
+    refund_reason: Optional[str] = None  # NEW: Reason for refund
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
@@ -1788,7 +1790,9 @@ async def amend_booking(request: AmendBookingRequest):
         
         amendment_data["total_amount"] = new_total
         
-        # Calculate payment difference
+        # Calculate payment difference and update advance_paid accordingly
+        old_advance = booking.get("advance_paid", 0)
+        
         if new_total > old_total:
             # Increased cost - collect additional advance
             additional_required = new_total - old_total
@@ -1798,8 +1802,8 @@ async def amend_booking(request: AmendBookingRequest):
                     detail=f"Additional advance required: ₹{additional_required}. Provided: ₹{request.additional_advance}"
                 )
             
-            # Update advance paid
-            amendment_data["advance_paid"] = booking.get("advance_paid", 0) + request.additional_advance
+            # Update advance paid (add the additional amount collected)
+            amendment_data["advance_paid"] = old_advance + request.additional_advance
             
             # Update payment details if provided
             if request.payment_mode:
@@ -1817,13 +1821,28 @@ async def amend_booking(request: AmendBookingRequest):
             if request.upi_phone:
                 amendment_data["upi_phone"] = request.upi_phone
             
-            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{request.additional_advance} paid)")
-        else:
-            # Decreased cost - refund at check-in
-            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (₹{old_total - new_total} to be refunded at check-in)")
+            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{request.additional_advance} collected)")
         
-        # Recalculate balance
-        amendment_data["balance_amount"] = new_total - amendment_data.get("advance_paid", booking.get("advance_paid", 0))
+        elif new_total < old_total:
+            # Decreased cost - refund scenario
+            refund_due = old_total - new_total
+            
+            # Keep advance_paid as is - the refund will be processed at checkout
+            # Mark this booking as having a pending refund
+            amendment_data["refund_due"] = refund_due
+            amendment_data["refund_reason"] = "Booking amended - cost reduced"
+            
+            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Refund due: ₹{refund_due} - will be processed at checkout)")
+        
+        else:
+            # No cost change
+            changes.append(f"Booking details updated (Amount unchanged: ₹{new_total})")
+        
+        # Recalculate balance amount
+        # Balance = New Total - Advance Paid + Any Refund Due
+        current_advance = amendment_data.get("advance_paid", old_advance)
+        refund_due = amendment_data.get("refund_due", 0)
+        amendment_data["balance_amount"] = new_total - current_advance + refund_due
     
     # Add amendment log
     amendment_log = booking.get("amendment_log", [])

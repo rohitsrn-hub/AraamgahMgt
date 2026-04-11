@@ -2948,11 +2948,15 @@ export default function Bookings() {
                       // Advance paid (to be subtracted)
                       const advancePaid = selectedBooking.advance_paid || 0;
                       
+                      // Refund due from amendment (if booking was reduced)
+                      const refundDue = selectedBooking.refund_due || 0;
+                      
                       // ONLY use checkout extra bed charges (actual usage)
                       const extraBedActual = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
                       
-                      // Final calculation: Room Charges - Advance + Extra Beds
-                      const amountDue = totalRoomCharges - advancePaid + extraBedActual;
+                      // Final calculation: Room Charges - Advance + Extra Beds - Refund Due
+                      // If refund_due exists, it means customer overpaid and needs money back
+                      const amountDue = totalRoomCharges - advancePaid + extraBedActual - refundDue;
                       
                       return (
                         <>
@@ -2966,6 +2970,12 @@ export default function Bookings() {
                               <span className="font-medium">-₹{advancePaid.toFixed(0)}</span>
                             </div>
                           )}
+                          {refundDue > 0 && (
+                            <div className="flex justify-between text-sm text-green-600">
+                              <span>Less: Refund Due (from amendment):</span>
+                              <span className="font-medium">-₹{refundDue.toFixed(0)}</span>
+                            </div>
+                          )}
                           {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
                             <div className="flex justify-between text-sm">
                               <span className="text-slate-600">Extra Beds (actual usage):</span>
@@ -2974,10 +2984,17 @@ export default function Bookings() {
                           )}
                           <div className="border-t border-green-300 pt-2 mt-2">
                             <div className="flex justify-between">
-                              <span className="font-semibold text-green-900">Amount Due at Checkout:</span>
-                              <span className="text-xl font-bold text-green-700">₹{amountDue.toFixed(0)}</span>
+                              <span className="font-semibold text-green-900">
+                                {amountDue >= 0 ? 'Amount Due at Checkout:' : 'Refund to Customer:'}
+                              </span>
+                              <span className={`text-xl font-bold ${amountDue >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                                {amountDue >= 0 ? '₹' : '-₹'}{Math.abs(amountDue).toFixed(0)}
+                              </span>
                               <input type="hidden" id="calculated-total" value={amountDue.toFixed(0)} />
                             </div>
+                            {amountDue < 0 && (
+                              <p className="text-xs text-red-600 mt-2">⚠️ Customer has overpaid. Please process refund of ₹{Math.abs(amountDue).toFixed(0)}</p>
+                            )}
                           </div>
                         </>
                       );
@@ -4094,7 +4111,10 @@ ECSAG Shillong`;
                             <p className="text-xs text-amber-600 mt-2">⚠️ Additional advance payment required</p>
                           )}
                           {cost.difference < 0 && (
-                            <p className="text-xs text-green-600 mt-2">✓ Amount reduced. Refund of ₹{Math.abs(cost.difference)} will be processed at check-in</p>
+                            <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
+                              <p className="text-xs text-green-700 font-medium">✓ Amount reduced by ₹{Math.abs(cost.difference)}</p>
+                              <p className="text-xs text-green-600 mt-1">This refund will be deducted from the final checkout bill</p>
+                            </div>
                           )}
                           {cost.difference === 0 && (
                             <p className="text-xs text-blue-600 mt-2">✓ No payment change required</p>
