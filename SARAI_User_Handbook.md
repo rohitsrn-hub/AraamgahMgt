@@ -1,7 +1,7 @@
 # SARAI User Handbook
 **Shillong Aramgah Room Automation Interface**
 
-Version 2.0 | April 2026
+Version 2.1 | April 2026
 
 ---
 
@@ -304,9 +304,19 @@ Before checking in a guest:
 ### 6.2 Check-In Steps
 
 **Step 1: Locate Booking**
+
+**Option A: From Bookings Page**
 1. Go to **Bookings** page
 2. Find the booking (use search if needed)
 3. Click **"Check In"** button
+
+**Option B: From Dashboard Quick Action**
+1. Go to **Dashboard**
+2. Click **"Check In"** quick action button
+3. Select booking from dropdown (shows only confirmed bookings)
+4. Click **"Proceed to Check-In"**
+
+📌 **Note**: The check-in dropdown automatically filters to show only confirmed bookings (no cancelled, deleted, or already checked-in bookings).
 
 **Step 2: Verify Guest Details**
 4. Review displayed information:
@@ -393,28 +403,50 @@ After successful check-in:
 4. System displays:
    - Guest information
    - Room numbers
-   - Check-in and check-out dates
-   - Number of nights stayed
+   - **Actual check-in and check-out dates** (not booking dates)
+   - Total duration (number of days stayed)
    - Room categories
 
-**Step 3: Review Charges**
+**Step 3: Enter Extra Bed Usage (If Applicable)**
+
+If guest used extra beds during their stay:
+- **Extra Beds Used**: Enter number of extra beds (0-5)
+- **Days Used**: Enter how many days extra beds were used
+  - ⚠️ **Validation**: Cannot exceed total stay duration
+  - Example: For a 3-day stay, maximum days = 3
+  - Helper text shows: "Max: X days (total stay duration)"
+- **Automatic Calculation**: Charges = Beds × Days × ₹75
+
+📌 **Important**: Only count extra beds actually used during the stay, not what was requested at booking.
+
+**Step 4: Review Total Bill Calculation**
 
 Breakdown shown:
-- **Room Rent**: Rate × Nights × Number of rooms
-- **License Fee**: Fee × Nights × Number of rooms
-- **Extra Beds** (if any): Quantity × ₹75
-- **Total Amount**: Sum of all charges
-- **Advance Paid**: Amount paid at booking/check-in
-- **Balance Collected**: Final amount due/collected
+- **Room Charges**: Calculated based on actual check-in to check-out dates
+  - Rate × Actual Nights × Number of rooms
+  - License fee is included in the room rate (not shown separately)
+- **Less: Advance Paid**: Amount already collected at booking/check-in (subtracted from total)
+- **Extra Beds (if any)**: Quantity × Days Used × ₹75 (added to balance)
+- **Amount Due at Checkout**: Final balance to collect
 
-**Step 4: Collect Final Payment**
+**Calculation Example:**
+```
+Room Charges (2 nights × 1 room):     ₹1000
+Less: Advance Paid:                   - ₹400
+Extra Beds (1 bed × 2 days × ₹75):   + ₹150
+─────────────────────────────────────
+Amount Due at Checkout:               ₹750
+```
+
+**Step 5: Collect Final Payment**
 
 If balance due:
-- Select payment mode
+- Click **"Confirm Amount"** to lock the calculation
+- Select payment mode (Cash/UPI/Bank Transfer)
 - Fill payment details
 - Confirm collection
 
-**Step 5: Confirm Check-Out**
+**Step 6: Confirm Check-Out**
 5. Click **"Confirm Check-Out"**
 6. Status changes to "Checked Out"
 7. Room marked as "Available"
@@ -631,33 +663,66 @@ View amendment history in booking details.
 
 Navigate to **Settings** page (⚙️ icon in sidebar)
 
-### 10.2 Rate Configuration
+### 10.2 Room Categories Configuration
 
-**10.2.1 Organization Rates**
+**10.2.1 Room Categories**
 
-Configure rates for Org guests:
+Configure room types, rates, and capacities:
 
-**Cat I Rooms:**
-- **Room Rent**: Base rate per night (e.g., ₹470)
-- **License Fee**: Additional fee per night (e.g., ₹30)
+**For Each Category:**
+- **Category Name**: e.g., "Cat I", "Cat II", "VIP Suite"
+- **Prefix**: Room number prefix (e.g., "C1", "C2", "VIP")
+- **Standard Rate**: Org guest rate per night
+- **Non-Org Rate**: Non-Org guest rate per night
+- **Room Capacity**: Number of persons per room
+- **Number of Rooms**: Total rooms in this category
 
-**Cat II Rooms:**
-- **Room Rent**: Base rate per night (e.g., ₹385)
-- **License Fee**: Additional fee per night (e.g., ₹15)
+**Example: Cat I Configuration**
+- Category Name: Cat I
+- Prefix: C1
+- Standard Rate: ₹500/night (for Org guests)
+- Non-Org Rate: ₹600/night (for Non-Org guests)
+- Room Capacity: 2 persons
+- Number of Rooms: 6 (creates C1-01 through C1-06)
 
-**10.2.2 Non-Organization Rates**
+**Example: Cat II Configuration**
+- Category Name: Cat II
+- Prefix: C2
+- Standard Rate: ₹400/night (for Org guests)
+- Non-Org Rate: ₹600/night (for Non-Org guests)
+- Room Capacity: 3 persons
+- Number of Rooms: 9 (creates C2-01 through C2-09)
 
-Configure rates for Non-Org guests:
+📌 **Important**: Non-Org rates are uniform across all categories (₹600/night) regardless of Cat I or Cat II.
 
-**Cat I Rooms:**
-- **Room Rent**: Base rate per night (e.g., ₹570)
-- **License Fee**: Additional fee per night (e.g., ₹30)
+**10.2.2 License Fee Breakdown**
 
-**Cat II Rooms:**
-- **Room Rent**: Base rate per night (e.g., ₹455)
-- **License Fee**: Additional fee per night (e.g., ₹15)
+For monthly financial reports, configure the breakdown of rates:
 
-**10.2.3 Other Charges**
+**Org (Cat I):**
+- Room Rent: ₹470
+- License Fee: ₹30
+- Total: ₹500/night
+
+**Org (Cat II):**
+- Room Rent: ₹385
+- License Fee: ₹15
+- Total: ₹400/night
+
+**Non-Org (All Categories):**
+- Room Rent: ₹570
+- License Fee: ₹30
+- Total: ₹600/night
+
+📌 **Note**: The license fee is included in the total room rate shown to guests. It's only separated here for accounting purposes.
+
+**10.2.3 Room Rates Summary**
+
+This read-only section displays current rates for all configured categories:
+- Shows Standard Rate and Non-Org Rate for each category
+- Updates automatically when you modify Room Categories
+
+**10.2.4 Other Charges**
 - **Extra Bed**: Fixed rate (e.g., ₹75 per bed per night)
 
 ### 10.3 Advance Payment Rules
@@ -726,9 +791,16 @@ View:
 - ✅ If refund scenario, no payment details needed - remove them
 
 **Issue: Check-in not working**
-- ✅ **Solution**: Verify booking is in "Confirmed" status
+- ✅ **Solution**: Verify booking is in "Confirmed" status (not Cancelled or Checked In)
 - ✅ Ensure all guest information fields are filled
 - ✅ If balance due, payment details must be provided
+- ✅ If using Dashboard check-in, only confirmed bookings appear in dropdown
+
+**Issue: Check-out failed error**
+- ✅ **Solution**: Verify booking is in "Checked In" status
+- ✅ Ensure Days Used for extra beds doesn't exceed total stay duration
+- ✅ Fill payment details if balance is due
+- ✅ If error persists, try refreshing the page and reopening checkout dialog
 
 **Issue: Org Data Form not generating**
 - ✅ **Solution**: Verify guest type is set to "Org" (not "Non-Org")
@@ -795,12 +867,15 @@ View:
 | Cat I | Org | ₹470 | ₹30 | ₹500 |
 | Cat I | Non-Org | ₹570 | ₹30 | ₹600 |
 | Cat II | Org | ₹385 | ₹15 | ₹400 |
-| Cat II | Non-Org | ₹455 | ₹15 | ₹470 |
+| Cat II | Non-Org | ₹570 | ₹30 | ₹600 |
 
 **Additional Charges:**
 - Extra Bed: ₹75 per bed per night
 
-**Note:** Rates are configurable in Settings and may vary by location.
+**Important Notes:**
+- **Non-Org Rate is uniform**: All Non-Org guests pay ₹600/night regardless of Cat I or Cat II
+- **License fee included**: The total rate shown includes the license fee (not charged separately to guests)
+- Rates are configurable in Settings and may vary by location
 
 ### 12.3 Payment Modes
 
@@ -925,7 +1000,7 @@ View:
 
 ## Document Information
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Last Updated:** April 2026  
 **Author:** SARAI Development Team  
 **Reviewed By:** System Administrator  
@@ -934,6 +1009,7 @@ View:
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1 | April 2026 | Updated rate structure (Cat II Non-Org now ₹600), added checkout extra bed validation, removed Formation Signs section, improved Settings labels |
 | 2.0 | April 2026 | Complete rewrite post-sanitization. Added Mix & Match, Amend Booking, updated terminology (Org/Non-Org) |
 | 1.5 | March 2026 | Added Org Data Form section |
 | 1.0 | February 2026 | Initial handbook (E-ARMS system) |
