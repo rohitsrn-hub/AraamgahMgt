@@ -1308,9 +1308,14 @@ export default function Bookings() {
       const isNonOrg = !amendBooking.is_org;
       let rate;
       if (room.category === "Cat I") {
-        rate = isNonOrg ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate;
+        rate = isNonOrg 
+          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
+          : settings?.cat_i_rate;
       } else {
-        rate = isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate;
+        // Cat II Non-Org uses same rate as Cat I Non-Org (570+30=600)
+        rate = isNonOrg 
+          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
+          : settings?.cat_ii_rate;
       }
       console.log(`Room ${room.room_number} (${room.category}): ₹${rate} × ${nights} nights = ₹${rate * nights}`);
       newTotal += (rate || 0) * nights;
@@ -1502,9 +1507,14 @@ export default function Bookings() {
       let rate;
       const isNonOrg = !bookingForm.is_org;  // Non-Org guests get Def Civ rates
       if (room.category === "Cat I") {
-        rate = isNonOrg ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate;
+        rate = isNonOrg 
+          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
+          : settings?.cat_i_rate;
       } else {
-        rate = isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate;
+        // Cat II Non-Org uses same rate as Cat I Non-Org (570+30=600)
+        rate = isNonOrg 
+          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
+          : settings?.cat_ii_rate;
       }
       return total + (rate || 0);
     }, 0);
@@ -1975,8 +1985,12 @@ export default function Bookings() {
                       const isSelected = bookingForm.room_ids.includes(room.id);
                       const isNonOrg = !bookingForm.is_org;  // Non-Org guests get Def Civ rates
                       const rate = room.category === "Cat I"
-                        ? (isNonOrg ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate)
-                        : (isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate);
+                        ? (isNonOrg 
+                            ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
+                            : settings?.cat_i_rate)
+                        : (isNonOrg 
+                            ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
+                            : settings?.cat_ii_rate);
                       return (
                         <div
                           key={room.id}
@@ -2640,10 +2654,8 @@ export default function Bookings() {
                       
                       // Determine rate based on charge category
                       if (room.charge_category === "Def Civ") {
-                        // Defense Civilian rates
-                        ratePerNight = room.room_category === "Cat I" 
-                          ? (settings?.def_civ_cat_i_rate || 600)
-                          : (settings?.def_civ_cat_ii_rate || 600);
+                        // Non-Org rates (same for both Cat I and Cat II: 570+30=600)
+                        ratePerNight = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
                       } else {
                         // Regular Cat I/II rates
                         ratePerNight = room.room_category === "Cat I"
@@ -2807,9 +2819,27 @@ export default function Bookings() {
                     <Input
                       type="number"
                       min="0"
+                      max={(() => {
+                        const checkIn = selectedBooking.actual_check_in 
+                          ? new Date(selectedBooking.actual_check_in)
+                          : new Date(selectedBooking.check_in_date);
+                        const checkOut = new Date();
+                        return Math.ceil((checkOut - checkIn) / 86400000);
+                      })()}
                       value={actionForm.extra_bed_days || 0}
                       onChange={(e) => {
+                        const maxDays = (() => {
+                          const checkIn = selectedBooking.actual_check_in 
+                            ? new Date(selectedBooking.actual_check_in)
+                            : new Date(selectedBooking.check_in_date);
+                          const checkOut = new Date();
+                          return Math.ceil((checkOut - checkIn) / 86400000);
+                        })();
                         const days = parseInt(e.target.value) || 0;
+                        if (days > maxDays) {
+                          toast.error(`Days used cannot exceed total stay duration of ${maxDays} day${maxDays !== 1 ? 's' : ''}`);
+                          return;
+                        }
                         setActionForm({...actionForm, extra_bed_days: days});
                       }}
                       onFocus={(e) => e.target.select()}
@@ -2817,7 +2847,13 @@ export default function Bookings() {
                       className="earms-input mt-1"
                       data-testid="input-extra-bed-days"
                     />
-                    <p className="text-xs text-slate-500 mt-1">How many days used</p>
+                    <p className="text-xs text-slate-500 mt-1">Max: {(() => {
+                      const checkIn = selectedBooking.actual_check_in 
+                        ? new Date(selectedBooking.actual_check_in)
+                        : new Date(selectedBooking.check_in_date);
+                      const checkOut = new Date();
+                      return Math.ceil((checkOut - checkIn) / 86400000);
+                    })()} days (total stay duration)</p>
                   </div>
                 </div>
                 {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
@@ -2859,15 +2895,22 @@ export default function Bookings() {
                         if (category === "Cat I") {
                           // Cat I: Room Rate + License Fee
                           const roomRate = isNonOrg 
-                            ? (settings?.def_civ_cat_i_rate || settings?.cat_i_rate || 570)
-                            : (settings?.cat_i_rate || 470);
-                          fullRate = roomRate + 30; // Add license fee
+                            ? (settings?.non_org_room_rent || settings?.def_civ_cat_i_rate || 570)
+                            : (settings?.cat_i_room_rent || settings?.cat_i_rate || 470);
+                          const licenseFee = isNonOrg 
+                            ? (settings?.non_org_license_fee || 30)
+                            : (settings?.cat_i_license_fee || 30);
+                          fullRate = roomRate + licenseFee;
                         } else {
                           // Cat II: Room Rate + License Fee
+                          // Non-Org uses same rate as Cat I Non-Org (570+30=600)
                           const roomRate = isNonOrg
-                            ? (settings?.def_civ_cat_ii_rate || settings?.cat_ii_rate || 455)
-                            : (settings?.cat_ii_rate || 385);
-                          fullRate = roomRate + 15; // Add license fee
+                            ? (settings?.non_org_room_rent || settings?.def_civ_cat_ii_rate || 570)
+                            : (settings?.cat_ii_room_rent || settings?.cat_ii_rate || 385);
+                          const licenseFee = isNonOrg 
+                            ? (settings?.non_org_license_fee || 30)
+                            : (settings?.cat_ii_license_fee || 15);
+                          fullRate = roomRate + licenseFee;
                         }
                         
                         totalRoomCharges += fullRate * actualNights;

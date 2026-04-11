@@ -381,7 +381,7 @@ export default function Settings({ settings, onUpdate }) {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Def Civ Rate (₹/night) *</Label>
+                    <Label className="text-xs">Non-Org Rate (₹/night) *</Label>
                     <Input
                       type="number"
                       min="0"
