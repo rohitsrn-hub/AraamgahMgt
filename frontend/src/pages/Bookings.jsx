@@ -1212,8 +1212,8 @@ export default function Bookings() {
   };
 
   const handleSearchGuestHistory = async () => {
-    if (!guestHistorySearch.phone) {
-      toast.error("Please enter phone number");
+    if (!guestHistorySearch.phone && !guestHistorySearch.aadhaar && !guestHistorySearch.name) {
+      toast.error("Please enter at least one search parameter");
       return;
     }
 
@@ -1222,6 +1222,12 @@ export default function Bookings() {
       const params = {};
       if (guestHistorySearch.phone) {
         params.phone_number = guestHistorySearch.phone;
+      }
+      if (guestHistorySearch.aadhaar) {
+        params.aadhaar_number = guestHistorySearch.aadhaar;
+      }
+      if (guestHistorySearch.name) {
+        params.guest_name = guestHistorySearch.name;
       }
 
       const response = await axios.get(`${API}/bookings/guest-history`, { params });
@@ -1453,7 +1459,7 @@ export default function Bookings() {
   };
 
   const resetGuestHistorySearch = () => {
-    setGuestHistorySearch({ phone: "" });
+    setGuestHistorySearch({ phone: "", aadhaar: "", name: "" });
     setGuestHistoryData(null);
   };
 
@@ -3526,7 +3532,7 @@ export default function Bookings() {
           <div className="space-y-6">
             {/* Search Form */}
             <div className="space-y-4">
-              <p className="text-sm text-slate-600">Search by guest's phone number or army/service number</p>
+              <p className="text-sm text-slate-600">Search by any of the following (at least one required)</p>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -3539,6 +3545,29 @@ export default function Bookings() {
                     className="earms-input mt-1"
                     data-testid="history-phone-input"
                     maxLength={11}
+                  />
+                </div>
+                <div>
+                  <Label>Aadhaar Number</Label>
+                  <Input
+                    value={guestHistorySearch.aadhaar}
+                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, aadhaar: e.target.value.replace(/\D/g, '').slice(0, 12) }))}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="12-digit Aadhaar number"
+                    className="earms-input mt-1"
+                    data-testid="history-aadhaar-input"
+                    maxLength={12}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Label>Guest Name</Label>
+                  <Input
+                    value={guestHistorySearch.name}
+                    onChange={(e) => setGuestHistorySearch(prev => ({ ...prev, name: e.target.value }))}
+                    onFocus={(e) => e.target.select()}
+                    placeholder="Full or partial name"
+                    className="earms-input mt-1"
+                    data-testid="history-name-input"
                   />
                 </div>
               </div>

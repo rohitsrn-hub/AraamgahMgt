@@ -85,12 +85,12 @@ export default function MonthlySummaryTab({ settings }) {
         <div className="flex justify-center py-12"><div className="spinner" /></div>
       ) : !report ? null : (
         <>
-          {/* Command breakdown */}
-          <Card className="earms-card" data-testid="command-breakdown">
+          {/* Colour breakdown */}
+          <Card className="earms-card" data-testid="colour-breakdown">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Buildings size={22} className="text-blue-500" weight="fill" />
-                Command-wise Occupancy — {report.month_name} {report.year}
+                Colour-wise Occupancy — {report.month_name} {report.year}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -99,7 +99,7 @@ export default function MonthlySummaryTab({ settings }) {
                   <thead>
                     <tr>
                       <th>No</th>
-                      <th>Command / Service</th>
+                      <th>Colour</th>
                       <th className="text-center">Total Guests</th>
                       <th className="text-center">No of Days</th>
                     </tr>

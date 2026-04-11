@@ -1877,26 +1877,38 @@ async def amend_booking(request: AmendBookingRequest):
 
 @api_router.get("/bookings/guest-history")
 async def get_guest_history(
-    phone_number: Optional[str] = Query(None, description="Guest phone number")
+    phone_number: Optional[str] = Query(None, description="Guest phone number"),
+    aadhaar_number: Optional[str] = Query(None, description="Guest Aadhaar number"),
+    guest_name: Optional[str] = Query(None, description="Guest name (full or partial)")
 ):
     """
-    Get booking history for a guest by phone number.
+    Get booking history for a guest by phone number, Aadhaar, or name.
     Returns all bookings, statistics, and guest information.
     """
-    if not phone_number:
+    if not phone_number and not aadhaar_number and not guest_name:
         raise HTTPException(
             status_code=400, 
-            detail="Please provide phone_number"
+            detail="Please provide at least one search parameter (phone_number, aadhaar_number, or guest_name)"
         )
     
-    # Build query - search by phone number
-    phone_clean = phone_number.replace(" ", "").replace("+91", "").replace("-", "")
-    query = {
-        "$or": [
+    # Build query - combine multiple search criteria
+    or_conditions = []
+    
+    if phone_number:
+        phone_clean = phone_number.replace(" ", "").replace("+91", "").replace("-", "")
+        or_conditions.extend([
             {"guest_contact": {"$regex": phone_clean, "$options": "i"}},
             {"guest_contact": {"$regex": f"\\+91.*{phone_clean}", "$options": "i"}}
-        ]
-    }
+        ])
+    
+    if aadhaar_number:
+        aadhaar_clean = aadhaar_number.replace(" ", "").replace("-", "")
+        or_conditions.append({"id_proof_number": {"$regex": aadhaar_clean, "$options": "i"}})
+    
+    if guest_name:
+        or_conditions.append({"guest_name": {"$regex": guest_name, "$options": "i"}})
+    
+    query = {"$or": or_conditions}
     
     # Fetch all bookings for this guest
     bookings = await db.bookings.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
