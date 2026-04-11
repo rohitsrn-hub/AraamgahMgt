@@ -2850,52 +2850,57 @@ export default function Bookings() {
                       const numRooms = selectedBooking.num_rooms || selectedBooking.room_ids.length || 1;
                       const isNonOrg = !selectedBooking.is_org;
                       
-                      let roomRentTotal = 0;
-                      let licenseFeeTotal = 0;
+                      let totalRoomCharges = 0;
                       
-                      // Calculate for each room category
+                      // Calculate room charges (rate INCLUDES license fee)
                       roomCategories.forEach(category => {
-                        let roomRate, licenseRate;
+                        let fullRate; // Room rate + License fee
                         
                         if (category === "Cat I") {
-                          roomRate = isNonOrg 
+                          // Cat I: Room Rate + License Fee
+                          const roomRate = isNonOrg 
                             ? (settings?.def_civ_cat_i_rate || settings?.cat_i_rate || 570)
                             : (settings?.cat_i_rate || 470);
-                          licenseRate = 30;
+                          fullRate = roomRate + 30; // Add license fee
                         } else {
-                          roomRate = isNonOrg
+                          // Cat II: Room Rate + License Fee
+                          const roomRate = isNonOrg
                             ? (settings?.def_civ_cat_ii_rate || settings?.cat_ii_rate || 455)
                             : (settings?.cat_ii_rate || 385);
-                          licenseRate = 15;
+                          fullRate = roomRate + 15; // Add license fee
                         }
                         
-                        roomRentTotal += roomRate * actualNights;
-                        licenseFeeTotal += licenseRate * actualNights;
+                        totalRoomCharges += fullRate * actualNights;
                       });
                       
                       // If no categories, use num_rooms
                       if (roomCategories.length === 0 && numRooms > 0) {
                         const roomRate = isNonOrg ? 570 : 470; // Default Cat I
-                        const licenseRate = 30;
-                        roomRentTotal = roomRate * actualNights * numRooms;
-                        licenseFeeTotal = licenseRate * actualNights * numRooms;
+                        const fullRate = roomRate + 30; // Add license fee
+                        totalRoomCharges = fullRate * actualNights * numRooms;
                       }
                       
-                      const stayCharges = roomRentTotal + licenseFeeTotal;
+                      // Advance paid (to be subtracted)
+                      const advancePaid = selectedBooking.advance_paid || 0;
+                      
                       // ONLY use checkout extra bed charges (actual usage)
                       const extraBedActual = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
-                      const totalDue = stayCharges + extraBedActual;
+                      
+                      // Final calculation: Room Charges - Advance + Extra Beds
+                      const amountDue = totalRoomCharges - advancePaid + extraBedActual;
                       
                       return (
                         <>
                           <div className="flex justify-between text-sm">
-                            <span className="text-slate-600">Room Rent ({actualNights} night{actualNights !== 1 ? 's' : ''}):</span>
-                            <span className="font-medium">₹{roomRentTotal.toFixed(0)}</span>
+                            <span className="text-slate-600">Room Charges ({actualNights} night{actualNights !== 1 ? 's' : ''} × {numRooms} room{numRooms > 1 ? 's' : ''}):</span>
+                            <span className="font-medium">₹{totalRoomCharges.toFixed(0)}</span>
                           </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-slate-600">License Fee ({actualNights} night{actualNights !== 1 ? 's' : ''}):</span>
-                            <span className="font-medium">₹{licenseFeeTotal.toFixed(0)}</span>
-                          </div>
+                          {advancePaid > 0 && (
+                            <div className="flex justify-between text-sm text-orange-600">
+                              <span>Less: Advance Paid:</span>
+                              <span className="font-medium">-₹{advancePaid.toFixed(0)}</span>
+                            </div>
+                          )}
                           {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
                             <div className="flex justify-between text-sm">
                               <span className="text-slate-600">Extra Beds (actual usage):</span>
@@ -2904,9 +2909,9 @@ export default function Bookings() {
                           )}
                           <div className="border-t border-green-300 pt-2 mt-2">
                             <div className="flex justify-between">
-                              <span className="font-semibold text-green-900">Total Amount Due:</span>
-                              <span className="text-xl font-bold text-green-700">₹{totalDue.toFixed(0)}</span>
-                              <input type="hidden" id="calculated-total" value={totalDue.toFixed(0)} />
+                              <span className="font-semibold text-green-900">Amount Due at Checkout:</span>
+                              <span className="text-xl font-bold text-green-700">₹{amountDue.toFixed(0)}</span>
+                              <input type="hidden" id="calculated-total" value={amountDue.toFixed(0)} />
                             </div>
                           </div>
                         </>

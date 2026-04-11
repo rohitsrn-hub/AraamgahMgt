@@ -98,53 +98,53 @@ export function generateCheckoutReceipt(booking, settings) {
   const roomCategories = booking.room_categories || [];
   const numRooms = booking.num_rooms || (booking.room_ids || []).length || 1;
   
-  let roomRentTotal = 0;
-  let licenseFeeTotal = 0;
+  let totalRoomCharges = 0;
   
-  // Calculate per-room-category rates
+  // Calculate room charges (rate INCLUDES license fee)
   if (roomCategories.length > 0) {
     roomCategories.forEach(category => {
-      let roomRate, licenseRate;
+      let fullRate; // Room rate + License fee
       
       if (category === "Cat I") {
-        roomRate = isNonOrg 
+        const roomRate = isNonOrg 
           ? (settings?.def_civ_cat_i_rate || settings?.cat_i_rate || 570)
           : (settings?.cat_i_rate || 470);
-        licenseRate = 30;
+        fullRate = roomRate + 30; // Add license fee
       } else { // Cat II
-        roomRate = isNonOrg
+        const roomRate = isNonOrg
           ? (settings?.def_civ_cat_ii_rate || settings?.cat_ii_rate || 455)
           : (settings?.cat_ii_rate || 385);
-        licenseRate = 15;
+        fullRate = roomRate + 15; // Add license fee
       }
       
-      roomRentTotal += roomRate * nights;
-      licenseFeeTotal += licenseRate * nights;
+      totalRoomCharges += fullRate * nights;
     });
   } else {
     // Fallback if no categories
     const roomRate = isNonOrg ? 570 : 470;
-    const licenseRate = 30;
-    roomRentTotal = roomRate * nights * numRooms;
-    licenseFeeTotal = licenseRate * nights * numRooms;
+    const fullRate = roomRate + 30; // Add license fee
+    totalRoomCharges = fullRate * nights * numRooms;
   }
+  
+  // Advance paid
+  const advancePaid = booking.advance_paid || 0;
   
   // Extra bed charges - ONLY use checkout values (actual usage)
   const extraBedActual = booking.extra_bed_charge_checkout || 0;
   
-  // Calculate total
-  const calculatedTotal = roomRentTotal + licenseFeeTotal + extraBedActual;
+  // Calculate subtotal before advance
+  const subtotal = totalRoomCharges + extraBedActual;
   
   // Final payment (from checkout form)
-  const finalPayment = booking.final_payment || calculatedTotal;
+  const finalPayment = booking.final_payment || (subtotal - advancePaid);
   
   // Additional charges (if staff amended the amount)
-  const additionalCharges = finalPayment > calculatedTotal ? (finalPayment - calculatedTotal) : 0;
+  const expectedAmount = subtotal - advancePaid;
+  const additionalCharges = finalPayment > expectedAmount ? (finalPayment - expectedAmount) : 0;
   
   // Build table rows
   const tableRows = [
-    ["Room Rent", `₹${(roomRentTotal / nights).toFixed(0)} × ${nights} night(s) × ${numRooms} room(s)`, roomRentTotal.toFixed(2)],
-    ["License Fee", `₹${(licenseFeeTotal / nights).toFixed(0)} × ${nights} night(s) × ${numRooms} room(s)`, licenseFeeTotal.toFixed(2)]
+    ["Room Charges", `₹${(totalRoomCharges / nights).toFixed(0)} × ${nights} night(s) × ${numRooms} room(s)`, totalRoomCharges.toFixed(2)]
   ];
   
   // Add extra beds if any (actual usage at checkout)
@@ -154,15 +154,18 @@ export function generateCheckoutReceipt(booking, settings) {
     tableRows.push(["Extra Beds (actual usage)", `${numBedsCheckout} bed(s) × ${daysCheckout} day(s) × ₹75`, extraBedActual.toFixed(2)]);
   }
   
+  // Add advance deduction
+  if (advancePaid > 0) {
+    tableRows.push(["Less: Advance Paid", "", `(${advancePaid.toFixed(2)})`]);
+  }
+  
   // Add additional charges if any
   if (additionalCharges > 0) {
     tableRows.push(["Additional Charges at Checkout", "", additionalCharges.toFixed(2)]);
   }
   
-  // Add totals
-  tableRows.push(["Total Amount", "", finalPayment.toFixed(2)]);
-  tableRows.push(["Advance Paid", "", `(${(booking.advance_paid || 0).toFixed(2)})`]);
-  tableRows.push(["Balance Collected", "", (finalPayment - (booking.advance_paid || 0)).toFixed(2)]);
+  // Add final total
+  tableRows.push(["Amount Collected at Checkout", "", finalPayment.toFixed(2)]);
 
   autoTable(doc, {
     startY: y,
@@ -172,11 +175,18 @@ export function generateCheckoutReceipt(booking, settings) {
     headStyles: { fillColor: PRIMARY_COLOR, textColor: 255, fontSize: 8 },
     columnStyles: { 0: { cellWidth: 45 }, 1: { cellWidth: 80 }, 2: { cellWidth: 30, halign: "right", fontStyle: "bold" } },
     rowStyles: (row) => {
-      const totalRowIndex = tableRows.findIndex(r => r[0] === "Total Amount");
-      const balanceRowIndex = tableRows.findIndex(r => r[0] === "Balance Collected");
+      const lastRowIndex = tableRows.length - 1;
+      const advanceRowIndex = tableRows.findIndex(r => r[0] === "Less: Advance Paid");
       
-      if (row.index === totalRowIndex) return { fillColor: [200, 230, 200] };
-      if (row.index === balanceRowIndex) return { fillColor: [170, 210, 170], fontStyle: "bold" };
+      // Highlight advance paid row in orange
+      if (row.index === advanceRowIndex && advanceRowIndex !== -1) {
+        return { textColor: [200, 100, 0] };
+      }
+      
+      // Highlight final amount row
+      if (row.index === lastRowIndex) {
+        return { fillColor: [170, 210, 170], fontStyle: "bold" };
+      }
     },
     margin: { left: 10, right: 10 }
   });
