@@ -87,9 +87,10 @@ export function generateCheckoutReceipt(booking, settings) {
 
   const numRooms = (booking.room_numbers || [1]).length;
   let roomRent, licFee;
-  if (isDefCiv) {
-    roomRent = (settings?.def_civ_room_rent || 570);
-    licFee = (settings?.def_civ_license_fee || 30);
+  // Non-Org guests use Non-Org rates (previously called Def Civ)
+  if (isNonOrg) {
+    roomRent = (settings?.def_civ_room_rent || settings?.non_org_room_rent || 570);
+    licFee = (settings?.def_civ_license_fee || settings?.non_org_license_fee || 30);
   } else if (catLabel.includes("Cat I") && !catLabel.includes("Cat II")) {
     roomRent = (settings?.cat_i_room_rent || 470);
     licFee = (settings?.cat_i_license_fee || 30);
@@ -461,10 +462,17 @@ export function generateBookingSlips(bookings) {
     doc.text("NO OF ROOM:", 110, y);
     doc.text((booking.num_rooms || 1).toString(), 145, y);
     
-    // Room Number
+    // Room Number - Updated to handle segmented bookings
     y += 6;
     doc.text("ROOM NO:", 110, y);
-    doc.text((booking.room_numbers || []).join(", "), 145, y);
+    if (booking.has_room_changes && booking.room_segments) {
+      // For segmented bookings, show "See below" and add details later
+      doc.setFontSize(8);
+      doc.text("(See room schedule below)", 145, y);
+      doc.setFontSize(9);
+    } else {
+      doc.text((booking.room_numbers || []).join(", "), 145, y);
+    }
     
     // From Date
     y += 6;
@@ -506,6 +514,38 @@ export function generateBookingSlips(bookings) {
     y += 6;
     doc.text("ID CARD ISSUED BY:", 10, y);
     doc.line(55, y, 200, y); // Blank line for manual entry
+    
+    // Room Schedule for segmented bookings
+    if (booking.has_room_changes && booking.room_segments && booking.room_segments.length > 0) {
+      y += 8;
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.text("ROOM SCHEDULE (Guest changes rooms during stay):", 10, y);
+      doc.setFont("helvetica", "normal");
+      y += 4;
+      
+      // Create compact schedule
+      booking.room_segments.forEach((segment, idx) => {
+        const nightDate = format(new Date(segment.night_date), "dd MMM");
+        const roomNums = segment.rooms.map(r => r.room_number).join(", ");
+        
+        if (idx % 2 === 0) {
+          // Left column
+          doc.text(`${nightDate}: ${roomNums}`, 10, y);
+        } else {
+          // Right column
+          doc.text(`${nightDate}: ${roomNums}`, 110, y);
+          y += 4;
+        }
+      });
+      
+      // Add spacing if odd number of segments
+      if (booking.room_segments.length % 2 !== 0) {
+        y += 4;
+      }
+      
+      doc.setFontSize(9);
+    }
     
     // Signature section
     y += 10;
@@ -952,7 +992,13 @@ export function generateOrgDataForm(booking) {
   doc.text(`Guest: ${booking.guest_name}`, 15, y + 15);
   doc.text(`Mobile: ${booking.guest_contact || "—"}`, 15, y + 20);
   
-  doc.text(`Room(s): ${(booking.room_numbers || []).join(", ")}`, pageWidth / 2 + 5, y + 10);
+  // Room display - handle both traditional and segmented bookings
+  if (booking.has_room_changes && booking.room_segments) {
+    const uniqueRooms = [...new Set(booking.room_segments.flatMap(s => s.rooms.map(r => r.room_number)))];
+    doc.text(`Room(s): ${uniqueRooms.join(", ")} (varies)`, pageWidth / 2 + 5, y + 10);
+  } else {
+    doc.text(`Room(s): ${(booking.room_numbers || []).join(", ")}`, pageWidth / 2 + 5, y + 10);
+  }
   doc.text(`Check-in: ${format(new Date(booking.check_in_date), "dd MMM yyyy")}`, pageWidth / 2 + 5, y + 15);
   doc.text(`Color: ${booking.org_color || "Not assigned"}`, pageWidth / 2 + 5, y + 20);
 

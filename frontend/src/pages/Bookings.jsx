@@ -1215,8 +1215,8 @@ export default function Bookings() {
     
     // Import and generate
     import("../utils/pdfUtils").then(module => {
-      const filename = module.generateBookingSlips(eligibleBookings);
-      toast.success(`Generated ${eligibleBookings.length} booking slip(s): ${filename}`);
+      const result = module.generateBookingSlips(eligibleBookings);
+      toast.success(`Generated ${result.count} booking slip(s): ${result.filename}`);
     });
   };
 
