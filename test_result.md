@@ -196,10 +196,25 @@ frontend:
         agent: "testing"
         comment: "✅ VERIFIED: ALL TESTS PASSED. Comprehensive testing of P0.5 Amend Booking feature completed successfully. REFUND SCENARIO (cost decrease): BK0083 4 nights (₹1600) → 2 nights (₹800) = ₹-800 refund - Cost Analysis shows correct green difference, refund message displayed, payment section hidden, amendment processed without errors. PAYMENT SCENARIO (cost increase): 4 nights 1 room (₹1600) → 2 nights 2 rooms (₹1800) = +₹200 payment - Cost Analysis shows correct red difference, payment section visible, additional advance auto-populated, validation enforced, amendment processed correctly. ADDITIONAL FIXES by testing agent: (1) handleOpenAmend now calls fetchAvailableRoomsForAmend to load rooms on dialog open (2) Changed room availability API from /dashboard/room-availability to /rooms/available with exclude_booking_id to include currently booked rooms. Backend /api/bookings/amend endpoint handles both positive and negative cost differences correctly. P0.5 COMPLETE and WORKING."
 
+  - task: "P1 - Mix & Match Rooms (Smart Room Allocation)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/RoomSegmentSelector.jsx, /app/frontend/src/pages/Bookings.jsx, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "fork_main"
+        comment: "IMPLEMENTED: Three-phase implementation completed. PHASE 1 (Backend): Created optimal room combination algorithm with POST /api/rooms/find-optimal-combination endpoint (lines 824-1033 in server.py). Algorithm finds rooms available for longest consecutive periods using greedy optimization to minimize room changes. Added process_room_segments helper (lines 1068-1125) for segmented booking validation and cost calculation. Updated Booking model to support room_segments and has_room_changes fields. PHASE 2 (Frontend UI): Created RoomSegmentSelector component (439 lines) with calendar grid view, color-coded rooms, change indicators, manual override, and real-time cost calculation. Integrated into Bookings.jsx with Mix & Match button (line ~1942), dialog (lines ~3926-3958), and booking validation updated to support both traditional (room_ids) and segmented (room_segments) bookings. PHASE 3 (Integration): Updated booking creation payload to include room_segments. Backward compatible with existing bookings."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: ALL TESTS PASSED (12 backend tests, full frontend UI validation). Backend API /api/rooms/find-optimal-combination returns correct optimal combinations for single/multi-room bookings with proper cost calculation. Frontend RoomSegmentSelector displays calendar view with color-coded rooms (blue/green/purple etc), status badges (Same/Change), total cost calculation, Accept/Customize modes. Database persistence confirmed: room_segments array, has_room_changes flag, room_ids populated for backward compatibility. Edge cases tested: insufficient availability (returns 'insufficient' status), single night booking, long stay (7 nights), multi-room bookings (2, 3 rooms). BUG FIXED during testing: API URL in RoomSegmentSelector.jsx was missing /api prefix (line 10) - causing 404 errors. User flow working end-to-end: New Booking → Fill details → Select dates → Click Mix & Match → View optimal combination → Accept/Customize → Create booking with room_segments. Test file created: /app/backend/tests/test_mix_match_rooms.py. P1 COMPLETE and FULLY WORKING."
+
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 4
+  test_sequence: 5
   run_ui: true
 
 test_plan:
