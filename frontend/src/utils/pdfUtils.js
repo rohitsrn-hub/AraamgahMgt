@@ -49,8 +49,13 @@ export function generateCheckoutReceipt(booking, settings) {
   const cats = booking.room_categories || [];
   const catLabel = [...new Set(cats)].join(", ") || "N/A";
   const roomNums = (booking.room_numbers || []).join(", ") || booking.room_number || "N/A";
+  
+  // Use actual check-in/check-out dates if available, otherwise fall back to booking dates
+  const checkInDate = booking.actual_check_in || booking.check_in_date;
+  const checkOutDate = booking.actual_check_out || booking.check_out_date;
+  
   const nights = Math.ceil(
-    (new Date(booking.check_out_date) - new Date(booking.check_in_date)) / 86400000
+    (new Date(checkOutDate) - new Date(checkInDate)) / 86400000
   );
 
   // Guest info
@@ -76,7 +81,7 @@ export function generateCheckoutReceipt(booking, settings) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.text(`Room: ${roomNums}  (${catLabel})`, 13, y + 11);
-  doc.text(`Check-in: ${g.check_in_date}  →  Check-out: ${g.check_out_date}  |  Nights: ${nights}`, W / 2 - 10, y + 11);
+  doc.text(`Check-in: ${checkInDate}  →  Check-out: ${checkOutDate}  |  Nights: ${nights}`, W / 2 - 10, y + 11);
   y += 20;
 
   // Charges table
@@ -126,14 +131,24 @@ export function generateCheckoutReceipt(booking, settings) {
     margin: { left: 10, right: 10 }
   });
 
-  y = doc.lastAutoTable.finalY + 15;
+  y = doc.lastAutoTable.finalY + 10;
 
-  // Signature lines - with proper spacing from footer
+  // Check if we have enough space for signatures (need at least 20mm from bottom)
+  const pageH = doc.internal.pageSize.height;
+  const footerStartY = pageH - 12; // Footer line position
+  const minSpaceNeeded = 15; // Minimum space between signature text and footer line
+  
+  // If not enough space, ensure signature is positioned properly
+  if (y + 12 > footerStartY - minSpaceNeeded) {
+    y = footerStartY - minSpaceNeeded - 12;
+  }
+
+  // Signature lines - with guaranteed spacing from footer
   doc.setFontSize(8);
-  doc.line(13, y + 5, 65, y + 5);
-  doc.line(W - 65, y + 5, W - 13, y + 5);
-  doc.text("(Guest Signature / Atithi ka hastakshar)", 13, y + 10);
-  doc.text("(Duty Staff Signature)", W - 65, y + 10);
+  doc.line(13, y + 3, 65, y + 3);
+  doc.line(W - 65, y + 3, W - 13, y + 3);
+  doc.text("(Guest Signature / Atithi ka hastakshar)", 13, y + 8);
+  doc.text("(Duty Staff Signature)", W - 65, y + 8);
 
   addFooter(doc);
   
