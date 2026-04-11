@@ -2786,6 +2786,9 @@ async def get_room_occupancy_report(
     """Get room occupancy report with flexible date filters"""
     import calendar as cal_mod
     
+    # Initialize period_label to avoid undefined variable warning
+    period_label = None
+    
     # Determine date range based on filter type
     if filter_type == "daily":
         if not start_date:
@@ -2958,6 +2961,9 @@ async def get_room_allotment_report(
 ):
     """Get room allotment report showing all bookings with room assignments"""
     import calendar as cal_mod
+    
+    # Initialize period_label to avoid undefined variable warning
+    period_label = None
     
     # Determine date range based on filter type (same logic as occupancy)
     if filter_type == "daily":

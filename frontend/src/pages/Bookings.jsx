@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -331,7 +331,7 @@ export default function Bookings() {
     }
   }, [location.search, bookings, navigate]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [bookingsRes, roomsRes, staffRes, settingsRes] = await Promise.all([
         axios.get(`${API}/bookings`),
@@ -355,7 +355,7 @@ export default function Bookings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const fetchPendingRefunds = async () => {
     try {
@@ -391,7 +391,7 @@ export default function Bookings() {
     setBookingForm(prev => ({ ...prev, room_ids: [] }));
   }, [bookingForm.num_rooms]);
 
-  const fetchAvailableRooms = async (checkIn, checkOut) => {
+  const fetchAvailableRooms = useCallback(async (checkIn, checkOut) => {
     if (!checkIn || !checkOut) { setAvailableRooms([]); return; }
     setLoadingRooms(true);
     try {
@@ -408,16 +408,16 @@ export default function Bookings() {
     } finally {
       setLoadingRooms(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (bookingForm.check_in_date && bookingForm.check_out_date) {
       fetchAvailableRooms(bookingForm.check_in_date, bookingForm.check_out_date);
       setBookingForm(prev => ({ ...prev, room_ids: [] }));
     }
-  }, [bookingForm.check_in_date, bookingForm.check_out_date]);
+  }, [bookingForm.check_in_date, bookingForm.check_out_date, fetchAvailableRooms]);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const filteredBookings = bookings.filter(booking => {
     const roomNums = (booking.room_numbers || [booking.room_number || ""]).join(", ");
