@@ -43,7 +43,7 @@ import {
   CheckCircle
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 // Indian mobile phone validation
 const validateIndianPhone = (phone) => {
@@ -70,6 +70,8 @@ const toUpperCase = (value) => {
 };
 
 export default function Bookings() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [bookings, setBookings] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [availableRooms, setAvailableRooms] = useState([]);
@@ -217,8 +219,7 @@ export default function Bookings() {
   const [availableRoomsForCheckIn, setAvailableRoomsForCheckIn] = useState([]);
   const [modifiedRoomIds, setModifiedRoomIds] = useState([]);
 
-  const location = useLocation();
-
+  // URL-based action handler (from Dashboard quick actions)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const action = params.get('action');
@@ -226,8 +227,14 @@ export default function Bookings() {
     
     if (!action) return;
     
+    // Clear URL params after reading them to prevent re-triggering
+    const clearParams = () => {
+      navigate('/app/bookings', { replace: true });
+    };
+    
     if (action === 'new') {
       setShowNewBooking(true);
+      clearParams();
     } else if (action === 'checkin') {
       // Only process if bookings are loaded
       if (bookings.length === 0) return;
@@ -238,19 +245,24 @@ export default function Bookings() {
         if (targetBooking) {
           if (targetBooking.status === 'confirmed') {
             openCheckInDialog(targetBooking);
+            clearParams();
           } else {
             toast.error(`Booking cannot be checked in (status: ${targetBooking.status})`);
+            clearParams();
           }
         } else {
           toast.error("Booking not found");
+          clearParams();
         }
       } else {
         // Fallback: Find first confirmed booking
         const confirmedBooking = bookings.find(b => b.status === 'confirmed');
         if (confirmedBooking) {
           openCheckInDialog(confirmedBooking);
+          clearParams();
         } else {
           toast.info("No confirmed bookings available for check-in");
+          clearParams();
         }
       }
     } else if (action === 'checkout') {
@@ -263,19 +275,24 @@ export default function Bookings() {
         if (targetBooking) {
           if (targetBooking.status === 'checked_in') {
             openCheckOutDialog(targetBooking);
+            clearParams();
           } else {
             toast.error(`Booking cannot be checked out (status: ${targetBooking.status})`);
+            clearParams();
           }
         } else {
           toast.error("Booking not found");
+          clearParams();
         }
       } else {
         // Fallback: Find first checked-in booking
         const checkedInBooking = bookings.find(b => b.status === 'checked_in');
         if (checkedInBooking) {
           openCheckOutDialog(checkedInBooking);
+          clearParams();
         } else {
           toast.info("No checked-in bookings available for check-out");
+          clearParams();
         }
       }
     } else if (action === 'cancel') {
@@ -288,23 +305,28 @@ export default function Bookings() {
         if (targetBooking) {
           if (targetBooking.status === 'confirmed' || targetBooking.status === 'checked_in') {
             openCancelDialog(targetBooking);
+            clearParams();
           } else {
             toast.error(`Booking cannot be cancelled (status: ${targetBooking.status})`);
+            clearParams();
           }
         } else {
           toast.error("Booking not found");
+          clearParams();
         }
       } else {
         // Fallback: Find first cancelable booking
         const cancelableBooking = bookings.find(b => b.status === 'confirmed' || b.status === 'checked_in');
         if (cancelableBooking) {
           openCancelDialog(cancelableBooking);
+          clearParams();
         } else {
           toast.info("No bookings available for cancellation");
+          clearParams();
         }
       }
     }
-  }, [location, bookings]);
+  }, [location.search, bookings, navigate]);
 
   const fetchData = async () => {
     try {
