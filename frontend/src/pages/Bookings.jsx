@@ -1026,9 +1026,10 @@ export default function Bookings() {
       staff_id: "",
       extra_beds: 0,
       notes: "",
-      guest_age: (booking.member_ages && booking.member_ages.length > 0 && booking.member_ages[0]) 
-        ? String(booking.member_ages[0])
-        : (booking.total_members && booking.total_members > 0 ? "" : ""),  // Autofill from M1 age if available
+      guest_age: booking.guest_age || 
+                 (booking.member_ages && booking.member_ages.length > 0 && booking.member_ages[0]) 
+                 ? String(booking.guest_age || booking.member_ages[0])
+                 : "",  // Autofill from guest_age or M1 age
       guest_sex: booking.guest_sex || "M",  // Default to Male
       guest_address: "",
       family_members: []
@@ -2825,33 +2826,87 @@ export default function Bookings() {
                 <div className="p-4 bg-green-50 rounded-xl border border-green-300">
                   <h4 className="font-semibold text-green-800 mb-3">Total Bill Calculation</h4>
                   <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600">Room Charges (from booking):</span>
-                      <span className="font-medium">₹{selectedBooking.total_amount - (selectedBooking.advance_paid || 0)}</span>
-                    </div>
-                    {selectedBooking.extra_beds > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-600">Extra Beds (at check-in):</span>
-                        <span className="font-medium">₹{selectedBooking.extra_bed_charge || 0}</span>
-                      </div>
-                    )}
-                    {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-600">Additional Extra Beds (during stay):</span>
-                        <span className="font-medium">₹{actionForm.extra_beds_checkout * actionForm.extra_bed_days * 75}</span>
-                      </div>
-                    )}
-                    <div className="border-t border-green-300 pt-2 mt-2">
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-green-900">Total Amount Due:</span>
-                        <span className="text-xl font-bold text-green-700">
-                          ₹{(() => {
-                            const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
-                            return (selectedBooking.balance_amount || 0) + extraBedCharge;
-                          })()}
-                        </span>
-                      </div>
-                    </div>
+                    {(() => {
+                      // Calculate actual stay charges based on actual check-in to today
+                      const checkInDate = selectedBooking.actual_check_in 
+                        ? new Date(selectedBooking.actual_check_in)
+                        : new Date(selectedBooking.check_in_date);
+                      const checkOutDate = new Date(); // Today
+                      const actualNights = Math.ceil((checkOutDate - checkInDate) / 86400000);
+                      
+                      // Get room categories and calculate rates
+                      const roomCategories = selectedBooking.room_categories || [];
+                      const numRooms = selectedBooking.num_rooms || selectedBooking.room_ids.length || 1;
+                      const isNonOrg = !selectedBooking.is_org;
+                      
+                      let roomRentTotal = 0;
+                      let licenseFeeTotal = 0;
+                      
+                      // Calculate for each room category
+                      roomCategories.forEach(category => {
+                        let roomRate, licenseRate;
+                        
+                        if (category === "Cat I") {
+                          roomRate = isNonOrg 
+                            ? (settings?.def_civ_cat_i_rate || settings?.cat_i_rate || 570)
+                            : (settings?.cat_i_rate || 470);
+                          licenseRate = 30;
+                        } else {
+                          roomRate = isNonOrg
+                            ? (settings?.def_civ_cat_ii_rate || settings?.cat_ii_rate || 455)
+                            : (settings?.cat_ii_rate || 385);
+                          licenseRate = 15;
+                        }
+                        
+                        roomRentTotal += roomRate * actualNights;
+                        licenseFeeTotal += licenseRate * actualNights;
+                      });
+                      
+                      // If no categories, use num_rooms
+                      if (roomCategories.length === 0 && numRooms > 0) {
+                        const roomRate = isNonOrg ? 570 : 470; // Default Cat I
+                        const licenseRate = 30;
+                        roomRentTotal = roomRate * actualNights * numRooms;
+                        licenseFeeTotal = licenseRate * actualNights * numRooms;
+                      }
+                      
+                      const stayCharges = roomRentTotal + licenseFeeTotal;
+                      const extraBedCheckIn = selectedBooking.extra_bed_charge || 0;
+                      const extraBedCheckOut = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
+                      const totalDue = stayCharges + extraBedCheckIn + extraBedCheckOut;
+                      
+                      return (
+                        <>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-slate-600">Room Rent ({actualNights} night{actualNights !== 1 ? 's' : ''}):</span>
+                            <span className="font-medium">₹{roomRentTotal.toFixed(0)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-slate-600">License Fee ({actualNights} night{actualNights !== 1 ? 's' : ''}):</span>
+                            <span className="font-medium">₹{licenseFeeTotal.toFixed(0)}</span>
+                          </div>
+                          {selectedBooking.extra_beds > 0 && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">Extra Beds (at check-in):</span>
+                              <span className="font-medium">₹{extraBedCheckIn}</span>
+                            </div>
+                          )}
+                          {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">Additional Extra Beds (during stay):</span>
+                              <span className="font-medium">₹{extraBedCheckOut}</span>
+                            </div>
+                          )}
+                          <div className="border-t border-green-300 pt-2 mt-2">
+                            <div className="flex justify-between">
+                              <span className="font-semibold text-green-900">Total Amount Due:</span>
+                              <span className="text-xl font-bold text-green-700">₹{totalDue.toFixed(0)}</span>
+                              <input type="hidden" id="calculated-total" value={totalDue.toFixed(0)} />
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                   
                   {/* Amend and Confirm Buttons */}
@@ -2860,8 +2915,13 @@ export default function Bookings() {
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        // Allow manual editing - don't auto-fill
-                        setActionForm({...actionForm, final_payment: actionForm.final_payment || 0});
+                        // Focus on final payment input to allow manual editing
+                        const finalPaymentInput = document.querySelector('input[data-testid="input-final-payment"]');
+                        if (finalPaymentInput) {
+                          finalPaymentInput.focus();
+                          finalPaymentInput.select();
+                          toast.info("You can now manually edit the payment amount");
+                        }
                       }}
                       className="flex items-center gap-1"
                     >
@@ -2871,8 +2931,8 @@ export default function Bookings() {
                     <Button
                       size="sm"
                       onClick={() => {
-                        const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
-                        const totalDue = (selectedBooking.balance_amount || 0) + extraBedCharge;
+                        const totalInput = document.getElementById('calculated-total');
+                        const totalDue = totalInput ? parseFloat(totalInput.value) : 0;
                         setActionForm({...actionForm, final_payment: totalDue});
                         toast.success(`Amount confirmed: ₹${totalDue}`);
                       }}
@@ -2903,26 +2963,14 @@ export default function Bookings() {
                   <Label>Final Payment *</Label>
                   <Input
                     type="number"
-                    value={(() => {
-                      const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
-                      const totalDue = (selectedBooking.balance_amount || 0) + extraBedCharge;
-                      return actionForm.final_payment !== undefined ? actionForm.final_payment : totalDue;
-                    })()}
+                    value={actionForm.final_payment || 0}
                     onChange={(e) => setActionForm({...actionForm, final_payment: parseFloat(e.target.value) || 0})}
-                    onFocus={(e) => {
-                      // Auto-fill with calculated total on first focus
-                      const extraBedCharge = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
-                      const totalDue = (selectedBooking.balance_amount || 0) + extraBedCharge;
-                      if (actionForm.final_payment === 0 || actionForm.final_payment === undefined) {
-                        setActionForm({...actionForm, final_payment: totalDue});
-                      }
-                      e.target.select();
-                    }}
+                    onFocus={(e) => e.target.select()}
                     className="earms-input mt-1"
                     data-testid="input-final-payment"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    Balance (₹{selectedBooking.balance_amount}) + Extra Beds (₹{(actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75})
+                    Click "Confirm Amount" to auto-fill calculated total, or "Amend Amount" to edit manually
                   </p>
                 </div>
                 <div>
