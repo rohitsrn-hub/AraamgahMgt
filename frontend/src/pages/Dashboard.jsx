@@ -1338,7 +1338,7 @@ export default function Dashboard() {
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Days until check-in:</span>
-                    <span className="font-medium">{refundInfo.days_until_checkin} days</span>
+                    <span className="font-medium">{Math.round(refundInfo.hours_until_checkin / 24)} days</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Advance Paid:</span>

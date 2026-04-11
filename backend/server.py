@@ -382,6 +382,7 @@ class CheckOutRequest(BaseModel):
 class CancelBookingRequest(BaseModel):
     booking_id: str
     reason: Optional[str] = None
+    refund_amount: Optional[float] = 0.0
 
 class AmendBookingRequest(BaseModel):
     booking_id: str
