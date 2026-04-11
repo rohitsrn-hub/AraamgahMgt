@@ -330,7 +330,7 @@ export default function Bookings() {
         }
       }
     }
-  }, [location.search, bookings, navigate, fetchPendingRefunds]);
+  }, [location.search, bookings, navigate]);
 
   const fetchData = useCallback(async () => {
     try {
