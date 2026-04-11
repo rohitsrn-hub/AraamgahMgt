@@ -126,14 +126,14 @@ export function generateCheckoutReceipt(booking, settings) {
     margin: { left: 10, right: 10 }
   });
 
-  y = doc.lastAutoTable.finalY + 10;
+  y = doc.lastAutoTable.finalY + 15;
 
-  // Signature lines
+  // Signature lines - with proper spacing from footer
   doc.setFontSize(8);
-  doc.line(13, y + 8, 65, y + 8);
-  doc.line(W - 65, y + 8, W - 13, y + 8);
-  doc.text("(Guest Signature / Atithi ka hastakshar)", 13, y + 13);
-  doc.text("(Duty Staff Signature)", W - 65, y + 13);
+  doc.line(13, y + 5, 65, y + 5);
+  doc.line(W - 65, y + 5, W - 13, y + 5);
+  doc.text("(Guest Signature / Atithi ka hastakshar)", 13, y + 10);
+  doc.text("(Duty Staff Signature)", W - 65, y + 10);
 
   addFooter(doc);
   
