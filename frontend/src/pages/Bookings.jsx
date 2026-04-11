@@ -1230,7 +1230,7 @@ export default function Bookings() {
         params.guest_name = guestHistorySearch.name;
       }
 
-      const response = await axios.get(`${API}/bookings/guest-history`, { params });
+      const response = await axios.get(`${API}/guest-history`, { params });
       
       if (response.data.found) {
         setGuestHistoryData(response.data);

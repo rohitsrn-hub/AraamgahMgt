@@ -1875,7 +1875,7 @@ async def amend_booking(request: AmendBookingRequest):
 
 # ============= GUEST HISTORY =============
 
-@api_router.get("/bookings/guest-history")
+@api_router.get("/guest-history")
 async def get_guest_history(
     phone_number: Optional[str] = Query(None, description="Guest phone number"),
     aadhaar_number: Optional[str] = Query(None, description="Guest Aadhaar number"),
