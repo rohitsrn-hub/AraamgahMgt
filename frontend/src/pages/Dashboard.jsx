@@ -1017,7 +1017,7 @@ export default function Dashboard() {
               {funds.cancellations.pending_refunds > 0 && (
                 <button
                   className="mt-3 w-full p-3 bg-amber-100 hover:bg-amber-200 rounded-lg text-center transition-colors cursor-pointer border border-amber-300 group"
-                  onClick={openPendingRefundsModal}
+                  onClick={() => navigate('/app/bookings?action=pending-refunds')}
                   data-testid="pending-refunds-amount-btn"
                 >
                   <span className="text-amber-800 font-medium">

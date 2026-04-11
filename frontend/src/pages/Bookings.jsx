@@ -235,6 +235,9 @@ export default function Bookings() {
     if (action === 'new') {
       setShowNewBooking(true);
       clearParams();
+    } else if (action === 'pending-refunds') {
+      setShowPendingRefunds(true);
+      clearParams();
     } else if (action === 'checkin') {
       // Only process if bookings are loaded
       if (bookings.length === 0) return;
