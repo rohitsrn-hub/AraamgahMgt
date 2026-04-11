@@ -2882,9 +2882,9 @@ export default function Bookings() {
                       }
                       
                       const stayCharges = roomRentTotal + licenseFeeTotal;
-                      const extraBedCheckIn = selectedBooking.extra_bed_charge || 0;
-                      const extraBedCheckOut = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
-                      const totalDue = stayCharges + extraBedCheckIn + extraBedCheckOut;
+                      // ONLY use checkout extra bed charges (actual usage)
+                      const extraBedActual = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
+                      const totalDue = stayCharges + extraBedActual;
                       
                       return (
                         <>
@@ -2896,16 +2896,10 @@ export default function Bookings() {
                             <span className="text-slate-600">License Fee ({actualNights} night{actualNights !== 1 ? 's' : ''}):</span>
                             <span className="font-medium">₹{licenseFeeTotal.toFixed(0)}</span>
                           </div>
-                          {selectedBooking.extra_beds > 0 && (
-                            <div className="flex justify-between text-sm">
-                              <span className="text-slate-600">Extra Beds (at check-in):</span>
-                              <span className="font-medium">₹{extraBedCheckIn}</span>
-                            </div>
-                          )}
                           {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
                             <div className="flex justify-between text-sm">
-                              <span className="text-slate-600">Additional Extra Beds (during stay):</span>
-                              <span className="font-medium">₹{extraBedCheckOut}</span>
+                              <span className="text-slate-600">Extra Beds (actual usage):</span>
+                              <span className="font-medium">₹{extraBedActual} ({actionForm.extra_beds_checkout} bed{actionForm.extra_beds_checkout > 1 ? 's' : ''} × {actionForm.extra_bed_days} day{actionForm.extra_bed_days > 1 ? 's' : ''})</span>
                             </div>
                           )}
                           <div className="border-t border-green-300 pt-2 mt-2">

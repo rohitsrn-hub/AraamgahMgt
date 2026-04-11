@@ -54,9 +54,9 @@ export function generateCheckoutReceipt(booking, settings) {
   const checkInDateRaw = booking.actual_check_in || booking.check_in_date;
   const checkOutDateRaw = booking.actual_check_out || booking.check_out_date;
   
-  // Format dates to display only date part (no time)
-  const checkInDate = format(new Date(checkInDateRaw), "yyyy-MM-dd");
-  const checkOutDate = format(new Date(checkOutDateRaw), "yyyy-MM-dd");
+  // Format dates to very short format to avoid overflow (dd MMM)
+  const checkInDate = format(new Date(checkInDateRaw), "dd MMM");
+  const checkOutDate = format(new Date(checkOutDateRaw), "dd MMM");
   
   const nights = Math.ceil(
     (new Date(checkOutDateRaw) - new Date(checkInDateRaw)) / 86400000
@@ -129,12 +129,11 @@ export function generateCheckoutReceipt(booking, settings) {
     licenseFeeTotal = licenseRate * nights * numRooms;
   }
   
-  // Extra bed charges
-  const extraBedCheckIn = booking.extra_bed_charge || 0;
-  const extraBedCheckOut = booking.extra_bed_charge_checkout || 0;
+  // Extra bed charges - ONLY use checkout values (actual usage)
+  const extraBedActual = booking.extra_bed_charge_checkout || 0;
   
   // Calculate total
-  const calculatedTotal = roomRentTotal + licenseFeeTotal + extraBedCheckIn + extraBedCheckOut;
+  const calculatedTotal = roomRentTotal + licenseFeeTotal + extraBedActual;
   
   // Final payment (from checkout form)
   const finalPayment = booking.final_payment || calculatedTotal;
@@ -144,20 +143,15 @@ export function generateCheckoutReceipt(booking, settings) {
   
   // Build table rows
   const tableRows = [
-    ["Room Rent", `₹${(roomRentTotal / nights).toFixed(0)} × ${nights} night(s)`, roomRentTotal.toFixed(2)],
-    ["License Fee", `₹${(licenseFeeTotal / nights).toFixed(0)} × ${nights} night(s)`, licenseFeeTotal.toFixed(2)]
+    ["Room Rent", `₹${(roomRentTotal / nights).toFixed(0)} × ${nights} night(s) × ${numRooms} room(s)`, roomRentTotal.toFixed(2)],
+    ["License Fee", `₹${(licenseFeeTotal / nights).toFixed(0)} × ${nights} night(s) × ${numRooms} room(s)`, licenseFeeTotal.toFixed(2)]
   ];
   
-  // Add extra beds if any
-  if (extraBedCheckIn > 0) {
-    const numBeds = booking.extra_beds || 0;
-    tableRows.push(["Extra Beds (at check-in)", `${numBeds} bed(s) × ₹75`, extraBedCheckIn.toFixed(2)]);
-  }
-  
-  if (extraBedCheckOut > 0) {
+  // Add extra beds if any (actual usage at checkout)
+  if (extraBedActual > 0) {
     const numBedsCheckout = booking.extra_beds_checkout || 0;
-    const daysCheckout = booking.extra_bed_days || 1;
-    tableRows.push(["Extra Beds (during stay)", `${numBedsCheckout} bed(s) × ${daysCheckout} day(s) × ₹75`, extraBedCheckOut.toFixed(2)]);
+    const daysCheckout = booking.extra_bed_days || 0;
+    tableRows.push(["Extra Beds (actual usage)", `${numBedsCheckout} bed(s) × ${daysCheckout} day(s) × ₹75`, extraBedActual.toFixed(2)]);
   }
   
   // Add additional charges if any
