@@ -928,7 +928,7 @@ export default function Bookings() {
     const booking = pendingCheckoutBooking;
     const form = booking._checkoutForm;
     try {
-      await axios.post(`${API}/bookings/check-out`, {
+      const response = await axios.post(`${API}/bookings/check-out`, {
         booking_id: booking.id,
         staff_id: form.staff_id,
         final_payment: form.final_payment,
@@ -946,9 +946,20 @@ export default function Bookings() {
         bank_ifsc: form.bank_ifsc || undefined,
         bank_account: form.bank_account || undefined
       });
+      
       toast.success("Check-out successful!");
-      // Generate receipt with enhanced notification
-      const result = generateCheckoutReceipt(booking, settings);
+      
+      // Get updated booking from response for PDF generation
+      const updatedBooking = response.data.booking || {
+        ...booking,
+        final_payment: form.final_payment,
+        extra_beds_checkout: form.extra_beds_checkout || 0,
+        extra_bed_days: form.extra_bed_days || 0,
+        extra_bed_charge_checkout: (form.extra_beds_checkout || 0) * (form.extra_bed_days || 0) * 75
+      };
+      
+      // Generate receipt with updated booking data
+      const result = generateCheckoutReceipt(updatedBooking, settings);
       showPDFNotification(result, "Checkout Receipt Generated");
       setPendingCheckoutBooking(null);
       setSelectedBooking(null);

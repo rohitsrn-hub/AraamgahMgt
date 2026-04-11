@@ -288,6 +288,10 @@ class Booking(BaseModel):
     upi_phone: Optional[str] = None
     extra_beds: int = 0
     extra_bed_charge: float = 0.0
+    extra_beds_checkout: Optional[int] = 0  # NEW: Extra beds added during stay
+    extra_bed_days: Optional[int] = 0  # NEW: Days extra beds used during stay
+    extra_bed_charge_checkout: Optional[float] = 0.0  # NEW: Charge for extra beds during stay
+    final_payment: Optional[float] = 0.0  # NEW: Final payment amount at checkout
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
@@ -1458,6 +1462,10 @@ async def check_out(request: CheckOutRequest):
             "actual_check_out": now,
             "checked_out_by": request.staff_id,
             "balance_amount": new_balance,
+            "final_payment": request.final_payment,
+            "extra_beds_checkout": request.extra_beds_checkout,
+            "extra_bed_days": request.extra_bed_days,
+            "extra_bed_charge_checkout": (request.extra_beds_checkout or 0) * (request.extra_bed_days or 0) * 75,
             "updated_at": now
         }}
     )

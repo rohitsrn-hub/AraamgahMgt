@@ -88,49 +88,101 @@ export function generateCheckoutReceipt(booking, settings) {
   doc.text(`Check-in: ${checkInDate}  →  Check-out: ${checkOutDate}  |  Nights: ${nights}`, W / 2 - 10, y + 11);
   y += 20;
 
-  // Charges table
+  // Charges table - use same calculation as checkout form
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.text("CHARGES", 13, y + 5);
   y += 7;
 
-  const numRooms = (booking.room_numbers || [1]).length;
-  let roomRent, licFee;
-  // Non-Org guests use Non-Org rates (previously called Def Civ)
-  if (isNonOrg) {
-    roomRent = (settings?.def_civ_room_rent || settings?.non_org_room_rent || 570);
-    licFee = (settings?.def_civ_license_fee || settings?.non_org_license_fee || 30);
-  } else if (catLabel.includes("Cat I") && !catLabel.includes("Cat II")) {
-    roomRent = (settings?.cat_i_room_rent || 470);
-    licFee = (settings?.cat_i_license_fee || 30);
+  // Calculate based on actual stay (same as checkout form)
+  const roomCategories = booking.room_categories || [];
+  const numRooms = booking.num_rooms || (booking.room_ids || []).length || 1;
+  
+  let roomRentTotal = 0;
+  let licenseFeeTotal = 0;
+  
+  // Calculate per-room-category rates
+  if (roomCategories.length > 0) {
+    roomCategories.forEach(category => {
+      let roomRate, licenseRate;
+      
+      if (category === "Cat I") {
+        roomRate = isNonOrg 
+          ? (settings?.def_civ_cat_i_rate || settings?.cat_i_rate || 570)
+          : (settings?.cat_i_rate || 470);
+        licenseRate = 30;
+      } else { // Cat II
+        roomRate = isNonOrg
+          ? (settings?.def_civ_cat_ii_rate || settings?.cat_ii_rate || 455)
+          : (settings?.cat_ii_rate || 385);
+        licenseRate = 15;
+      }
+      
+      roomRentTotal += roomRate * nights;
+      licenseFeeTotal += licenseRate * nights;
+    });
   } else {
-    roomRent = (settings?.cat_ii_room_rent || 385);
-    licFee = (settings?.cat_ii_license_fee || 15);
+    // Fallback if no categories
+    const roomRate = isNonOrg ? 570 : 470;
+    const licenseRate = 30;
+    roomRentTotal = roomRate * nights * numRooms;
+    licenseFeeTotal = licenseRate * nights * numRooms;
   }
-
-  const rr = roomRent * nights * numRooms;
-  const lf = licFee * nights * numRooms;
-  const eb = (booking.extra_beds || 0) * 75;
-  const total = rr + lf + eb;
-  const balance = booking.balance_amount || (total - (booking.advance_paid || 0));
+  
+  // Extra bed charges
+  const extraBedCheckIn = booking.extra_bed_charge || 0;
+  const extraBedCheckOut = booking.extra_bed_charge_checkout || 0;
+  
+  // Calculate total
+  const calculatedTotal = roomRentTotal + licenseFeeTotal + extraBedCheckIn + extraBedCheckOut;
+  
+  // Final payment (from checkout form)
+  const finalPayment = booking.final_payment || calculatedTotal;
+  
+  // Additional charges (if staff amended the amount)
+  const additionalCharges = finalPayment > calculatedTotal ? (finalPayment - calculatedTotal) : 0;
+  
+  // Build table rows
+  const tableRows = [
+    ["Room Rent", `₹${(roomRentTotal / nights).toFixed(0)} × ${nights} night(s)`, roomRentTotal.toFixed(2)],
+    ["License Fee", `₹${(licenseFeeTotal / nights).toFixed(0)} × ${nights} night(s)`, licenseFeeTotal.toFixed(2)]
+  ];
+  
+  // Add extra beds if any
+  if (extraBedCheckIn > 0) {
+    const numBeds = booking.extra_beds || 0;
+    tableRows.push(["Extra Beds (at check-in)", `${numBeds} bed(s) × ₹75`, extraBedCheckIn.toFixed(2)]);
+  }
+  
+  if (extraBedCheckOut > 0) {
+    const numBedsCheckout = booking.extra_beds_checkout || 0;
+    const daysCheckout = booking.extra_bed_days || 1;
+    tableRows.push(["Extra Beds (during stay)", `${numBedsCheckout} bed(s) × ${daysCheckout} day(s) × ₹75`, extraBedCheckOut.toFixed(2)]);
+  }
+  
+  // Add additional charges if any
+  if (additionalCharges > 0) {
+    tableRows.push(["Additional Charges at Checkout", "", additionalCharges.toFixed(2)]);
+  }
+  
+  // Add totals
+  tableRows.push(["Total Amount", "", finalPayment.toFixed(2)]);
+  tableRows.push(["Advance Paid", "", `(${(booking.advance_paid || 0).toFixed(2)})`]);
+  tableRows.push(["Balance Collected", "", (finalPayment - (booking.advance_paid || 0)).toFixed(2)]);
 
   autoTable(doc, {
     startY: y,
     head: [["Description", "Calculation", "Amount (₹)"]],
-    body: [
-      ["Room Rent", `₹${roomRent} × ${nights} nights × ${numRooms} room(s)`, rr.toFixed(2)],
-      ["License Fee", `₹${licFee} × ${nights} nights × ${numRooms} room(s)`, lf.toFixed(2)],
-      ...(eb > 0 ? [["Extra Beds", `${booking.extra_beds} bed(s) × ₹75`, eb.toFixed(2)]] : []),
-      ["Total Amount", "", total.toFixed(2)],
-      ["Advance Paid", "", `(${(booking.advance_paid || 0).toFixed(2)})`],
-      ["Balance Collected", "", balance.toFixed(2)],
-    ],
+    body: tableRows,
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: PRIMARY_COLOR, textColor: 255, fontSize: 8 },
     columnStyles: { 0: { cellWidth: 45 }, 1: { cellWidth: 80 }, 2: { cellWidth: 30, halign: "right", fontStyle: "bold" } },
     rowStyles: (row) => {
-      if (row.index === 3) return { fillColor: [200, 230, 200] };
-      if (row.index === row.table.body.length - 1) return { fillColor: [170, 210, 170], fontStyle: "bold" };
+      const totalRowIndex = tableRows.findIndex(r => r[0] === "Total Amount");
+      const balanceRowIndex = tableRows.findIndex(r => r[0] === "Balance Collected");
+      
+      if (row.index === totalRowIndex) return { fillColor: [200, 230, 200] };
+      if (row.index === balanceRowIndex) return { fillColor: [170, 210, 170], fontStyle: "bold" };
     },
     margin: { left: 10, right: 10 }
   });
