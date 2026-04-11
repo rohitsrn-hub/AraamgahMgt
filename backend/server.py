@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -1953,7 +1954,7 @@ async def get_guest_history(
                 checkout = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
                 nights = (checkout - checkin).days
                 total_nights += nights
-            except:
+            except Exception:
                 pass
     
     statistics = {
