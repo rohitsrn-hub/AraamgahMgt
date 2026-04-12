@@ -227,7 +227,7 @@ function AppContent() {
             <Route
               path="backup-restore"
               element={
-                <ProtectedRoute roles="admin">
+                <ProtectedRoute roles={["admin", "staff"]}>
                   <BackupRestore />
                 </ProtectedRoute>
               }
@@ -328,7 +328,7 @@ function AppContent() {
           <Route
             path="/backup-restore"
             element={
-              <ProtectedRoute roles="admin">
+              <ProtectedRoute roles={["admin", "staff"]}>
                 <Layout settings={settings} />
               </ProtectedRoute>
             }

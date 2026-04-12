@@ -46,12 +46,18 @@ export default function Layout({ settings }) {
       { path: "/app/reports", icon: ChartBar, label: "Reports" },
     ];
     
-    // Only add admin items if user is admin
+    // Add Backup & Restore for Staff and Admin
+    if (user && (user.role === 'admin' || user.role === 'staff')) {
+      allNavItems.push(
+        { path: "/app/backup-restore", icon: Database, label: "Backup & Restore" }
+      );
+    }
+    
+    // Add admin-only items
     if (user && user.role === 'admin') {
       allNavItems.push(
-        { path: "/app/users", icon: UsersThree, label: "User Management", adminOnly: true },
-        { path: "/app/backup-restore", icon: Database, label: "Backup & Restore", adminOnly: true },
-        { path: "/app/settings", icon: Gear, label: "Settings", adminOnly: true }
+        { path: "/app/users", icon: UsersThree, label: "User Management" },
+        { path: "/app/settings", icon: Gear, label: "Settings" }
       );
     }
     
