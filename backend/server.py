@@ -1,5 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Security
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -27,6 +28,27 @@ from utils import (
     serialize_response,
     calculate_nights,
     get_room_rate
+)
+
+# Import auth utilities
+from utils.auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_user_response
+)
+
+# Security scheme for JWT
+security = HTTPBearer()
+
+# Import user models
+from models.user import (
+    User,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    LoginResponse,
+    UserRole as UserRoleModel
 )
 
 ROOT_DIR = Path(__file__).parent
@@ -618,6 +640,283 @@ async def update_room_categories(categories: List[dict]):
         raise HTTPException(status_code=404, detail="Settings not found")
     
     return {"message": "Room categories updated successfully", "categories": categories}
+
+# ============= AUTHENTICATION =============
+
+# Create dependency that injects db into get_current_user
+async def get_current_user_with_db(credentials = Security(security)):
+    """Wrapper to inject db into get_current_user"""
+    from utils.auth import decode_access_token
+    
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="User account is disabled")
+    
+    return user
+
+
+async def require_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
+    """Require admin role"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
+async def require_staff_or_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
+    """Require staff or admin role"""
+    role = current_user.get("role")
+    if role not in ["admin", "staff"]:
+        raise HTTPException(status_code=403, detail="Staff or Admin access required")
+    return current_user
+
+
+@api_router.post("/auth/login", response_model=LoginResponse)
+async def login(credentials: UserLogin):
+    """
+    User login endpoint
+    
+    Returns JWT access token on successful authentication
+    """
+    # Find user by email
+    user = await db.users.find_one({"email": credentials.email.lower()}, {"_id": 0})
+    
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+    
+    # Verify password
+    if not verify_password(credentials.password, user["password_hash"]):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+    
+    # Check if user is active
+    if not user.get("is_active", True):
+        raise HTTPException(
+            status_code=403,
+            detail="Account is disabled. Contact administrator."
+        )
+    
+    # Update last login
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    # Create JWT token
+    access_token = create_access_token(
+        data={
+            "user_id": user["id"],
+            "email": user["email"],
+            "role": user["role"]
+        }
+    )
+    
+    # Return token and user info
+    return LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            role=user["role"],
+            is_active=user["is_active"],
+            created_at=user["created_at"],
+            last_login=user.get("last_login")
+        )
+    )
+
+
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: dict = Depends(get_current_user_with_db)):
+    """
+    Get current logged-in user information
+    
+    Requires: Valid JWT token in Authorization header
+    """
+    return UserResponse(
+        id=current_user["id"],
+        email=current_user["email"],
+        name=current_user["name"],
+        role=current_user["role"],
+        is_active=current_user["is_active"],
+        created_at=current_user["created_at"],
+        last_login=current_user.get("last_login")
+    )
+
+
+@api_router.post("/auth/logout")
+async def logout():
+    """
+    Logout endpoint (stateless - client should delete token)
+    
+    Returns success message
+    """
+    return {"message": "Logged out successfully. Please delete your token."}
+
+
+# ============= USER MANAGEMENT (ADMIN ONLY) =============
+
+@api_router.post("/users", response_model=UserResponse)
+async def create_user(
+    user_data: UserCreate,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Create a new user (Admin only)
+    
+    Requires: Admin role
+    """
+    # Validate role
+    user_data.validate_role()
+    
+    # Check if email already exists
+    existing = await db.users.find_one({"email": user_data.email.lower()}, {"_id": 0})
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Email already registered"
+        )
+    
+    # Create user
+    new_user = User(
+        id=str(uuid.uuid4()),
+        email=user_data.email.lower(),
+        password_hash=hash_password(user_data.password),
+        name=user_data.name,
+        role=user_data.role,
+        is_active=True,
+        created_at=datetime.now(timezone.utc).isoformat()
+    )
+    
+    # Insert into database
+    await db.users.insert_one(new_user.model_dump())
+    
+    # Return user (without password_hash)
+    return UserResponse(
+        id=new_user.id,
+        email=new_user.email,
+        name=new_user.name,
+        role=new_user.role,
+        is_active=new_user.is_active,
+        created_at=new_user.created_at,
+        last_login=None
+    )
+
+
+@api_router.get("/users", response_model=List[UserResponse])
+async def list_users(current_user: dict = Depends(require_admin_role)):
+    """
+    List all users (Admin only)
+    
+    Requires: Admin role
+    """
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
+    
+    return [
+        UserResponse(
+            id=u["id"],
+            email=u["email"],
+            name=u["name"],
+            role=u["role"],
+            is_active=u.get("is_active", True),
+            created_at=u["created_at"],
+            last_login=u.get("last_login")
+        )
+        for u in users
+    ]
+
+
+@api_router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    update_data: dict,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Update a user (Admin only)
+    
+    Requires: Admin role
+    """
+    # Prevent admin from disabling themselves
+    if user_id == current_user["id"] and not update_data.get("is_active", True):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot disable your own account"
+        )
+    
+    update_fields = {}
+    
+    if "name" in update_data:
+        update_fields["name"] = update_data["name"]
+    
+    if "role" in update_data:
+        if update_data["role"] not in ["admin", "staff", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role")
+        update_fields["role"] = update_data["role"]
+    
+    if "is_active" in update_data:
+        update_fields["is_active"] = update_data["is_active"]
+    
+    if "password" in update_data:
+        update_fields["password_hash"] = hash_password(update_data["password"])
+    
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Update user
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": update_fields}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get updated user
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    
+    return UserResponse(**user)
+
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Delete a user (Admin only)
+    
+    Requires: Admin role
+    """
+    # Prevent admin from deleting themselves
+    if user_id == current_user["id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete your own account"
+        )
+    
+    result = await db.users.delete_one({"id": user_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "User deleted successfully"}
 
 # ============= ROOMS =============
 

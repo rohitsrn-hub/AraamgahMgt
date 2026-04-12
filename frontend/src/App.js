@@ -3,8 +3,10 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { Toaster } from "@/components/ui/sonner";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 // Pages
+import Login from "@/pages/Login";
 import SetupWizard from "@/pages/SetupWizard";
 import CommandCenter from "@/components/CommandCenter";
 import Dashboard from "@/pages/Dashboard";
@@ -18,9 +20,35 @@ import ReportsPage from "@/pages/ReportsPage";
 import BackupRestore from "@/pages/BackupRestore";
 import BackupWarningModal from "@/components/BackupWarningModal";
 import Layout from "@/components/Layout";
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
+
+// Configure axios interceptors for authentication
+axios.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Handle 401 responses
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Main app content component (needs useNavigate hook)
 function AppContent() {
@@ -150,6 +178,9 @@ function AppContent() {
       {/* Main Content with top padding if banner is visible */}
       <div className={backupWarning?.missed && !backupBannerDismissed ? "pt-14" : ""}>
         <Routes>
+          {/* Login Route (Public) */}
+          <Route path="/login" element={<Login />} />
+          
           {/* Command Center as main landing */}
           <Route path="/" element={<CommandCenter />} />
           
@@ -206,9 +237,11 @@ function AppContent() {
 // Root App component wraps AppContent with BrowserRouter
 function App() {
   return (
-    <BrowserRouter>
-      <AppContent />
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 
