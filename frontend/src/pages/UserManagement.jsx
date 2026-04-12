@@ -5,7 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { API } from '@/App';
-import { UserCircle, Plus, Pencil, Trash, Check, X } from '@phosphor-icons/react';
+import { UserCircle, Plus, Pencil, Trash, Check, X, Eye, EyeSlash, Key, Copy } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 
 const UserManagement = () => {
@@ -13,6 +13,11 @@ const UserManagement = () => {
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [selectedUserForReset, setSelectedUserForReset] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showFormPassword, setShowFormPassword] = useState(false);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -71,6 +76,48 @@ const UserManagement = () => {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete user');
     }
+  };
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*';
+    let password = '';
+    for (let i = 0; i < 12; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
+  };
+
+  const handleOpenPasswordReset = (user) => {
+    setSelectedUserForReset(user);
+    setNewPassword('');
+    setShowPasswordReset(true);
+    setShowNewPassword(false);
+  };
+
+  const handleGeneratePassword = () => {
+    const generated = generateRandomPassword();
+    setNewPassword(generated);
+    setShowNewPassword(true);
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.put(`${API}/users/${selectedUserForReset.id}/password`, {
+        new_password: newPassword
+      });
+      toast.success('Password reset successfully');
+      setShowPasswordReset(false);
+      setSelectedUserForReset(null);
+      setNewPassword('');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to reset password');
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    toast.success('Copied to clipboard');
   };
 
   const getRoleBadgeColor = (role) => {
@@ -168,22 +215,32 @@ const UserManagement = () => {
                       : 'Never'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => handleToggleActive(user.id, user.is_active)}
-                      className={`mr-2 px-3 py-1 rounded ${
-                        user.is_active
-                          ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                          : 'bg-green-100 text-green-700 hover:bg-green-200'
-                      }`}
-                    >
-                      {user.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUser(user.id)}
-                      className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                    >
-                      <Trash size={16} className="inline" />
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => handleOpenPasswordReset(user)}
+                        className="px-3 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 flex items-center gap-1"
+                        title="Reset Password"
+                      >
+                        <Key size={16} />
+                        <span className="hidden sm:inline">Reset</span>
+                      </button>
+                      <button
+                        onClick={() => handleToggleActive(user.id, user.is_active)}
+                        className={`px-3 py-1 rounded ${
+                          user.is_active
+                            ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                            : 'bg-green-100 text-green-700 hover:bg-green-200'
+                        }`}
+                      >
+                        {user.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(user.id)}
+                        className="px-3 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                      >
+                        <Trash size={16} className="inline" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -231,15 +288,24 @@ const UserManagement = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Password
                 </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Minimum 8 characters"
-                />
+                <div className="relative">
+                  <input
+                    type={showFormPassword ? "text" : "password"}
+                    required
+                    minLength={8}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Minimum 8 characters"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowFormPassword(!showFormPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                  >
+                    {showFormPassword ? <EyeSlash size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -273,6 +339,96 @@ const UserManagement = () => {
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
                   Create User
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Password Reset Dialog */}
+      {showPasswordReset && selectedUserForReset && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h2 className="text-2xl font-bold mb-4">Reset Password</h2>
+            <p className="text-gray-600 mb-4">
+              Reset password for <strong>{selectedUserForReset.name}</strong> ({selectedUserForReset.email})
+            </p>
+            
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-3 py-2 pr-20 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Enter new password"
+                  />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(newPassword)}
+                      className="p-1 text-gray-500 hover:text-gray-700"
+                      title="Copy password"
+                      disabled={!newPassword}
+                    >
+                      <Copy size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="p-1 text-gray-500 hover:text-gray-700"
+                    >
+                      {showNewPassword ? <EyeSlash size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGeneratePassword}
+                className="w-full px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 flex items-center justify-center gap-2"
+              >
+                <Key size={20} />
+                Generate Random Password
+              </button>
+
+              {newPassword && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-blue-800 font-medium mb-1">⚠️ Important:</p>
+                  <p className="text-xs text-blue-700">
+                    Make sure to copy this password and share it with the user securely. 
+                    It cannot be recovered later.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-end mt-6">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordReset(false);
+                    setSelectedUserForReset(null);
+                    setNewPassword('');
+                    setShowNewPassword(false);
+                  }}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  disabled={!newPassword}
+                >
+                  Reset Password
                 </button>
               </div>
             </form>

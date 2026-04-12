@@ -918,6 +918,41 @@ async def delete_user(
     
     return {"message": "User deleted successfully"}
 
+
+@api_router.put("/users/{user_id}/password")
+async def reset_user_password(
+    user_id: str,
+    password_data: dict,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Reset a user's password (Admin only)
+    
+    Requires: Admin role
+    Body: {"new_password": "new_password_here"}
+    """
+    new_password = password_data.get("new_password")
+    
+    if not new_password:
+        raise HTTPException(status_code=400, detail="new_password is required")
+    
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    
+    # Hash the new password
+    password_hash = hash_password(new_password)
+    
+    # Update user's password
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"password_hash": password_hash}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "Password reset successfully"}
+
 # ============= ROOMS =============
 
 @api_router.get("/rooms", response_model=List[dict])

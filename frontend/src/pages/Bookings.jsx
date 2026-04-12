@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { API } from "@/App";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -72,6 +73,9 @@ const toUpperCase = (value) => {
 export default function Bookings() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth(); // Get current user for role-based permissions
+  const isViewer = user?.role === 'viewer'; // Check if user is viewer
+  
   const [bookings, setBookings] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [availableRooms, setAvailableRooms] = useState([]);
@@ -1611,6 +1615,8 @@ export default function Bookings() {
             onClick={() => setShowNewBooking(true)}
             className="earms-btn-primary flex items-center gap-2"
             data-testid="new-booking-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot create bookings" : "Create new booking"}
           >
             <Plus size={20} />
             New Booking
@@ -1709,22 +1715,25 @@ export default function Bookings() {
                             <>
                               <Button size="sm" variant="outline"
                                 onClick={() => openCheckInDialog(booking)}
-                                disabled={!canCheckInToday(booking)}
+                                disabled={!canCheckInToday(booking) || isViewer}
                                 className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title={!canCheckInToday(booking) ? `Check-in available from ${new Date(booking.check_in_date).toLocaleDateString('en-IN')}` : 'Check In'}
+                                title={isViewer ? "Viewers cannot check in guests" : (!canCheckInToday(booking) ? `Check-in available from ${new Date(booking.check_in_date).toLocaleDateString('en-IN')}` : 'Check In')}
                                 data-testid={`checkin-btn-${booking.id}`}>
                                 <SignIn size={16} className="mr-1" />Check In
                               </Button>
                               <Button size="sm" variant="outline"
                                 onClick={() => handleOpenAmend(booking)}
                                 className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                                title="Amend booking (dates, rooms, party)"
+                                disabled={isViewer}
+                                title={isViewer ? "Viewers cannot amend bookings" : "Amend booking (dates, rooms, party)"}
                                 data-testid={`amend-btn-${booking.id}`}>
                                 <NotePencil size={16} className="mr-1" />Amend
                               </Button>
                               <Button size="sm" variant="outline"
                                 onClick={() => openCancelDialog(booking)}
                                 className="text-red-600 border-red-200 hover:bg-red-50"
+                                disabled={isViewer}
+                                title={isViewer ? "Viewers cannot cancel bookings" : "Cancel booking"}
                                 data-testid={`cancel-btn-${booking.id}`}>
                                 <X size={16} />
                               </Button>
@@ -1735,6 +1744,8 @@ export default function Bookings() {
                               <Button size="sm" variant="outline"
                                 onClick={() => { setSelectedBooking(booking); setShowCheckOut(true); }}
                                 className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                disabled={isViewer}
+                                title={isViewer ? "Viewers cannot check out guests" : "Check out"}
                                 data-testid={`checkout-btn-${booking.id}`}>
                                 <SignOut size={16} className="mr-1" />Check Out
                               </Button>
@@ -1751,6 +1762,8 @@ export default function Bookings() {
                               <Button size="sm" variant="outline"
                                 onClick={() => openCancelDialog(booking)}
                                 className="text-red-600 border-red-200 hover:bg-red-50"
+                                disabled={isViewer}
+                                title={isViewer ? "Viewers cannot cancel bookings" : "Cancel booking"}
                                 data-testid={`cancel-btn-${booking.id}`}>
                                 <X size={16} />
                               </Button>
