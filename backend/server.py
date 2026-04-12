@@ -3789,5 +3789,56 @@ async def delete_migration_archive():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============= TEMPORARY SEED ENDPOINT (DELETE AFTER CREATING ADMIN) =============
+@api_router.post("/seed/create-first-admin")
+async def create_first_admin_endpoint():
+    """
+    TEMPORARY ENDPOINT - DELETE AFTER USE
+    Creates the first admin user for authentication system.
+    This endpoint should be removed after creating the admin user for security.
+    """
+    try:
+        # Check if any admin user already exists
+        existing_admin = await db.users.find_one({"role": "admin"}, {"_id": 0})
+        
+        if existing_admin:
+            return {
+                "success": False,
+                "message": "Admin user already exists",
+                "username": existing_admin.get("username") or existing_admin.get("email"),
+                "created_at": existing_admin.get("created_at")
+            }
+        
+        # Create first admin user
+        admin_user = {
+            "id": str(uuid.uuid4()),
+            "username": "admin",
+            "email": "admin",
+            "password_hash": hash_password("Admin@2026!"),
+            "name": "System Administrator",
+            "role": "admin",
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_login": None
+        }
+        
+        # Insert into database
+        await db.users.insert_one(admin_user)
+        
+        logger.info("✅ First admin user created via seed endpoint")
+        
+        return {
+            "success": True,
+            "message": "Admin user created successfully!",
+            "username": "admin",
+            "password": "Admin@2026!",
+            "warning": "⚠️ DELETE THIS ENDPOINT IMMEDIATELY AFTER USE for security!"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error creating admin user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create admin user: {str(e)}")
+
+
 # ============= INCLUDE ROUTER (MUST BE AFTER ALL ROUTES) =============
 app.include_router(api_router)
