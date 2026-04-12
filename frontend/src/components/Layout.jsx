@@ -21,19 +21,6 @@ import axios from "axios";
 import { API } from "@/App";
 import { useAuth } from "@/contexts/AuthContext";
 
-const navItems = [
-  { path: "/app/dashboard", icon: House, label: "Dashboard" },
-  { path: "/app/bookings", icon: CalendarCheck, label: "Bookings" },
-  { path: "/app/rooms", icon: Bed, label: "Rooms" },
-  { path: "/app/staff", icon: Users, label: "Staff" },
-  { path: "/app/toiletry", icon: Package, label: "Toiletry" },
-  { path: "/app/feedback", icon: Star, label: "Feedback", dynamic: true },
-  { path: "/app/reports", icon: ChartBar, label: "Reports" },
-  { path: "/app/users", icon: UsersThree, label: "User Management", adminOnly: true },
-  { path: "/app/backup-restore", icon: Database, label: "Backup & Restore", adminOnly: true },
-  { path: "/app/settings", icon: Gear, label: "Settings", adminOnly: true },
-];
-
 const DEFAULT_FMN_1 = "https://images.unsplash.com/photo-1765555648802-53235276a40b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85&w=100";
 const DEFAULT_FMN_2 = "https://images.unsplash.com/photo-1771456915291-58f0dee5b404?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwxfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85&w=100";
 
@@ -41,19 +28,35 @@ export default function Layout({ settings }) {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [feedbackScore, setFeedbackScore] = useState(null);
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, loading: authLoading } = useAuth();
+  const [navItems, setNavItems] = useState([]);
 
   const fmnSign1 = settings?.fmn_sign_1_url || DEFAULT_FMN_1;
   const fmnSign2 = settings?.fmn_sign_2_url || DEFAULT_FMN_2;
   
-  // Filter nav items based on user role
-  const filteredNavItems = navItems.filter(item => {
-    // Hide admin-only routes for non-admins
-    if (item.adminOnly && !isAdmin()) {
-      return false;
+  // Update nav items when user changes
+  useEffect(() => {
+    const allNavItems = [
+      { path: "/app/dashboard", icon: House, label: "Dashboard" },
+      { path: "/app/bookings", icon: CalendarCheck, label: "Bookings" },
+      { path: "/app/rooms", icon: Bed, label: "Rooms" },
+      { path: "/app/staff", icon: Users, label: "Staff" },
+      { path: "/app/toiletry", icon: Package, label: "Toiletry" },
+      { path: "/app/feedback", icon: Star, label: "Feedback", dynamic: true },
+      { path: "/app/reports", icon: ChartBar, label: "Reports" },
+    ];
+    
+    // Only add admin items if user is admin
+    if (user && user.role === 'admin') {
+      allNavItems.push(
+        { path: "/app/users", icon: UsersThree, label: "User Management", adminOnly: true },
+        { path: "/app/backup-restore", icon: Database, label: "Backup & Restore", adminOnly: true },
+        { path: "/app/settings", icon: Gear, label: "Settings", adminOnly: true }
+      );
     }
-    return true;
-  });
+    
+    setNavItems(allNavItems);
+  }, [user]);
 
   useEffect(() => {
     axios.get(`${API}/feedback/analysis`).then((res) => {

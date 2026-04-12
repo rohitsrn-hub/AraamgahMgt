@@ -206,11 +206,32 @@ function AppContent() {
             <Route path="rooms" element={<Rooms />} />
             <Route path="staff" element={<Staff />} />
             <Route path="toiletry" element={<Toiletry />} />
-            <Route path="settings" element={<Settings settings={settings} onUpdate={fetchSettings} />} />
-            <Route path="users" element={<UserManagement />} />
+            <Route
+              path="users"
+              element={
+                <ProtectedRoute roles="admin">
+                  <UserManagement />
+                </ProtectedRoute>
+              }
+            />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="reports" element={<ReportsPage settings={settings} />} />
-            <Route path="backup-restore" element={<BackupRestore />} />
+            <Route
+              path="settings"
+              element={
+                <ProtectedRoute roles="admin">
+                  <Settings settings={settings} onUpdate={fetchSettings} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="backup-restore"
+              element={
+                <ProtectedRoute roles="admin">
+                  <BackupRestore />
+                </ProtectedRoute>
+              }
+            />
           </Route>
           
           {/* Direct routes (for backward compatibility) - All Protected */}
@@ -283,6 +304,16 @@ function AppContent() {
             }
           >
             <Route index element={<Toiletry />} />
+          </Route>
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute roles="admin">
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<UserManagement />} />
           </Route>
           <Route
             path="/settings"
