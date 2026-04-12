@@ -42,6 +42,8 @@
 
 **API Endpoints in `server.py`:**
 - `POST /api/auth/login` - Login (returns token and user info)
+  - **IMPORTANT**: Search for user by `username` OR `email` using MongoDB `$or` operator
+  - Allows login with either username or email address
 - `GET /api/users` - List users (Admin only)
 - `POST /api/users` - Create user (Admin only)
 - `PUT /api/users/{user_id}` - Update user (Admin only)
@@ -107,14 +109,12 @@ In main feature pages (Dashboard, Bookings, etc.):
 - Get `const { user } = useAuth();`
 - Check `const isViewer = user?.role === 'viewer';`
 - Disable these buttons for viewers:
-  - New Booking
-  - Check In
-  - Check Out  
-  - Cancel Booking
-  - Amend Booking
+  - **Dashboard page**: New Booking, Check In, Check Out, Cancel
+  - **Bookings page**: New Booking, Check In, Check Out, Cancel, Amend
   - Any other modification actions
 - Add `disabled={isViewer}` prop
 - Add `title={isViewer ? "Viewers cannot perform this action" : "Normal tooltip"}` for tooltips
+- Add disabled styling: `disabled:opacity-50 disabled:cursor-not-allowed`
 
 **Backend Protection:**
 - All mutation endpoints (POST/PUT/DELETE) require authentication
@@ -152,11 +152,13 @@ In main feature pages (Dashboard, Bookings, etc.):
 - Password visibility toggle (eye icon)
 - Clear error messages
 - Loading state while authenticating
+- **No default credentials displayed** (security)
 
 **User Management:**
 - Admin can see all usernames clearly
 - Password reset with one-click generation
 - Copy password to clipboard
+- Password visibility toggle in create and reset forms
 - Warning: "Passwords shown only once - copy before closing"
 - Visual role indicators (badges for Admin/Staff/Viewer)
 
@@ -324,16 +326,20 @@ Run: `python /app/backend/scripts/create_admin.py`
 
 Implementation is complete when:
 - ✅ Login page shows on app visit (unauthenticated users)
+- ✅ **Can login with BOTH username and email** (either format works)
+- ✅ **No default credentials shown on login page** (security)
 - ✅ Admin can login and access everything
 - ✅ Staff can login, redirects to Command Center, hides User Mgmt/Settings
-- ✅ Viewer can login, redirects to Dashboard, all action buttons disabled
+- ✅ Viewer can login, redirects to Dashboard, **all action buttons disabled on Dashboard AND feature pages**
 - ✅ Admin can create/reset/delete users
 - ✅ Password reset with generate/copy functionality works
+- ✅ **Password visibility toggle works in login, create, and reset forms**
 - ✅ All API endpoints require authentication
 - ✅ Logout clears session and redirects to login
 - ✅ Token persists across page refreshes
 - ✅ 401 errors automatically redirect to login
 - ✅ All existing app features work with authentication
+- ✅ Backup warnings show accurate time (if applicable)
 
 ---
 
@@ -345,6 +351,10 @@ Implementation is complete when:
 4. **Change default password** immediately after first login
 5. **Inform users** before deploying to production
 6. **Keep credentials document updated** in `/app/memory/test_credentials.md`
+7. **Login must accept username OR email** - use `$or` operator in login endpoint
+8. **Dashboard AND all feature pages** must disable viewer buttons - check every action button
+9. **No default credentials on login page** - remove any "test credentials" text for security
+10. **Backup warnings** should calculate from fresh history, not cached status
 
 ---
 
@@ -359,7 +369,9 @@ Use this to track progress:
 - [ ] Add JWT env variables to .env
 - [ ] Create runtime.txt (Python 3.11.9)
 - [ ] Add auth endpoints to server.py
+- [ ] **CRITICAL**: Login endpoint uses `$or` to search username OR email
 - [ ] Protect existing endpoints with authentication
+- [ ] Add password reset endpoint
 - [ ] Create admin seed script
 - [ ] Test all endpoints with Postman/curl
 
@@ -367,17 +379,23 @@ Use this to track progress:
 - [ ] Create AuthContext with login/logout
 - [ ] Create ProtectedRoute component
 - [ ] Create Login page with password toggle
+- [ ] **CRITICAL**: Remove any default credentials text from login page
 - [ ] Create UserManagement page with reset/generate
+- [ ] Add password visibility toggle to create and reset forms
 - [ ] Update App.js (AuthProvider, interceptors, route protection)
 - [ ] Update Layout (logout button, RBAC sidebar)
-- [ ] Update feature pages (disable viewer buttons)
+- [ ] **CRITICAL**: Update Dashboard - disable all action buttons for viewer
+- [ ] **CRITICAL**: Update all feature pages - disable all action buttons for viewer
 - [ ] Test all user flows (Admin/Staff/Viewer)
+- [ ] Verify backup warnings show accurate time (if applicable)
 
 **Deployment:**
 - [ ] Push to testing branch
 - [ ] Add JWT env variables to Render test service
 - [ ] Create admin user in test database
 - [ ] Test preview deployment thoroughly
+- [ ] Verify login works with username AND email
+- [ ] Verify viewer restrictions on Dashboard and all feature pages
 - [ ] Merge to main branch
 - [ ] Add JWT env variables to Render production
 - [ ] Create admin user in production database
@@ -388,8 +406,17 @@ Use this to track progress:
 
 ---
 
-**IMPORTANT: Follow this prompt step-by-step. This is a proven implementation that works. Don't skip steps or take shortcuts - they will cause authentication failures, bcrypt errors, or CORS issues.**
+**IMPORTANT: Follow this prompt step-by-step. This is a proven implementation that works. Don't skip steps or take shortcuts - they will cause authentication failures, bcrypt errors, CORS issues, or incomplete viewer restrictions.**
 
 ---
 
+**Recent improvements in this version:**
+- ✅ Login accepts username OR email (MongoDB `$or` operator)
+- ✅ Dashboard viewer restrictions added
+- ✅ No default credentials on login page (security)
+- ✅ Backup warning accuracy fix (calculate from fresh history)
+- ✅ Password visibility toggles in all forms
+- ✅ Comprehensive testing checklist
+
 **Good luck! This implementation took multiple iterations to perfect, so following this prompt will save you significant time and debugging.**
+
