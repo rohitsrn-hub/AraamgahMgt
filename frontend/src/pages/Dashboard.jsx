@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API } from "@/App";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,9 @@ const getRoomCategories = (booking) => {
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth(); // Get current user for role-based permissions
+  const isViewer = user?.role === 'viewer'; // Check if user is viewer
+  
   const [occupancy, setOccupancy] = useState(null);
   const [bookings, setBookings] = useState({ today: [], upcoming: [] });
   const [analytics, setAnalytics] = useState(null);
@@ -379,8 +383,10 @@ export default function Dashboard() {
           {/* New Booking - Prominent */}
           <Button 
             onClick={() => navigate('/bookings?action=new')}
-            className="col-span-2 sm:col-span-1 h-16 px-6 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transform transition-all hover:scale-105"
+            className="col-span-2 sm:col-span-1 h-16 px-6 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transform transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             data-testid="new-booking-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot create bookings" : "Create new booking"}
           >
             <CalendarCheck size={24} weight="fill" />
             <span className="text-base">New Booking</span>
@@ -388,8 +394,10 @@ export default function Dashboard() {
           
           <Button 
             onClick={() => setShowBookingSelectionAction("checkin")}
-            className="h-16 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
+            className="h-16 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="quick-checkin-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot check in guests" : "Check in guest"}
           >
             <SignIn size={22} />
             <span>Check In</span>
@@ -397,8 +405,10 @@ export default function Dashboard() {
           
           <Button 
             onClick={() => setShowBookingSelectionAction("checkout")}
-            className="h-16 px-5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
+            className="h-16 px-5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="quick-checkout-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot check out guests" : "Check out guest"}
           >
             <SignOut size={22} />
             <span>Check Out</span>
@@ -406,8 +416,10 @@ export default function Dashboard() {
           
           <Button 
             onClick={() => setShowCancelModal(true)}
-            className="h-16 px-5 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
+            className="h-16 px-5 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="cancel-booking-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot cancel bookings" : "Cancel booking"}
           >
             <X size={22} />
             <span>Cancel</span>
