@@ -79,14 +79,43 @@ function AppContent() {
 
   const checkBackupStatus = async () => {
     try {
-      const response = await axios.get(`${API}/backups/status`);
-      const warning = response.data?.missed_backup_warning;
+      // Fetch backup history instead of status to avoid stale cache
+      const historyResponse = await axios.get(`${API}/backups/history`);
+      const backups = historyResponse.data || [];
       
-      if (warning?.missed) {
-        setBackupWarning(warning);
+      if (backups.length === 0) {
+        // No backups exist
+        setBackupWarning({
+          missed: true,
+          message: "No backups found. Create your first backup now!",
+          hours_since: null
+        });
+        setShowBackupModal(true);
+        return;
+      }
+      
+      // Sort backups by timestamp (most recent first) to ensure we get the latest
+      const sortedBackups = [...backups].sort((a, b) => {
+        const timeA = new Date(a.backup_metadata?.timestamp || a.timestamp).getTime();
+        const timeB = new Date(b.backup_metadata?.timestamp || b.timestamp).getTime();
+        return timeB - timeA;
+      });
+      
+      const lastBackup = sortedBackups[0];
+      const lastBackupTime = new Date(lastBackup.backup_metadata?.timestamp || lastBackup.timestamp);
+      const now = new Date();
+      const hoursSince = (now - lastBackupTime) / (1000 * 60 * 60);
+      
+      // Show warning if last backup is older than 24 hours
+      if (hoursSince > 24) {
+        setBackupWarning({
+          missed: true,
+          message: `Last backup was ${hoursSince.toFixed(1)} hours ago`,
+          hours_since: hoursSince
+        });
         setShowBackupModal(true);
       } else {
-        // Clear warnings if backup is no longer missed
+        // Clear warnings if backup is recent
         setBackupWarning(null);
         setBackupBannerDismissed(false);
       }
