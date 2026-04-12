@@ -3050,8 +3050,15 @@ export default function Bookings() {
                       onClick={() => {
                         const totalInput = document.getElementById('calculated-total');
                         const totalDue = totalInput ? parseFloat(totalInput.value) : 0;
-                        setActionForm({...actionForm, final_payment: totalDue});
-                        toast.success(`Amount confirmed: ₹${totalDue}`);
+                        
+                        // If total is 0, set payment mode to Cash automatically to enable proceed button
+                        if (totalDue === 0) {
+                          setActionForm({...actionForm, final_payment: totalDue, payment_mode: 'Cash'});
+                          toast.success(`Amount confirmed: ₹0 - No payment required`);
+                        } else {
+                          setActionForm({...actionForm, final_payment: totalDue});
+                          toast.success(`Amount confirmed: ₹${totalDue}`);
+                        }
                       }}
                       className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
                     >
@@ -3089,10 +3096,19 @@ export default function Bookings() {
                   <p className="text-xs text-slate-500 mt-1">
                     Click "Confirm Amount" to auto-fill calculated total, or "Amend Amount" to edit manually
                   </p>
+                  {actionForm.final_payment === 0 && (
+                    <p className="text-xs text-green-600 font-medium mt-1">
+                      ✓ No payment required - Click "Proceed to Feedback" after confirming amount
+                    </p>
+                  )}
                 </div>
                 <div>
-                  <Label>Payment Mode *</Label>
-                  <Select value={actionForm.payment_mode} onValueChange={(v) => setActionForm({...actionForm, payment_mode: v, payment_id: ""})}>
+                  <Label>Payment Mode {actionForm.final_payment === 0 ? '' : '*'}</Label>
+                  <Select 
+                    value={actionForm.payment_mode} 
+                    onValueChange={(v) => setActionForm({...actionForm, payment_mode: v, payment_id: ""})}
+                    disabled={actionForm.final_payment === 0}
+                  >
                     <SelectTrigger className="earms-input mt-1" data-testid="select-payment-mode-checkout">
                       <SelectValue placeholder="Mode" />
                     </SelectTrigger>
@@ -3103,6 +3119,9 @@ export default function Bookings() {
                       <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                     </SelectContent>
                   </Select>
+                  {actionForm.final_payment === 0 && (
+                    <p className="text-xs text-slate-500 mt-1">Auto-set to Cash for zero payment</p>
+                  )}
                 </div>
               </div>
 
@@ -3295,12 +3314,17 @@ export default function Bookings() {
               className="bg-blue-500 hover:bg-blue-600" 
               data-testid="confirm-checkout"
               disabled={(() => {
-                // Basic validation
-                if (!actionForm.payment_mode || !actionForm.final_payment || actionForm.final_payment === 0) {
+                // If final payment is 0, only require payment mode to be set (any mode is acceptable for zero payment)
+                if (actionForm.final_payment === 0) {
+                  return !actionForm.payment_mode;
+                }
+                
+                // Basic validation for non-zero payments
+                if (!actionForm.payment_mode || !actionForm.final_payment) {
                   return true;
                 }
                 
-                // Mode-specific validation
+                // Mode-specific validation for non-zero payments
                 if (actionForm.payment_mode === "UPI") {
                   // Require transaction ID for UPI
                   return !actionForm.payment_id || actionForm.payment_id.trim() === "";
