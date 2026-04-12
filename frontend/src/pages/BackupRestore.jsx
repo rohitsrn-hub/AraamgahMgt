@@ -102,6 +102,10 @@ export default function BackupRestore() {
       });
       
       setHistory(sortedBackups);
+      
+      // After setting history, re-fetch status to update warnings
+      // This ensures warnings are calculated based on latest backup
+      await fetchBackupStatus();
     } catch (error) {
       console.error("Error fetching backup history:", error);
     }
@@ -216,9 +220,33 @@ export default function BackupRestore() {
     );
   }
 
-  // Compute last backup: Use API response OR fallback to first item in sorted history
-  const lastBackup = status?.last_backup || (history.length > 0 ? history[0] : null);
-  const missedWarning = status?.missed_backup_warning;
+  // ALWAYS use sorted history as source of truth for last backup
+  // This prevents stale data from status API
+  const lastBackup = history.length > 0 ? history[0] : status?.last_backup;
+  
+  // Recalculate missed warning based on actual last backup from history
+  let missedWarning = status?.missed_backup_warning;
+  
+  if (lastBackup?.timestamp) {
+    try {
+      const lastTime = new Date(lastBackup.timestamp);
+      const now = new Date();
+      const hoursSince = (now - lastTime) / (1000 * 60 * 60);
+      const missed = hoursSince > 26;
+      
+      // Override backend warning with client-side calculation
+      missedWarning = {
+        missed,
+        hours_since_last: Math.round(hoursSince * 10) / 10,
+        message: missed 
+          ? `Last backup was ${Math.round(hoursSince * 10) / 10} hours ago`
+          : "Backup is up to date"
+      };
+    } catch (e) {
+      // Fallback to backend warning if calculation fails
+      console.error("Error calculating backup warning:", e);
+    }
+  }
 
   return (
     <div className="space-y-6 p-6">
