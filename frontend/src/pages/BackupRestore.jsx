@@ -91,7 +91,17 @@ export default function BackupRestore() {
   const fetchBackupHistory = async () => {
     try {
       const res = await axios.get(`${API}/backups/history?limit=20`);
-      setHistory(res.data.backups || []);
+      const backups = res.data.backups || [];
+      
+      // CLIENT-SIDE SORT: Ensure backups are sorted by timestamp descending
+      // This handles edge cases where backend sorting might fail
+      const sortedBackups = backups.sort((a, b) => {
+        const dateA = new Date(a.timestamp);
+        const dateB = new Date(b.timestamp);
+        return dateB - dateA; // Descending order (newest first)
+      });
+      
+      setHistory(sortedBackups);
     } catch (error) {
       console.error("Error fetching backup history:", error);
     }
@@ -206,7 +216,8 @@ export default function BackupRestore() {
     );
   }
 
-  const lastBackup = status?.last_backup;
+  // Compute last backup: Use API response OR fallback to first item in sorted history
+  const lastBackup = status?.last_backup || (history.length > 0 ? history[0] : null);
   const missedWarning = status?.missed_backup_warning;
 
   return (
