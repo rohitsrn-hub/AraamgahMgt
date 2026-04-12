@@ -18,6 +18,7 @@ import Settings from "@/pages/Settings";
 import FeedbackPage from "@/pages/FeedbackPage";
 import ReportsPage from "@/pages/ReportsPage";
 import BackupRestore from "@/pages/BackupRestore";
+import UserManagement from "@/pages/UserManagement";
 import BackupWarningModal from "@/components/BackupWarningModal";
 import Layout from "@/components/Layout";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -206,6 +207,7 @@ function AppContent() {
             <Route path="staff" element={<Staff />} />
             <Route path="toiletry" element={<Toiletry />} />
             <Route path="settings" element={<Settings settings={settings} onUpdate={fetchSettings} />} />
+            <Route path="users" element={<UserManagement />} />
             <Route path="feedback" element={<FeedbackPage />} />
             <Route path="reports" element={<ReportsPage settings={settings} />} />
             <Route path="backup-restore" element={<BackupRestore />} />

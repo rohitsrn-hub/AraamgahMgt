@@ -11,11 +11,15 @@ import {
   List,
   Star,
   ChartBar,
-  Database
+  Database,
+  SignOut,
+  UserCircle,
+  UsersThree
 } from "@phosphor-icons/react";
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API } from "@/App";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
   { path: "/app/dashboard", icon: House, label: "Dashboard" },
@@ -25,8 +29,9 @@ const navItems = [
   { path: "/app/toiletry", icon: Package, label: "Toiletry" },
   { path: "/app/feedback", icon: Star, label: "Feedback", dynamic: true },
   { path: "/app/reports", icon: ChartBar, label: "Reports" },
-  { path: "/app/backup-restore", icon: Database, label: "Backup & Restore" },
-  { path: "/app/settings", icon: Gear, label: "Settings" },
+  { path: "/app/users", icon: UsersThree, label: "User Management", adminOnly: true },
+  { path: "/app/backup-restore", icon: Database, label: "Backup & Restore", adminOnly: true },
+  { path: "/app/settings", icon: Gear, label: "Settings", adminOnly: true },
 ];
 
 const DEFAULT_FMN_1 = "https://images.unsplash.com/photo-1765555648802-53235276a40b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85&w=100";
@@ -36,9 +41,19 @@ export default function Layout({ settings }) {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [feedbackScore, setFeedbackScore] = useState(null);
+  const { user, logout, isAdmin } = useAuth();
 
   const fmnSign1 = settings?.fmn_sign_1_url || DEFAULT_FMN_1;
   const fmnSign2 = settings?.fmn_sign_2_url || DEFAULT_FMN_2;
+  
+  // Filter nav items based on user role
+  const filteredNavItems = navItems.filter(item => {
+    // Hide admin-only routes for non-admins
+    if (item.adminOnly && !isAdmin()) {
+      return false;
+    }
+    return true;
+  });
 
   useEffect(() => {
     axios.get(`${API}/feedback/analysis`).then((res) => {
@@ -117,9 +132,24 @@ export default function Layout({ settings }) {
             </p>
           </div>
 
-          {/* Right - Empty spacer for balance */}
-          <div className="flex items-center w-12 md:w-14">
-            {/* Removed formation signs */}
+          {/* Right - User menu with logout */}
+          <div className="flex items-center gap-2">
+            <div className="hidden md:flex items-center gap-2 mr-2">
+              <UserCircle size={24} className="text-slate-600" />
+              <div className="text-right">
+                <p className="text-sm font-medium text-slate-700">{user?.name}</p>
+                <p className="text-xs text-slate-500">{user?.role}</p>
+              </div>
+            </div>
+            <Button
+              onClick={logout}
+              variant="ghost"
+              size="sm"
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+            >
+              <SignOut size={20} className="md:mr-1" />
+              <span className="hidden md:inline">Logout</span>
+            </Button>
           </div>
         </div>
       </header>
