@@ -181,11 +181,25 @@ function AppContent() {
           {/* Login Route (Public) */}
           <Route path="/login" element={<Login />} />
           
-          {/* Command Center as main landing */}
-          <Route path="/" element={<CommandCenter />} />
+          {/* Command Center and App Routes - Require Authentication */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <CommandCenter />
+              </ProtectedRoute>
+            }
+          />
           
-          {/* App routes with layout */}
-          <Route path="/app" element={<Layout settings={settings} />}>
+          {/* App routes with layout - Protected */}
+          <Route
+            path="/app"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="bookings" element={<Bookings />} />
             <Route path="rooms" element={<Rooms />} />
@@ -197,32 +211,95 @@ function AppContent() {
             <Route path="backup-restore" element={<BackupRestore />} />
           </Route>
           
-          {/* Direct routes (for backward compatibility) */}
-          <Route path="/dashboard" element={<Layout settings={settings} />}>
+          {/* Direct routes (for backward compatibility) - All Protected */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Dashboard />} />
           </Route>
-          <Route path="/bookings" element={<Layout settings={settings} />}>
+          <Route
+            path="/bookings"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Bookings />} />
           </Route>
-          <Route path="/feedback" element={<Layout settings={settings} />}>
+          <Route
+            path="/feedback"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<FeedbackPage />} />
           </Route>
-          <Route path="/reports" element={<Layout settings={settings} />}>
+          <Route
+            path="/reports"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<ReportsPage settings={settings} />} />
           </Route>
-          <Route path="/rooms" element={<Layout settings={settings} />}>
+          <Route
+            path="/rooms"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Rooms />} />
           </Route>
-          <Route path="/staff" element={<Layout settings={settings} />}>
+          <Route
+            path="/staff"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Staff />} />
           </Route>
-          <Route path="/toiletry" element={<Layout settings={settings} />}>
+          <Route
+            path="/toiletry"
+            element={
+              <ProtectedRoute>
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Toiletry />} />
           </Route>
-          <Route path="/settings" element={<Layout settings={settings} />}>
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute roles="admin">
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<Settings settings={settings} onUpdate={fetchSettings} />} />
           </Route>
-          <Route path="/backup-restore" element={<Layout settings={settings} />}>
+          <Route
+            path="/backup-restore"
+            element={
+              <ProtectedRoute roles="admin">
+                <Layout settings={settings} />
+              </ProtectedRoute>
+            }
+          >
             <Route index element={<BackupRestore />} />
           </Route>
           
