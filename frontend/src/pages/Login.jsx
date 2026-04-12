@@ -152,12 +152,6 @@ const Login = () => {
               )}
             </button>
           </form>
-
-          {/* Footer */}
-          <div className="mt-6 text-center text-sm text-gray-600">
-            <p>Default credentials for testing:</p>
-            <p className="font-mono text-xs mt-1">admin@sarai.local / Admin@2026!</p>
-          </div>
         </div>
 
         {/* Version Info */}
