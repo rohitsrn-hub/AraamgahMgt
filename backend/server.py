@@ -688,8 +688,16 @@ async def login(credentials: UserLogin):
     
     Returns JWT access token on successful authentication
     """
-    # Find user by email
-    user = await db.users.find_one({"email": credentials.email.lower()}, {"_id": 0})
+    # Find user by username OR email (case-insensitive)
+    user = await db.users.find_one(
+        {
+            "$or": [
+                {"username": credentials.email.lower()},
+                {"email": credentials.email.lower()}
+            ]
+        }, 
+        {"_id": 0}
+    )
     
     if not user:
         raise HTTPException(
