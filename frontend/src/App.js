@@ -54,6 +54,7 @@ axios.interceptors.response.use(
 // Main app content component (needs useNavigate hook)
 function AppContent() {
   const navigate = useNavigate();
+  const { isAuthenticated, loading: authLoading } = require('@/contexts/AuthContext').useAuth();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [backupWarning, setBackupWarning] = useState(null);
@@ -66,6 +67,11 @@ function AppContent() {
       setSettings(response.data);
     } catch (e) {
       console.error("Error fetching settings:", e);
+      // If settings fetch fails due to 401, it will be handled by axios interceptor
+      // Set default empty settings to avoid infinite loading
+      if (e.response?.status === 401) {
+        setSettings({ is_setup_complete: false });
+      }
     } finally {
       setLoading(false);
     }
@@ -97,8 +103,13 @@ function AppContent() {
   };
 
   useEffect(() => {
-    fetchSettings();
-    checkBackupStatus();
+    // Only fetch settings and check backup if user is authenticated
+    if (isAuthenticated()) {
+      fetchSettings();
+      checkBackupStatus();
+    } else {
+      setLoading(false);
+    }
 
     // Listen for backup completion to clear warnings
     const handleBackupCompleted = () => {
@@ -113,20 +124,33 @@ function AppContent() {
     return () => {
       window.removeEventListener('backupCompleted', handleBackupCompleted);
     };
-  }, []);
+  }, [isAuthenticated]);
 
-  if (loading) {
+  // Show loading while auth is initializing
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50" data-testid="loading-screen">
         <div className="text-center">
           <div className="spinner mx-auto mb-4"></div>
-          <p className="text-slate-600 font-medium">Loading E-ARMS...</p>
+          <p className="text-slate-600 font-medium">Loading SARAI...</p>
         </div>
       </div>
     );
   }
 
-  // Show setup wizard if not configured
+  // If not authenticated, show login page (don't check setup)
+  if (!isAuthenticated()) {
+    return (
+      <>
+        <Routes>
+          <Route path="*" element={<Login />} />
+        </Routes>
+        <Toaster position="top-right" richColors />
+      </>
+    );
+  }
+
+  // User is authenticated - now check setup
   if (!settings?.is_setup_complete) {
     return (
       <>
