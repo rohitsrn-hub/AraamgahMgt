@@ -694,14 +694,14 @@ async def login(credentials: UserLogin):
     if not user:
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="Invalid username or password"
         )
     
     # Verify password
     if not verify_password(credentials.password, user["password_hash"]):
         raise HTTPException(
             status_code=401,
-            detail="Invalid email or password"
+            detail="Invalid username or password"
         )
     
     # Check if user is active
@@ -785,18 +785,18 @@ async def create_user(
     # Validate role
     user_data.validate_role()
     
-    # Check if email already exists
-    existing = await db.users.find_one({"email": user_data.email.lower()}, {"_id": 0})
+    # Check if username already exists
+    existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(
             status_code=400,
-            detail="Email already registered"
+            detail="Username already exists"
         )
     
     # Create user
     new_user = User(
         id=str(uuid.uuid4()),
-        email=user_data.email.lower(),
+        email=user_data.email,  # Username
         password_hash=hash_password(user_data.password),
         name=user_data.name,
         role=user_data.role,

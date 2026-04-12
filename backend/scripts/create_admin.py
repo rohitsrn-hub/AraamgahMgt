@@ -56,13 +56,13 @@ async def create_first_admin():
         return
     
     # Create first admin user
-    admin_email = "admin@sarai.local"
+    admin_email = "admin"
     admin_password = "Admin@2026!"
     admin_name = "System Administrator"
     
     admin_user = {
         "id": str(uuid.uuid4()),
-        "email": admin_email,
+        "email": admin_email,  # Username (not necessarily email)
         "password_hash": hash_password(admin_password),
         "name": admin_name,
         "role": "admin",
