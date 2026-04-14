@@ -14,10 +14,10 @@ class AppSettings(BaseModel):
     is_setup_complete: bool = False
     fmn_sign_1_url: Optional[str] = None
     fmn_sign_2_url: Optional[str] = None
-    cat_i_rate: float = 500.0
-    cat_ii_rate: float = 400.0
-    def_civ_cat_i_rate: float = 600.0
-    def_civ_cat_ii_rate: float = 600.0
+    cat_i_rate: float = 500.0  # Org Cat I rate
+    cat_ii_rate: float = 400.0  # Org Cat II rate
+    def_civ_cat_i_rate: float = 600.0  # Non-Org Cat I rate
+    def_civ_cat_ii_rate: float = 600.0  # Non-Org Cat II rate
     cat_i_room_rent: float = 470.0
     cat_i_license_fee: float = 30.0
     cat_ii_room_rent: float = 385.0
@@ -28,7 +28,7 @@ class AppSettings(BaseModel):
     non_org_license_fee: float = 30.0
     cat_i_rooms_count: int = 6
     cat_ii_rooms_count: int = 9
-    default_advance_amount: float = 400.0
+    default_advance_amount: float = 400.0  # Fixed advance for all bookings
     colors: List[str] = Field(default_factory=lambda: COLOR_OPTIONS.copy())
     cancellation_policy: List[dict] = Field(default_factory=lambda: [
         {"hours_before": 96, "charge_percent": 0},
@@ -41,8 +41,8 @@ class AppSettings(BaseModel):
         {
             "id": "cat-i",
             "name": "Cat I",
-            "rate": 500.0,
-            "def_civ_rate": 600.0,
+            "rate": 500.0,  # Org Cat I rate
+            "def_civ_rate": 600.0,  # Non-Org Cat I rate
             "room_count": 6,
             "prefix": "C1",
             "capacity": 2
@@ -50,8 +50,8 @@ class AppSettings(BaseModel):
         {
             "id": "cat-ii",
             "name": "Cat II",
-            "rate": 400.0,
-            "def_civ_rate": 600.0,
+            "rate": 400.0,  # Org Cat II rate
+            "def_civ_rate": 600.0,  # Non-Org Cat II rate
             "room_count": 9,
             "prefix": "C2",
             "capacity": 2
