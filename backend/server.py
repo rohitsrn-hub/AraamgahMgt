@@ -2151,34 +2151,38 @@ async def amend_booking(request: AmendBookingRequest):
         old_advance = booking.get("advance_paid", 0)
         
         if new_total > old_total:
-            # Increased cost - collect additional advance
+            # Increased cost - additional payment OPTIONAL (can collect later at checkout)
             additional_required = new_total - old_total
-            if request.additional_advance < additional_required:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Additional advance required: ₹{additional_required}. Provided: ₹{request.additional_advance}"
-                )
             
-            # Update advance paid (add the additional amount collected)
-            amendment_data["advance_paid"] = old_advance + request.additional_advance
-            
-            # Update payment details if provided
-            if request.payment_mode:
-                amendment_data["payment_mode"] = request.payment_mode
-            if request.payment_id:
-                amendment_data["payment_id"] = request.payment_id
-            if request.bank_name:
-                amendment_data["bank_name"] = request.bank_name
-            if request.bank_ifsc:
-                amendment_data["bank_ifsc"] = request.bank_ifsc.upper()
-            if request.bank_account:
-                amendment_data["bank_account"] = request.bank_account
-            if request.upi_id:
-                amendment_data["upi_id"] = request.upi_id
-            if request.upi_phone:
-                amendment_data["upi_phone"] = request.upi_phone
-            
-            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{request.additional_advance} collected)")
+            # If payment provided, validate and record it
+            if request.additional_advance > 0:
+                if request.additional_advance < additional_required:
+                    # Partial payment allowed
+                    pass
+                
+                # Update advance paid (add the additional amount collected)
+                amendment_data["advance_paid"] = old_advance + request.additional_advance
+                
+                # Update payment details if provided
+                if request.payment_mode:
+                    amendment_data["payment_mode"] = request.payment_mode
+                if request.payment_id:
+                    amendment_data["payment_id"] = request.payment_id
+                if request.bank_name:
+                    amendment_data["bank_name"] = request.bank_name
+                if request.bank_ifsc:
+                    amendment_data["bank_ifsc"] = request.bank_ifsc.upper()
+                if request.bank_account:
+                    amendment_data["bank_account"] = request.bank_account
+                if request.upi_id:
+                    amendment_data["upi_id"] = request.upi_id
+                if request.upi_phone:
+                    amendment_data["upi_phone"] = request.upi_phone
+                
+                changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{request.additional_advance} collected, ₹{additional_required - request.additional_advance} due at checkout)")
+            else:
+                # No payment collected now - will be collected at checkout
+                changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{additional_required} will be collected at checkout)")
         
         elif new_total < old_total:
             # Decreased cost - refund scenario
@@ -2723,7 +2727,16 @@ async def check_room_availability(
     check_out_date: str,
     category: Optional[RoomCategory] = None
 ):
-    """Check available rooms for given dates"""
+    """
+    Check available rooms for given dates
+    
+    Booking Time Logic:
+    - Check-in: 13:00 (1 PM) on check-in date
+    - Check-out: 08:00 (8 AM) on check-out date
+    - Room becomes available FROM check-out date for new bookings
+    
+    Example: Room booked Apr 16-17 → Available for new booking from Apr 17
+    """
     query = {}
     if category:
         query["category"] = category.value
@@ -2731,11 +2744,12 @@ async def check_room_availability(
     all_rooms = await db.rooms.find(query, {"_id": 0}).to_list(100)
     
     # Get bookings that overlap with requested dates
+    # Use $lt and $gt (not $lte/$gte) to allow same-day bookings
+    # If existing checkout = new checkin → NO conflict (guest leaves 08:00, new guest arrives 13:00)
     overlapping_bookings = await db.bookings.find({
         "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
-        "$or": [
-            {"check_in_date": {"$lte": check_out_date}, "check_out_date": {"$gte": check_in_date}}
-        ]
+        "check_in_date": {"$lt": check_out_date},
+        "check_out_date": {"$gt": check_in_date}
     }, {"_id": 0}).to_list(1000)
     
     booked_room_ids = set()

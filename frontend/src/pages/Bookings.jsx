@@ -3115,10 +3115,14 @@ export default function Bookings() {
                         const totalInput = document.getElementById('calculated-total');
                         const totalDue = totalInput ? parseFloat(totalInput.value) : 0;
                         
-                        // If total is 0, set payment mode to Cash automatically to enable proceed button
-                        if (totalDue === 0) {
+                        // If total is 0 or negative (refund), set payment mode to Cash automatically to enable proceed button
+                        if (totalDue <= 0) {
                           setActionForm({...actionForm, final_payment: totalDue, payment_mode: 'Cash'});
-                          toast.success(`Amount confirmed: ₹0 - No payment required`);
+                          if (totalDue === 0) {
+                            toast.success(`Amount confirmed: ₹0 - No payment required`);
+                          } else {
+                            toast.success(`Amount confirmed: Refund of ₹${Math.abs(totalDue)} due to guest`);
+                          }
                         } else {
                           setActionForm({...actionForm, final_payment: totalDue});
                           toast.success(`Amount confirmed: ₹${totalDue}`);
@@ -3162,7 +3166,12 @@ export default function Bookings() {
                   </p>
                   {actionForm.final_payment === 0 && (
                     <p className="text-xs text-green-600 font-medium mt-1">
-                      ✓ No payment required - Click "Proceed to Feedback" after confirming amount
+                      ✓ No payment required - "Proceed to Feedback" enabled
+                    </p>
+                  )}
+                  {actionForm.final_payment < 0 && (
+                    <p className="text-xs text-blue-600 font-medium mt-1">
+                      ℹ️ Refund of ₹{Math.abs(actionForm.final_payment)} due to guest - "Proceed to Feedback" enabled
                     </p>
                   )}
                 </div>
@@ -3378,17 +3387,17 @@ export default function Bookings() {
               className="bg-blue-500 hover:bg-blue-600" 
               data-testid="confirm-checkout"
               disabled={(() => {
-                // If final payment is 0, only require payment mode to be set (any mode is acceptable for zero payment)
-                if (actionForm.final_payment === 0) {
+                // If final payment is 0 or negative (refund), auto-enable after payment mode is set
+                if (actionForm.final_payment <= 0) {
                   return !actionForm.payment_mode;
                 }
                 
-                // Basic validation for non-zero payments
+                // Basic validation for positive payments
                 if (!actionForm.payment_mode || !actionForm.final_payment) {
                   return true;
                 }
                 
-                // Mode-specific validation for non-zero payments
+                // Mode-specific validation for positive payments
                 if (actionForm.payment_mode === "UPI") {
                   // Require transaction ID for UPI
                   return !actionForm.payment_id || actionForm.payment_id.trim() === "";
