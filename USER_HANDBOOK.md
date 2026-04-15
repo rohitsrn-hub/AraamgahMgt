@@ -1,8 +1,8 @@
 # 📖 SARAI User Handbook - Complete Guide
 ## Shillong Aramgah Room Automation Interface
 
-**Version**: 2.1 (Authentication Enabled)  
-**Last Updated**: April 2026
+**Version**: 2.2 (Enhanced Check-In/Out Logic)  
+**Last Updated**: April 15, 2026
 
 ---
 
@@ -312,21 +312,29 @@ For check-in today:
    - Staff member name (auto-selected or choose)
    - Actual check-in time (auto-filled with current time)
 
-4. **Extra Beds** (if needed):
-   - Select number of extra beds
-   - System calculates charges
+4. **Early Checkout Notification** (Optional but Important):
+   - **Ask guest**: "Are you planning to checkout earlier than {booked_checkout_date}?"
+   - **If YES**: Enter planned early checkout date
+   - **If NO**: Leave blank
+   - **Why this matters**:
+     - ✅ If informed at check-in → Guest charged only for actual days stayed
+     - ❌ If NOT informed at check-in → Guest charged for full booking amount (even if they leave early)
 
-5. **Advance Payment** (if not paid during booking):
+5. **Extra Beds** (if needed):
+   - Select number of extra beds
+   - System calculates charges (₹75 per bed per night)
+
+6. **Advance Payment** (if not paid during booking):
    - Enter amount received
    - Select payment mode
    - Enter transaction ID if applicable
 
-6. **Generate Physical Form**:
-   - System generates "Org Data Form" PDF
+7. **Generate Physical Form**:
+   - System generates "Org Data Form" PDF (for Organization guests only)
    - Contains: Guest details, room info, dates, payment info
    - Print for guest to fill and sign
 
-7. **Confirm Check-In**:
+8. **Confirm Check-In**:
    - Status changes to **Checked In**
    - Rooms marked as occupied
 
@@ -350,10 +358,71 @@ Anytime after guest has checked in, typically:
 
 2. **Review Stay Details**:
    - Rooms occupied
-   - Actual nights stayed
+   - Original booking dates
+   - Planned vs Actual checkout date
    - Extra beds used (if any)
+   - Early checkout notification status
 
-3. **Calculate Final Payment**:
+3. **Early Checkout Handling**:
+
+   **Scenario A: Guest Informed at Check-In** ✅
+   - System shows: "Guest informed about early checkout on {date}"
+   - **Charges**: Actual days stayed only
+   - Example: Booked 3 nights, stayed 1 night → Charged for 1 night
+
+   **Scenario B: Guest Did NOT Inform at Check-In** ⚠️
+   - System shows: "Guest did NOT inform about early checkout"
+   - **Charges**: Full booking amount (original dates)
+   - Example: Booked 3 nights, stayed 1 night → Charged for 3 nights
+
+   **Scenario C: Normal Checkout** ✅
+   - Guest checks out on booked date
+   - **Charges**: As per booking
+
+4. **Calculate Final Payment**:
+
+   **System automatically calculates**:
+   ```
+   Total Room Charges (charged nights × rate)
+   + Extra Bed Charges (beds × nights used × ₹75)
+   - Advance Paid
+   = Balance Due
+   ```
+
+5. **Confirm Amount**:
+   - Click **"Confirm Amount"** button
+   - **If balance = ₹0**: 
+     - Payment mode auto-set to "Cash"
+     - "Proceed to Feedback" button enabled immediately
+   - **If balance > 0**: Enter payment details
+   - **If balance < 0 (Refund)**:
+     - System shows: "Refund of ₹{amount} due to guest"
+     - "Proceed to Feedback" button enabled
+     - Record refund transaction
+
+6. **Collect Payment** (if balance > 0):
+   - Select payment mode
+   - Enter transaction ID
+   - Enter payment details (UPI/Card/Bank)
+
+7. **Proceed to Feedback**:
+   - Button enabled after confirming amount (for zero/refund) or entering payment
+   - Guest feedback form opens
+
+8. **Collect Feedback**:
+   - Guest rates their experience (1-5 stars)
+   - Optional comments
+   - Click **"Submit Feedback & Complete Checkout"**
+
+9. **Generate Receipt**:
+   - System generates checkout receipt PDF
+   - Shows: Room charges, extra beds, advance, final payment, total
+   - Print and hand to guest
+
+10. **Checkout Complete**:
+    - Status changes to **Checked Out**
+    - Rooms marked as available
+    - Receipt generated
 
    **System automatically calculates**:
    ```
@@ -425,27 +494,36 @@ The generated PDF includes:
 - Booking status: **Confirmed** only
 - Cannot amend after check-in (use checkout process instead)
 
+**Amendment Timing Policy**:
+- **>24 hours before check-in**: No cancellation charges
+- **<24 hours before check-in**: May be subject to cancellation policy
+
 **How to amend**:
 
 1. Bookings page → Find booking → Click **"Amend"**
 
 2. **Modify Details**:
    - Change dates
-   - Add/remove room segments
+   - Add/remove rooms
    - Modify party size
 
 3. **Review Changes**:
    - System shows old vs new charges
    - Calculates: Additional payment OR Refund due
 
-4. **Collect/Refund Payment**:
-   - If **additional charge**: Collect payment
-   - If **refund due**: Record refund transaction
+4. **Payment Collection** (OPTIONAL):
+   - **If cost increased**:
+     - Additional payment is OPTIONAL
+     - Can collect now OR at checkout
+     - Leave payment field empty to collect later
+   - **If cost decreased**:
+     - Refund amount shown
+     - Record refund transaction
 
 5. **Confirm Amendment**:
    - Changes saved
    - Booking updated
-   - Refund/payment recorded
+   - Payment status recorded (collected now or due at checkout)
 
 ---
 
@@ -532,6 +610,13 @@ Each category has:
 **Bookings page shows**:
 - Real-time availability for selected dates
 - Prevents double-booking
+
+**Same-Day Booking Logic**:
+- **Check-out time**: 08:00 AM (8:00)
+- **Check-in time**: 13:00 PM (1:00)
+- **5-hour gap** between checkout and next check-in
+- **Example**: Room booked until Apr 17 → Available for booking from Apr 17 onwards
+- Guest vacates at 08:00 on Apr 17, new guest checks in at 13:00 on Apr 17
 
 ---
 
@@ -1077,6 +1162,37 @@ User Management page shows:
 
 ---
 
+**Problem**: Sidebar menu scrolls with page
+
+**Solution**:
+- This issue has been fixed in latest version
+- Sidebar now stays fixed while scrolling
+- Update to version 2.2 or later
+
+---
+
+**Problem**: Room showing available but booking fails with "already booked" error
+
+**Solution**:
+- This issue has been fixed
+- Same-day bookings now work correctly (checkout 08:00, checkin 13:00)
+- Example: Room booked till Apr 17 → Can book from Apr 17 onwards
+- Update to version 2.2 or later
+
+---
+
+**Problem**: Checkout receipt showing wrong room rates
+
+**Solution**:
+- This calculation bug has been fixed
+- Receipts now show correct rates:
+  - Organization Cat I: ₹500/night
+  - Organization Cat II: ₹400/night
+  - Non-Organization: ₹600/night
+- Update to version 2.2 or later
+
+---
+
 ### General Issues
 
 **Problem**: Page not loading / blank screen
@@ -1111,6 +1227,109 @@ User Management page shows:
 - Login again
 - Your work is auto-saved
 - Continue from where you left off
+
+---
+
+## 🆕 Recent Enhancements (Version 2.2)
+
+### Check-In/Check-Out Time Management
+
+**Standardized Timings**:
+- **Check-out**: 08:00 AM (8:00) on checkout date
+- **Check-in**: 13:00 PM (1:00) on checkin date
+- **Gap**: 5 hours between bookings on same day
+
+**Benefits**:
+- ✅ Same-day bookings now possible
+- ✅ Room booked till Apr 17 → Can book from Apr 17
+- ✅ Maximum room utilization
+
+---
+
+### Early/Late Checkout Charge Logic
+
+**Guest Informed at Check-In** ✅:
+- Staff captures planned early checkout date
+- Guest charged only for actual days stayed
+- Fair billing for guests who inform in advance
+
+**Guest Did NOT Inform** ⚠️:
+- No early checkout notification at check-in
+- Guest charged for full booking amount
+- Protects revenue from unplanned early departures
+
+**Example**:
+```
+Booking: 3 nights (Apr 15-18)
+Guest checks out on Apr 16 (1 night only)
+
+Scenario A (Informed at check-in):
+  Charged: 1 night × ₹500 = ₹500
+
+Scenario B (Not informed):
+  Charged: 3 nights × ₹500 = ₹1500
+```
+
+---
+
+### Amendment Payment Flexibility
+
+**Previous**: Payment collection was mandatory when cost increased  
+**Now**: Payment is OPTIONAL
+
+**Benefits**:
+- ✅ Staff can amend bookings without collecting payment immediately
+- ✅ Payment can be collected at checkout
+- ✅ Partial payments allowed
+- ✅ More flexibility in booking management
+
+---
+
+### Zero/Refund Balance Quick Checkout
+
+**Previous**: Manual payment mode selection required  
+**Now**: Auto-enabled feedback button
+
+**How it works**:
+1. Calculate final balance
+2. Click "Confirm Amount"
+3. **If balance ≤ ₹0**:
+   - Payment mode auto-set
+   - "Proceed to Feedback" enabled immediately
+   - No extra clicks needed
+4. Complete checkout faster
+
+**Benefits**:
+- ✅ Faster checkout for zero-balance cases
+- ✅ Clear refund messaging
+- ✅ Streamlined workflow
+
+---
+
+### Fixed Sidebar Navigation
+
+**Enhancement**: Sidebar menu now stays visible while scrolling
+
+**Benefits**:
+- ✅ Menu always accessible
+- ✅ No need to scroll back to top
+- ✅ Better user experience on long pages
+
+---
+
+### Accurate Receipt Generation
+
+**Fixed**: Checkout receipt rate calculation
+
+**Now showing correct rates**:
+- Organization Cat I: ₹500/night (₹470 room + ₹30 license)
+- Organization Cat II: ₹400/night (₹385 room + ₹15 license)
+- Non-Organization: ₹600/night (₹570 room + ₹30 license)
+
+**Benefits**:
+- ✅ Accurate billing
+- ✅ Correct receipts for accounting
+- ✅ No manual corrections needed
 
 ---
 
@@ -1168,6 +1387,33 @@ Example: `9876543210`
 ---
 
 ## 🔄 Version History
+
+**v2.2** (April 15, 2026) - Enhanced Check-In/Out Logic
+- **Check-in/Check-out time management**:
+  - Standardized times (checkout 08:00, checkin 13:00)
+  - Same-day booking logic (5-hour gap between bookings)
+  - Fixed room availability checks across all endpoints
+- **Early/Late checkout charge logic**:
+  - Optional early checkout notification at check-in
+  - Informed guests charged for actual days only
+  - Non-informed guests charged for full booking
+  - Protects revenue while being fair to communicative guests
+- **Amendment improvements**:
+  - Payment collection now optional (can defer to checkout)
+  - Partial payments allowed
+  - Tracks amendment timing (>24h or <24h before check-in)
+- **Checkout enhancements**:
+  - Zero/refund balance auto-enables feedback button
+  - Clear refund messaging
+  - Faster checkout workflow
+- **UI improvements**:
+  - Sticky sidebar (stays visible while scrolling)
+  - Fixed checkout receipt rate calculations
+  - Accurate PDF generation for all scenarios
+- **Bug fixes**:
+  - Same-day booking now works end-to-end
+  - Checkout receipt shows correct rates
+  - Consistent availability checks
 
 **v2.1** (April 2026)
 - Added JWT Authentication system
