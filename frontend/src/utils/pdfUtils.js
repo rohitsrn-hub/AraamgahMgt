@@ -100,30 +100,55 @@ export function generateCheckoutReceipt(booking, settings) {
   
   let totalRoomCharges = 0;
   
-  // Calculate room charges (rate INCLUDES license fee)
-  if (roomCategories.length > 0) {
-    roomCategories.forEach(category => {
-      let fullRate; // Room rate + License fee
+  // Calculate room charges based on room_guest_mapping if available (accurate per-room rates)
+  const roomGuestMapping = booking.room_guest_mapping || [];
+  
+  if (roomGuestMapping.length > 0) {
+    // Use room-guest mapping for accurate calculation (considers org cards per room)
+    roomGuestMapping.forEach(room => {
+      const category = room.room_category || "Cat I";
+      const chargeCategory = room.charge_category || category;
       
-      if (category === "Cat I") {
-        const roomRate = isNonOrg 
-          ? (settings?.def_civ_cat_i_rate || settings?.cat_i_rate || 570)
-          : (settings?.cat_i_rate || 470);
-        fullRate = roomRate + 30; // Add license fee
-      } else { // Cat II
-        const roomRate = isNonOrg
-          ? (settings?.def_civ_cat_ii_rate || settings?.cat_ii_rate || 455)
-          : (settings?.cat_ii_rate || 385);
-        fullRate = roomRate + 15; // Add license fee
+      let ratePerNight;
+      if (chargeCategory === "Non-Org") {
+        // Non-Org rate (same for all categories)
+        ratePerNight = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
+      } else {
+        // Organization rate
+        if (category === "Cat I") {
+          ratePerNight = (settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30);
+        } else {
+          ratePerNight = (settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15);
+        }
       }
       
-      totalRoomCharges += fullRate * nights;
+      totalRoomCharges += ratePerNight * nights;
+    });
+  } else if (roomCategories.length > 0) {
+    // Fallback: Use room categories (less accurate - assumes all same guest type)
+    roomCategories.forEach(category => {
+      let ratePerNight;
+      
+      if (isNonOrg) {
+        // Non-Org rate
+        ratePerNight = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
+      } else {
+        // Organization rate
+        if (category === "Cat I") {
+          ratePerNight = (settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30);
+        } else {
+          ratePerNight = (settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15);
+        }
+      }
+      
+      totalRoomCharges += ratePerNight * nights;
     });
   } else {
-    // Fallback if no categories
-    const roomRate = isNonOrg ? 570 : 470;
-    const fullRate = roomRate + 30; // Add license fee
-    totalRoomCharges = fullRate * nights * numRooms;
+    // Last resort fallback
+    const ratePerNight = isNonOrg 
+      ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
+      : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30));
+    totalRoomCharges = ratePerNight * nights * numRooms;
   }
   
   // Advance paid
