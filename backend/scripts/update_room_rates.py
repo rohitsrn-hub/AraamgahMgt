@@ -46,9 +46,10 @@ async def update_room_rates():
     
     # New correct values
     new_values = {
+        "is_setup_complete": True,  # Fix setup wizard issue
         "cat_i_rate": 500.0,  # Org Cat I
         "cat_ii_rate": 400.0,  # Org Cat II
-        "def_civ_cat_i_rate": 600.0,  # Non-Org Cat I
+        "def_civ_cat_i_rate": 600.0,  # Non-Org Cat I (was 500, now 600)
         "def_civ_cat_ii_rate": 600.0,  # Non-Org Cat II
         "default_advance_amount": 400.0  # Fixed advance
     }
