@@ -1348,12 +1348,12 @@ export default function Bookings() {
       if (room.category === "Cat I") {
         rate = isNonOrg 
           ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : settings?.cat_i_rate;
+          : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30));
       } else {
         // Cat II Non-Org uses same rate as Cat I Non-Org (570+30=600)
         rate = isNonOrg 
           ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : settings?.cat_ii_rate;
+          : ((settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15));
       }
       console.log(`Room ${room.room_number} (${room.category}): ₹${rate} × ${nights} nights = ₹${rate * nights}`);
       newTotal += (rate || 0) * nights;
@@ -1547,12 +1547,12 @@ export default function Bookings() {
       if (room.category === "Cat I") {
         rate = isNonOrg 
           ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : settings?.cat_i_rate;
+          : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30));
       } else {
         // Cat II Non-Org uses same rate as Cat I Non-Org (570+30=600)
         rate = isNonOrg 
           ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : settings?.cat_ii_rate;
+          : ((settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15));
       }
       return total + (rate || 0);
     }, 0);
@@ -2034,10 +2034,10 @@ export default function Bookings() {
                       const rate = room.category === "Cat I"
                         ? (isNonOrg 
                             ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-                            : settings?.cat_i_rate)
+                            : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30)))
                         : (isNonOrg 
                             ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-                            : settings?.cat_ii_rate);
+                            : ((settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15)));
                       return (
                         <div
                           key={room.id}
@@ -2700,14 +2700,16 @@ export default function Bookings() {
                       let ratePerNight = 0;
                       
                       // Determine rate based on charge category
-                      if (room.charge_category === "Def Civ") {
+                      if (room.charge_category === "Non-Org") {
                         // Non-Org rates (same for both Cat I and Cat II: 570+30=600)
                         ratePerNight = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
                       } else {
-                        // Regular Cat I/II rates
-                        ratePerNight = room.room_category === "Cat I"
-                          ? (settings?.cat_i_rate || 500)
-                          : (settings?.cat_ii_rate || 400);
+                        // Organization rates (Cat I or Cat II)
+                        if (room.room_category === "Cat I") {
+                          ratePerNight = (settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30);
+                        } else {
+                          ratePerNight = (settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15);
+                        }
                       }
                       
                       const roomTotal = ratePerNight * nights;
@@ -2942,8 +2944,8 @@ export default function Bookings() {
                         if (category === "Cat I") {
                           // Cat I: Room Rate + License Fee
                           const roomRate = isNonOrg 
-                            ? (settings?.non_org_room_rent || settings?.def_civ_cat_i_rate || 570)
-                            : (settings?.cat_i_room_rent || settings?.cat_i_rate || 470);
+                            ? (settings?.non_org_room_rent || 570)
+                            : (settings?.cat_i_room_rent || 470);
                           const licenseFee = isNonOrg 
                             ? (settings?.non_org_license_fee || 30)
                             : (settings?.cat_i_license_fee || 30);
@@ -2952,8 +2954,8 @@ export default function Bookings() {
                           // Cat II: Room Rate + License Fee
                           // Non-Org uses same rate as Cat I Non-Org (570+30=600)
                           const roomRate = isNonOrg
-                            ? (settings?.non_org_room_rent || settings?.def_civ_cat_ii_rate || 570)
-                            : (settings?.cat_ii_room_rent || settings?.cat_ii_rate || 385);
+                            ? (settings?.non_org_room_rent || 570)
+                            : (settings?.cat_ii_room_rent || 385);
                           const licenseFee = isNonOrg 
                             ? (settings?.non_org_license_fee || 30)
                             : (settings?.cat_ii_license_fee || 15);

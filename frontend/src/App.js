@@ -67,10 +67,11 @@ function AppContent() {
       setSettings(response.data);
     } catch (e) {
       console.error("Error fetching settings:", e);
-      // If settings fetch fails due to 401, it will be handled by axios interceptor
-      // Set default empty settings to avoid infinite loading
-      if (e.response?.status === 401) {
-        setSettings({ is_setup_complete: false });
+      // If settings fetch fails, don't force setup wizard
+      // Auth errors (401) will be handled by axios interceptor and redirect to login
+      // For other errors, set empty settings but preserve setup state
+      if (e.response?.status !== 401) {
+        setSettings({});
       }
     } finally {
       setLoading(false);
