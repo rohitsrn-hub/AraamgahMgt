@@ -899,6 +899,7 @@ export default function Bookings() {
         bank_account: actionForm.bank_account || undefined,
         upi_id: actionForm.upi_id || undefined,
         upi_phone: actionForm.upi_phone || undefined,
+        planned_early_checkout_date: actionForm.planned_early_checkout_date || undefined,  // Early checkout notification
         family_members: allFamilyMembers.length > 0 ? allFamilyMembers : undefined,
         room_guest_mapping: roomGuestMapping  // Send room-guest mapping with inline family members
       });
@@ -967,6 +968,7 @@ export default function Bookings() {
         notes: form.notes,
         extra_beds_checkout: form.extra_beds_checkout || 0,
         extra_bed_days: form.extra_bed_days || 0,
+        actual_checkout_date: form.actual_checkout_date || new Date().toISOString().split('T')[0],
         // Include payment details
         card_last4: form.card_last4 || undefined,
         card_type: form.card_type || undefined,
@@ -2772,6 +2774,29 @@ export default function Bookings() {
                 </div>
               )}
 
+              {/* Early Checkout Notification (Optional) */}
+              <div>
+                <Label htmlFor="planned_early_checkout">Planning Early Checkout? (Optional)</Label>
+                <p className="text-xs text-slate-500 mb-2">
+                  If guest informs you they plan to checkout earlier than booked date, enter it here to charge only actual days stayed.
+                </p>
+                <Input 
+                  id="planned_early_checkout"
+                  type="date" 
+                  value={actionForm.planned_early_checkout_date || ''}
+                  onChange={(e) => setActionForm({...actionForm, planned_early_checkout_date: e.target.value})}
+                  className="mt-1"
+                  min={selectedBooking?.check_in_date}
+                  max={selectedBooking?.check_out_date}
+                  placeholder="Leave blank if full stay"
+                />
+                {actionForm.planned_early_checkout_date && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    ✓ Guest will be charged from {selectedBooking?.check_in_date} to {actionForm.planned_early_checkout_date}
+                  </p>
+                )}
+              </div>
+
               {/* Notes */}
               <div>
                 <Label>Notes</Label>
@@ -2915,6 +2940,43 @@ export default function Bookings() {
                     </div>
                   </div>
                 )}
+              </div>
+              
+              {/* Actual Checkout Date (for early checkout tracking) */}
+              <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+                <h4 className="font-semibold text-amber-800 mb-2">Actual Checkout Date</h4>
+                <div>
+                  <Label htmlFor="actual_checkout_date">Checkout Date</Label>
+                  <Input 
+                    id="actual_checkout_date"
+                    type="date" 
+                    value={actionForm.actual_checkout_date || new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setActionForm({...actionForm, actual_checkout_date: e.target.value})}
+                    className="mt-1"
+                    min={selectedBooking?.check_in_date}
+                    max={new Date().toISOString().split('T')[0]}
+                  />
+                  {selectedBooking?.planned_early_checkout_date && (
+                    <div className="mt-2 text-xs p-2 bg-green-50 border border-green-200 rounded">
+                      <p className="text-green-700">
+                        ✓ Guest informed at check-in about early checkout on {selectedBooking.planned_early_checkout_date}
+                      </p>
+                      <p className="text-green-600 mt-1">
+                        Will be charged for actual days only.
+                      </p>
+                    </div>
+                  )}
+                  {!selectedBooking?.planned_early_checkout_date && actionForm.actual_checkout_date && actionForm.actual_checkout_date < selectedBooking?.check_out_date && (
+                    <div className="mt-2 text-xs p-2 bg-red-50 border border-red-200 rounded">
+                      <p className="text-red-700">
+                        ⚠️ Guest did NOT inform about early checkout at check-in.
+                      </p>
+                      <p className="text-red-600 mt-1">
+                        Full booking amount will be charged (from {selectedBooking.check_in_date} to {selectedBooking.check_out_date}).
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
               
               {/* Detailed Bill Calculation */}

@@ -354,18 +354,31 @@ class CheckInRequest(BaseModel):
     upi_phone: Optional[str] = None
     family_members: List[dict] = Field(default_factory=list)
     room_guest_mapping: List[dict] = Field(default_factory=list)  # NEW: Room-wise guest assignments
+    # Early checkout notification (if guest informs at check-in)
+    planned_early_checkout_date: Optional[str] = None  # YYYY-MM-DD format
 
 class CheckOutRequest(BaseModel):
     booking_id: str
     staff_id: str
     final_payment: float = 0.0
     payment_mode: Optional[str] = None
+    payment_id: Optional[str] = None
     notes: Optional[str] = None
     # Organization color (to be filled at checkout if Org guest)
     org_color: Optional[str] = None
+    # Payment details
+    card_last4: Optional[str] = None
+    card_type: Optional[str] = None
+    upi_id: Optional[str] = None
+    upi_phone: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_ifsc: Optional[str] = None
+    bank_account: Optional[str] = None
     # Extra bed fields for actual usage at checkout
     extra_beds_checkout: Optional[int] = 0
     extra_bed_days: Optional[int] = 0
+    # Actual checkout date (for early checkout calculation)
+    actual_checkout_date: Optional[str] = None  # YYYY-MM-DD format
 
 class CancelBookingRequest(BaseModel):
     booking_id: str
@@ -1606,6 +1619,7 @@ async def check_in(request: CheckInRequest):
         "bank_account": request.bank_account,
         "upi_id": request.upi_id,
         "upi_phone": request.upi_phone,
+        "planned_early_checkout_date": request.planned_early_checkout_date,  # Track if guest informed about early checkout
     }
     for k, v in optional_fields.items():
         if v is not None:
@@ -1689,23 +1703,116 @@ async def check_out(request: CheckOutRequest):
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Calculate final balance
-    new_balance = booking["balance_amount"] - request.final_payment
+    # Get settings for rate calculation
+    settings = await db.app_settings.find_one({}, {"_id": 0})
+    
+    # Calculate charges based on early checkout logic
+    original_check_in = booking["check_in_date"]
+    original_check_out = booking["check_out_date"]
+    planned_early_checkout = booking.get("planned_early_checkout_date")  # Informed at check-in
+    actual_checkout_date = request.actual_checkout_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # Parse dates
+    check_in_dt = datetime.fromisoformat(original_check_in.replace('Z', '+00:00')).date() if isinstance(original_check_in, str) else original_check_in
+    original_checkout_dt = datetime.fromisoformat(original_check_out.replace('Z', '+00:00')).date() if isinstance(original_check_out, str) else original_check_out
+    actual_checkout_dt = datetime.strptime(actual_checkout_date, "%Y-%m-%d").date()
+    
+    # Determine which nights to charge
+    if actual_checkout_dt < original_checkout_dt:
+        # Early checkout scenario
+        if planned_early_checkout:
+            # Guest informed at check-in → charge only actual days
+            charged_nights = (actual_checkout_dt - check_in_dt).days
+            charge_reason = "early_checkout_informed"
+        else:
+            # Guest did NOT inform at check-in → charge full booking
+            charged_nights = (original_checkout_dt - check_in_dt).days
+            charge_reason = "early_checkout_not_informed"
+    else:
+        # Normal or late checkout → charge booked nights
+        charged_nights = (original_checkout_dt - check_in_dt).days
+        charge_reason = "normal"
+    
+    # Recalculate room charges for charged nights
+    room_rent_recalculated = 0.0
+    room_guest_mapping = booking.get("room_guest_mapping", [])
+    
+    if room_guest_mapping and len(room_guest_mapping) > 0:
+        for room in room_guest_mapping:
+            room_category = room.get("room_category", "Cat I")
+            charge_category = room.get("charge_category", room_category)
+            
+            # Determine rate per night based on charge category
+            if charge_category == "Non-Org":
+                # Non-Org rates
+                rate_per_night = (settings.get("non_org_room_rent", 570) + settings.get("non_org_license_fee", 30))
+            else:
+                # Org rates
+                if room_category == "Cat I":
+                    rate_per_night = (settings.get("cat_i_room_rent", 470) + settings.get("cat_i_license_fee", 30))
+                else:
+                    rate_per_night = (settings.get("cat_ii_room_rent", 385) + settings.get("cat_ii_license_fee", 15))
+            
+            room_rent_recalculated += rate_per_night * charged_nights
+    else:
+        # Fallback to original calculation if no mapping
+        original_nights = (original_checkout_dt - check_in_dt).days
+        if original_nights > 0:
+            per_night_rate = booking.get("room_rent_total", 0) / original_nights
+            room_rent_recalculated = per_night_rate * charged_nights
+        else:
+            room_rent_recalculated = booking.get("room_rent_total", 0)
+    
+    # Calculate extra bed charges
+    extra_bed_charge_checkout = (request.extra_beds_checkout or 0) * (request.extra_bed_days or 0) * 75
+    
+    # Total amount due
+    total_amount_due = room_rent_recalculated + extra_bed_charge_checkout
+    
+    # Balance after subtracting advance
+    advance_paid = booking.get("advance_paid", 0)
+    final_balance = total_amount_due - advance_paid
+    
+    # Build update fields
+    update_fields = {
+        "status": BookingStatus.CHECKED_OUT.value,
+        "actual_check_out": now,
+        "checked_out_by": request.staff_id,
+        "actual_checkout_date": actual_checkout_date,
+        "charged_nights": charged_nights,
+        "charge_reason": charge_reason,
+        "room_rent_total": room_rent_recalculated,
+        "extra_beds_checkout": request.extra_beds_checkout,
+        "extra_bed_days": request.extra_bed_days,
+        "extra_bed_charge_checkout": extra_bed_charge_checkout,
+        "total_amount": total_amount_due,
+        "balance_amount": final_balance - request.final_payment,
+        "final_payment": request.final_payment,
+        "updated_at": now
+    }
+    
+    # Optional fields
+    optional_fields = {
+        "payment_mode": request.payment_mode,
+        "payment_id": request.payment_id,
+        "notes": request.notes,
+        "org_color": request.org_color,
+        "card_last4": request.card_last4,
+        "card_type": request.card_type,
+        "upi_id": request.upi_id,
+        "upi_phone": request.upi_phone,
+        "bank_name": request.bank_name,
+        "bank_ifsc": request.bank_ifsc,
+        "bank_account": request.bank_account
+    }
+    for k, v in optional_fields.items():
+        if v is not None:
+            update_fields[k] = v
     
     # Update booking
     await db.bookings.update_one(
         {"id": request.booking_id},
-        {"$set": {
-            "status": BookingStatus.CHECKED_OUT.value,
-            "actual_check_out": now,
-            "checked_out_by": request.staff_id,
-            "balance_amount": new_balance,
-            "final_payment": request.final_payment,
-            "extra_beds_checkout": request.extra_beds_checkout,
-            "extra_bed_days": request.extra_bed_days,
-            "extra_bed_charge_checkout": (request.extra_beds_checkout or 0) * (request.extra_bed_days or 0) * 75,
-            "updated_at": now
-        }}
+        {"$set": update_fields}
     )
     
     # Update room status for all rooms in this booking
@@ -1886,11 +1993,15 @@ async def delete_booking(booking_id: str):
 @api_router.post("/bookings/amend")
 async def amend_booking(request: AmendBookingRequest):
     """
-    Amend a confirmed booking without cancellation charges
+    Amend a confirmed booking
     
     Allows changes to: dates, rooms, party composition
     Restrictions: Only CONFIRMED bookings can be amended
     Payment: Collects additional advance if cost increases
+    
+    Amendment Policy:
+    - Amendments made >24 hours before check-in: No cancellation charges
+    - Amendments made <24 hours before check-in: Subject to cancellation policy if dates moved forward
     """
     from datetime import date as date_type
     
@@ -1906,9 +2017,18 @@ async def amend_booking(request: AmendBookingRequest):
             detail=f"Only CONFIRMED bookings can be amended. Current status: {booking['status']}"
         )
     
+    # Check amendment timing (for informational purposes)
+    original_check_in = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
+    if isinstance(original_check_in, datetime) and original_check_in.tzinfo is None:
+        original_check_in = original_check_in.replace(tzinfo=timezone.utc)
+    
+    now = datetime.now(timezone.utc)
+    hours_until_checkin = (original_check_in - now).total_seconds() / 3600
+    
     # Prepare amendment data
     amendment_data = {
-        "updated_at": datetime.now(timezone.utc).isoformat()
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "amendment_hours_before_checkin": round(hours_until_checkin, 1)
     }
     
     # Track changes for amendment log
