@@ -1419,15 +1419,17 @@ async def create_booking(booking: BookingCreate):
             if room["status"] == RoomStatus.MAINTENANCE.value:
                 raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
 
-            # Check for overlapping bookings (check both old room_id and new room_ids fields)
+            # Check for overlapping bookings
+            # Use $lt and $gt (not $lte/$gte) to allow same-day bookings
+            # If existing checkout = new checkin → NO conflict (guest leaves 08:00, new arrives 13:00)
             overlapping = await db.bookings.find_one({
                 "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
                 "$or": [
                     {"room_ids": rid},
                     {"room_id": rid}  # backward compat with old records
                 ],
-                "check_in_date": {"$lte": booking.check_out_date},
-                "check_out_date": {"$gte": booking.check_in_date}
+                "check_in_date": {"$lt": booking.check_out_date},
+                "check_out_date": {"$gt": booking.check_in_date}
             })
             if overlapping:
                 raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
