@@ -164,8 +164,8 @@ export default function Layout({ settings }) {
       </header>
 
       <div className="flex">
-        {/* Desktop Sidebar */}
-        <aside className="hidden lg:block w-64 min-h-[calc(100vh-80px)] bg-white border-r border-slate-200" data-testid="desktop-sidebar">
+        {/* Desktop Sidebar - Fixed position */}
+        <aside className="hidden lg:block w-64 h-[calc(100vh-80px)] sticky top-[80px] bg-white border-r border-slate-200 overflow-y-auto" data-testid="desktop-sidebar">
           <NavContent />
         </aside>
 
