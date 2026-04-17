@@ -2552,20 +2552,110 @@ async def get_toiletry_transactions(
 
 # ============= DASHBOARD =============
 
+@api_router.post("/admin/sync-room-status")
+async def sync_room_status():
+    """
+    Admin utility: Sync room status based on checked-in bookings
+    
+    Use this to fix inconsistencies where rooms should be occupied 
+    but their status field wasn't updated.
+    """
+    # Get all checked-in bookings
+    checked_in_bookings = await db.bookings.find({
+        "status": BookingStatus.CHECKED_IN.value
+    }, {"_id": 0}).to_list(1000)
+    
+    # Collect all occupied room IDs
+    occupied_room_ids = set()
+    for booking in checked_in_bookings:
+        for rid in booking.get("room_ids", []):
+            occupied_room_ids.add(rid)
+        if booking.get("room_id"):
+            occupied_room_ids.add(booking["room_id"])
+    
+    # Update all rooms with checked-in bookings to occupied
+    updated_count = 0
+    for rid in occupied_room_ids:
+        result = await db.rooms.update_one(
+            {"id": rid},
+            {"$set": {"status": RoomStatus.OCCUPIED.value}}
+        )
+        if result.modified_count > 0:
+            updated_count += 1
+    
+    # Also mark all other rooms as available (unless in maintenance)
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    freed_count = 0
+    for room in all_rooms:
+        if room["id"] not in occupied_room_ids and room["status"] == RoomStatus.OCCUPIED.value:
+            await db.rooms.update_one(
+                {"id": room["id"]},
+                {"$set": {"status": RoomStatus.AVAILABLE.value}}
+            )
+            freed_count += 1
+    
+    return {
+        "message": "Room status synchronized",
+        "occupied_rooms_updated": updated_count,
+        "freed_rooms": freed_count,
+        "total_checked_in_bookings": len(checked_in_bookings),
+        "total_occupied_rooms": len(occupied_room_ids)
+    }
+
 @api_router.get("/dashboard/occupancy")
 async def get_occupancy():
-    """Get real-time occupancy data"""
+    """
+    Get real-time occupancy data
+    
+    Calculates occupancy by checking:
+    1. Rooms with status = 'occupied' (fast check)
+    2. Bookings with status = 'checked_in' (accurate check)
+    
+    Uses the union of both to handle edge cases where room status wasn't updated
+    """
     rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    
+    # Get all checked-in bookings
+    checked_in_bookings = await db.bookings.find({
+        "status": BookingStatus.CHECKED_IN.value
+    }, {"_id": 0}).to_list(1000)
+    
+    # Collect all occupied room IDs and room numbers from checked-in bookings
+    occupied_room_ids_from_bookings = set()
+    occupied_room_numbers_from_bookings = set()
+    
+    for booking in checked_in_bookings:
+        # Collect room IDs
+        for rid in booking.get("room_ids", []):
+            occupied_room_ids_from_bookings.add(rid)
+        if booking.get("room_id"):
+            occupied_room_ids_from_bookings.add(booking["room_id"])
+        
+        # Also collect room numbers (fallback for data inconsistency)
+        for room_num in booking.get("room_numbers", []):
+            occupied_room_numbers_from_bookings.add(room_num)
+    
+    # Mark rooms as occupied if either:
+    # 1. Room status is "occupied" OR
+    # 2. Room ID is in a checked-in booking OR
+    # 3. Room number is in a checked-in booking (fallback for data inconsistency)
+    def is_room_occupied(room):
+        return (
+            room["status"] == RoomStatus.OCCUPIED.value or 
+            room["id"] in occupied_room_ids_from_bookings or
+            room.get("room_number") in occupied_room_numbers_from_bookings
+        )
     
     total_rooms = len(rooms)
     cat_i_rooms = [r for r in rooms if r["category"] == RoomCategory.CAT_I.value]
     cat_ii_rooms = [r for r in rooms if r["category"] == RoomCategory.CAT_II.value]
     
-    occupied_rooms = [r for r in rooms if r["status"] == RoomStatus.OCCUPIED.value]
-    occupied_cat_i = [r for r in cat_i_rooms if r["status"] == RoomStatus.OCCUPIED.value]
-    occupied_cat_ii = [r for r in cat_ii_rooms if r["status"] == RoomStatus.OCCUPIED.value]
+    occupied_rooms = [r for r in rooms if is_room_occupied(r)]
+    occupied_cat_i = [r for r in cat_i_rooms if is_room_occupied(r)]
+    occupied_cat_ii = [r for r in cat_ii_rooms if is_room_occupied(r)]
     
     return {
+        "version": "v2.2_fixed_occupancy",  # Proof new code is running
         "overall": {
             "total": total_rooms,
             "occupied": len(occupied_rooms),
