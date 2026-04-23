@@ -1,4 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Security
+from fastapi.responses import FileResponse
+from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -11,6 +13,44 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 
+# Import backup services
+from services import backup_service, restore_service, scheduler_service
+from services.migration_service import run_startup_migrations
+
+# Import utils
+from utils import (
+    validate_ifsc,
+    validate_indian_mobile,
+    normalize_uppercase_fields,
+    generate_booking_number,
+    serialize_datetime,
+    serialize_doc,
+    serialize_response,
+    calculate_nights,
+    get_room_rate
+)
+
+# Import auth utilities
+from utils.auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_user_response
+)
+
+# Security scheme for JWT
+security = HTTPBearer()
+
+# Import user models
+from models.user import (
+    User,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    LoginResponse,
+    UserRole as UserRoleModel
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -20,7 +60,7 @@ client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
 # Create the main app without a prefix
-app = FastAPI(title="E-ARMS API", description="ECSAG Automated Room Management System")
+app = FastAPI(title="SARAI API", description="Shillong Aramgah Room Automation Interface")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -33,28 +73,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============= HELPER FUNCTIONS =============
-async def generate_booking_number():
-    """Generate sequential booking number starting from BK0001"""
-    # Get the latest booking number
-    latest_booking = await db.bookings.find_one(
-        {},
-        {"_id": 0, "booking_number": 1},
-        sort=[("created_at", -1)]
-    )
-    
-    if not latest_booking or not latest_booking.get("booking_number"):
-        return "BK0001"
-    
-    try:
-        # Extract the number from the booking number (e.g., BK0001 -> 1)
-        current_number = int(latest_booking["booking_number"].replace("BK", ""))
-        next_number = current_number + 1
-        # Format with leading zeros (e.g., 1 -> BK0001)
-        return f"BK{next_number:04d}"
-    except (ValueError, KeyError):
-        # Fallback to counting all bookings if format is unexpected
-        count = await db.bookings.count_documents({})
-        return f"BK{count + 1:04d}"
+# Note: Helper functions moved to utils/ for better organization
 
 # ============= ENUMS =============
 class RoomCategory(str, Enum):
@@ -84,17 +103,13 @@ class RefundStatus(str, Enum):
 
 # App Settings
 class CancellationSlab(BaseModel):
-    days_before: int  # Days before check-in
+    hours_before: int  # Hours before check-in
     charge_percent: float  # Percentage of advance to deduct
 
-DEFAULT_RANKS = [
-    "Sep/Dfr/Swr", "Nk", "Hav", "Sgt", "PO", "Nb Sub", "JWO", "CPO",
-    "Sub", "WO", "CA", "SM", "MCPO", "Hony Lt or Eqvt", "Hony Capt or Eqvt", "Def Civ"
-]
-
-COMMAND_ORDER = [
-    "E Command", "N Command", "W Command", "S Command", "SW Command",
-    "C Command", "ARTRAC", "Army HQ", "SFC", "Navy", "Air Force", "Def Civ", "Others"
+# Color categories for Organization guests
+COLOR_OPTIONS = [
+    "Red", "Green", "Brown", "Orange", "Yellow", 
+    "Violet", "Black", "Blue", "White", "Light Blue"
 ]
 
 class AppSettings(BaseModel):
@@ -113,18 +128,40 @@ class AppSettings(BaseModel):
     cat_ii_license_fee: float = 15.0
     def_civ_room_rent: float = 570.0
     def_civ_license_fee: float = 30.0
+    non_org_room_rent: float = 570.0
+    non_org_license_fee: float = 30.0
     cat_i_rooms_count: int = 6
     cat_ii_rooms_count: int = 9
     default_advance_amount: float = 400.0
-    ranks: List[str] = Field(default_factory=lambda: DEFAULT_RANKS.copy())
+    colors: List[str] = Field(default_factory=lambda: COLOR_OPTIONS.copy())
     cancellation_policy: List[dict] = Field(default_factory=lambda: [
-        {"days_before": 7, "charge_percent": 0},
-        {"days_before": 3, "charge_percent": 25},
-        {"days_before": 1, "charge_percent": 50},
-        {"days_before": 0, "charge_percent": 100}
+        {"hours_before": 96, "charge_percent": 0},
+        {"hours_before": 48, "charge_percent": 50},
+        {"hours_before": 0, "charge_percent": 100}
     ])
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # P4: Dynamic room categories
+    room_categories: List[dict] = Field(default_factory=lambda: [
+        {
+            "id": "cat-i",
+            "name": "Cat I",
+            "rate": 500.0,
+            "def_civ_rate": 600.0,
+            "room_count": 6,
+            "prefix": "C1",
+            "capacity": 2  # Number of people per room
+        },
+        {
+            "id": "cat-ii",
+            "name": "Cat II",
+            "rate": 400.0,
+            "def_civ_rate": 600.0,
+            "room_count": 9,
+            "prefix": "C2",
+            "capacity": 2
+        }
+    ])
 
 class AppSettingsUpdate(BaseModel):
     fmn_sign_1_url: Optional[str] = None
@@ -139,10 +176,12 @@ class AppSettingsUpdate(BaseModel):
     cat_ii_license_fee: Optional[float] = None
     def_civ_room_rent: Optional[float] = None
     def_civ_license_fee: Optional[float] = None
+    non_org_room_rent: Optional[float] = None
+    non_org_license_fee: Optional[float] = None
     cat_i_rooms_count: Optional[int] = None
     cat_ii_rooms_count: Optional[int] = None
     default_advance_amount: Optional[float] = None
-    ranks: Optional[List[str]] = None
+    colors: Optional[List[str]] = None
     cancellation_policy: Optional[List[dict]] = None
 
 class SetupRequest(BaseModel):
@@ -158,10 +197,12 @@ class SetupRequest(BaseModel):
     cat_ii_license_fee: float = 15.0
     def_civ_room_rent: float = 570.0
     def_civ_license_fee: float = 30.0
+    non_org_room_rent: float = 570.0
+    non_org_license_fee: float = 30.0
     cat_i_rooms_count: int = 6
     cat_ii_rooms_count: int = 9
     default_advance_amount: float = 400.0
-    ranks: Optional[List[str]] = None
+    colors: Optional[List[str]] = None
     cancellation_policy: Optional[List[dict]] = None
 
 # Room
@@ -190,8 +231,6 @@ class Guest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    rank: Optional[str] = None
-    unit: Optional[str] = None
     contact_number: Optional[str] = None
     id_proof_type: Optional[str] = None
     id_proof_number: Optional[str] = None
@@ -200,8 +239,6 @@ class Guest(BaseModel):
 
 class GuestCreate(BaseModel):
     name: str
-    rank: Optional[str] = None
-    unit: Optional[str] = None
     contact_number: str
     id_proof_type: Optional[str] = None
     id_proof_number: Optional[str] = None
@@ -215,12 +252,15 @@ class Booking(BaseModel):
     guest_id: str
     guest_name: str
     guest_contact: Optional[str] = None
-    guest_rank: Optional[str] = None
-    guest_unit: Optional[str] = None
-    guest_service_status: Optional[str] = None  # "Serving" or "Retired"
+    # NEW: Organization classification (replaces rank/command system)
+    is_org: bool = False  # True = Organization personnel, False = Non-Org
+    org_color: Optional[str] = None  # Color category for Org guests (Red, Green, etc.)
     room_ids: List[str] = []
     room_numbers: List[str] = []
     room_categories: List[str] = []
+    # NEW: Mix & Match Rooms - per-night room assignments
+    room_segments: Optional[List[dict]] = None  # [{"night_date": "2026-04-11", "rooms": [...]}]
+    has_room_changes: bool = False  # Flag indicating if guest changes rooms during stay
     num_guests: int = 1
     num_rooms: int = 1
     check_in_date: str  # ISO date string
@@ -242,32 +282,40 @@ class Booking(BaseModel):
     upi_phone: Optional[str] = None
     extra_beds: int = 0
     extra_bed_charge: float = 0.0
-    service_type: Optional[str] = None
-    command_hq: Optional[str] = None
-    army_number: Optional[str] = None
+    extra_beds_checkout: Optional[int] = 0  # NEW: Extra beds added during stay
+    extra_bed_days: Optional[int] = 0  # NEW: Days extra beds used during stay
+    extra_bed_charge_checkout: Optional[float] = 0.0  # NEW: Charge for extra beds during stay
+    final_payment: Optional[float] = 0.0  # NEW: Final payment amount at checkout
+    refund_due: Optional[float] = 0.0  # NEW: Refund amount due (from amendment or overpayment)
+    refund_reason: Optional[str] = None  # NEW: Reason for refund
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
     aadhaar_number: Optional[str] = None
-    identity_card_number: Optional[str] = None
     wife_count: int = 0
     children_count: int = 0
     family_members: List[dict] = Field(default_factory=list)
+    room_guest_mapping: List[dict] = Field(default_factory=list)  # Room-wise guest assignments
     room_rent_total: float = 0.0
     license_fee_total: float = 0.0
     notes: Optional[str] = None
+    amendment_log: List[dict] = Field(default_factory=list)  # Track amendments
     checked_in_by: Optional[str] = None
     checked_out_by: Optional[str] = None
+    total_members: Optional[int] = None  # NEW: For party composition
+    member_ages: Optional[List[int]] = None  # NEW: Ages of all members
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class BookingCreate(BaseModel):
     guest_name: str
     guest_contact: Optional[str] = None
-    guest_rank: Optional[str] = None
-    guest_unit: Optional[str] = None
-    guest_service_status: Optional[str] = None
+    # NEW: Organization classification
+    is_org: bool = False  # Organization personnel or Non-Org
+    org_color: Optional[str] = None  # Color category (only for Org guests)
     room_ids: List[str]
+    # NEW: Mix & Match Rooms support
+    room_segments: Optional[List[dict]] = None  # Alternative to room_ids for segmented bookings
     num_guests: int = 1
     num_rooms: int = 1
     check_in_date: str
@@ -282,18 +330,16 @@ class BookingCreate(BaseModel):
     bank_account: Optional[str] = None
     upi_id: Optional[str] = None
     upi_phone: Optional[str] = None
-    service_type: Optional[str] = None
-    command_hq: Optional[str] = None
-    army_number: Optional[str] = None
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
     aadhaar_number: Optional[str] = None
-    identity_card_number: Optional[str] = None
     wife_count: int = 0
     children_count: int = 0
     family_members: List[dict] = Field(default_factory=list)
     notes: Optional[str] = None
+    total_members: Optional[int] = None  # NEW: For party composition
+    member_ages: Optional[List[int]] = None  # NEW: Ages of all members
 
 class CheckInRequest(BaseModel):
     booking_id: str
@@ -305,27 +351,67 @@ class CheckInRequest(BaseModel):
     guest_age: Optional[int] = None
     guest_sex: Optional[str] = None
     guest_address: Optional[str] = None
-    identity_card_number: Optional[str] = None
-    guest_service_status: Optional[str] = None
-    service_type: Optional[str] = None
-    command_hq: Optional[str] = None
+    # Organization color (if not set during booking)
+    org_color: Optional[str] = None
     bank_name: Optional[str] = None
     bank_ifsc: Optional[str] = None
     bank_account: Optional[str] = None
     upi_id: Optional[str] = None
     upi_phone: Optional[str] = None
     family_members: List[dict] = Field(default_factory=list)
+    room_guest_mapping: List[dict] = Field(default_factory=list)  # NEW: Room-wise guest assignments
+    # Early checkout notification (if guest informs at check-in)
+    planned_early_checkout_date: Optional[str] = None  # YYYY-MM-DD format
 
 class CheckOutRequest(BaseModel):
     booking_id: str
     staff_id: str
     final_payment: float = 0.0
     payment_mode: Optional[str] = None
+    payment_id: Optional[str] = None
     notes: Optional[str] = None
+    # Organization color (to be filled at checkout if Org guest)
+    org_color: Optional[str] = None
+    # Payment details
+    card_last4: Optional[str] = None
+    card_type: Optional[str] = None
+    upi_id: Optional[str] = None
+    upi_phone: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_ifsc: Optional[str] = None
+    bank_account: Optional[str] = None
+    # Extra bed fields for actual usage at checkout
+    extra_beds_checkout: Optional[int] = 0
+    extra_bed_days: Optional[int] = 0
+    # Actual checkout date (for early checkout calculation)
+    actual_checkout_date: Optional[str] = None  # YYYY-MM-DD format
 
 class CancelBookingRequest(BaseModel):
     booking_id: str
     reason: Optional[str] = None
+    refund_amount: Optional[float] = 0.0
+
+class AmendBookingRequest(BaseModel):
+    booking_id: str
+    # Amendable fields
+    check_in_date: Optional[str] = None
+    check_out_date: Optional[str] = None
+    room_ids: Optional[List[str]] = None
+    num_rooms: Optional[int] = None
+    total_members: Optional[int] = None
+    member_ages: Optional[List[int]] = None
+    # Payment adjustment
+    additional_advance: float = 0.0
+    payment_mode: Optional[str] = None
+    payment_id: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_ifsc: Optional[str] = None
+    bank_account: Optional[str] = None
+    upi_id: Optional[str] = None
+    upi_phone: Optional[str] = None
+    # Amendment metadata
+    amendment_reason: Optional[str] = None
+
     refund_amount: float = 0.0
 
 # Staff
@@ -439,68 +525,15 @@ class Payment(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 # ============= HELPER FUNCTIONS =============
-
-def serialize_datetime(obj):
-    """Convert datetime to ISO string for MongoDB storage"""
-    if isinstance(obj, datetime):
-        return obj.isoformat()
-    return obj
-
-def serialize_doc(doc: dict) -> dict:
-    """Serialize document for MongoDB storage"""
-    result = {}
-    for k, v in doc.items():
-        if k == '_id':  # Skip MongoDB ObjectId
-            continue
-        if isinstance(v, datetime):
-            result[k] = v.isoformat()
-        else:
-            result[k] = v
-    return result
-
-def serialize_response(doc: dict) -> dict:
-    """Serialize document for API response, excluding _id"""
-    if doc is None:
-        return None
-    result = {}
-    for k, v in doc.items():
-        if k == '_id':  # Skip MongoDB ObjectId
-            continue
-        result[k] = v
-    return result
-
-async def get_room_rate(category: RoomCategory, guest_rank: Optional[str] = None) -> float:
-    """Get room rate from settings, applying Def Civ rate if applicable"""
-    settings = await db.app_settings.find_one({}, {"_id": 0})
-    is_def_civ = guest_rank and guest_rank.strip().lower() == "def civ"
-    if settings:
-        if category == RoomCategory.CAT_I:
-            if is_def_civ:
-                return settings.get("def_civ_cat_i_rate", settings.get("cat_i_rate", 600.0))
-            return settings.get("cat_i_rate", 500.0)
-        else:
-            if is_def_civ:
-                return settings.get("def_civ_cat_ii_rate", settings.get("cat_ii_rate", 400.0))
-            return settings.get("cat_ii_rate", 300.0)
-    if is_def_civ:
-        return 600.0 if category == RoomCategory.CAT_I else 400.0
-    return 500.0 if category == RoomCategory.CAT_I else 300.0
-
-def calculate_nights(check_in: str, check_out: str) -> int:
-    """Calculate number of nights between dates"""
-    try:
-        ci = datetime.fromisoformat(check_in.replace('Z', '+00:00'))
-        co = datetime.fromisoformat(check_out.replace('Z', '+00:00'))
-        return max(1, (co - ci).days)
-    except (ValueError, TypeError):
-        return 1
+# Note: Helper functions moved to utils/ for better organization
+import re
 
 # ============= API ROUTES =============
 
 # Health check
 @api_router.get("/")
 async def root():
-    return {"message": "E-ARMS API is running", "version": "1.0.0"}
+    return {"message": "SARAI API is running", "version": "1.0.0"}
 
 # ============= APP SETTINGS =============
 
@@ -518,11 +551,14 @@ async def complete_setup(request: SetupRequest):
     """Complete first-time setup"""
     existing = await db.app_settings.find_one({})
     
+    # Default cancellation policy (hours-based)
+    # >96 hours (4 days): 100% refund
+    # 48-96 hours (2-4 days): 50% refund
+    # <48 hours (2 days): 0% refund
     default_cancellation_policy = [
-        {"days_before": 7, "charge_percent": 0},
-        {"days_before": 3, "charge_percent": 25},
-        {"days_before": 1, "charge_percent": 50},
-        {"days_before": 0, "charge_percent": 100}
+        {"hours_before": 96, "charge_percent": 0},   # More than 96 hours: 0% charge (100% refund)
+        {"hours_before": 48, "charge_percent": 50},  # 48-96 hours: 50% charge (50% refund)
+        {"hours_before": 0, "charge_percent": 100}   # Less than 48 hours: 100% charge (0% refund)
     ]
     
     settings = AppSettings(
@@ -542,7 +578,7 @@ async def complete_setup(request: SetupRequest):
         cat_i_rooms_count=request.cat_i_rooms_count,
         cat_ii_rooms_count=request.cat_ii_rooms_count,
         default_advance_amount=request.default_advance_amount,
-        ranks=request.ranks or DEFAULT_RANKS.copy(),
+        colors=request.colors or COLOR_OPTIONS.copy(),
         cancellation_policy=request.cancellation_policy or default_cancellation_policy
     )
     
@@ -593,6 +629,357 @@ async def update_settings(request: AppSettingsUpdate):
     
     return await get_settings()
 
+@api_router.post("/settings/reset-setup")
+async def reset_setup():
+    """P3: Reset is_setup_complete flag to show setup wizard again"""
+    result = await db.app_settings.update_one({}, {"$set": {"is_setup_complete": False}})
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Settings not found")
+    
+    return {"message": "Setup reset successfully. Please reload the page."}
+
+@api_router.put("/settings/categories")
+async def update_room_categories(categories: List[dict]):
+    """P4: Update room categories configuration"""
+    # Validate categories
+    for cat in categories:
+        if not all(k in cat for k in ["id", "name", "rate", "def_civ_rate", "room_count", "prefix", "capacity"]):
+            raise HTTPException(status_code=400, detail="Invalid category structure - missing required fields")
+    
+    # Update settings
+    result = await db.app_settings.update_one(
+        {},
+        {"$set": {
+            "room_categories": categories,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Settings not found")
+    
+    return {"message": "Room categories updated successfully", "categories": categories}
+
+# ============= AUTHENTICATION =============
+
+# Create dependency that injects db into get_current_user
+async def get_current_user_with_db(credentials = Security(security)):
+    """Wrapper to inject db into get_current_user"""
+    from utils.auth import decode_access_token
+    
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="User account is disabled")
+    
+    return user
+
+
+async def require_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
+    """Require admin role"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
+async def require_staff_or_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
+    """Require staff or admin role"""
+    role = current_user.get("role")
+    if role not in ["admin", "staff"]:
+        raise HTTPException(status_code=403, detail="Staff or Admin access required")
+    return current_user
+
+
+@api_router.post("/auth/login", response_model=LoginResponse)
+async def login(credentials: UserLogin):
+    """
+    User login endpoint
+    
+    Returns JWT access token on successful authentication
+    """
+    # Find user by username OR email (case-insensitive)
+    user = await db.users.find_one(
+        {
+            "$or": [
+                {"username": credentials.email.lower()},
+                {"email": credentials.email.lower()}
+            ]
+        }, 
+        {"_id": 0}
+    )
+    
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password"
+        )
+    
+    # Verify password
+    if not verify_password(credentials.password, user["password_hash"]):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid username or password"
+        )
+    
+    # Check if user is active
+    if not user.get("is_active", True):
+        raise HTTPException(
+            status_code=403,
+            detail="Account is disabled. Contact administrator."
+        )
+    
+    # Update last login
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    # Create JWT token
+    access_token = create_access_token(
+        data={
+            "user_id": user["id"],
+            "email": user["email"],
+            "role": user["role"]
+        }
+    )
+    
+    # Return token and user info
+    return LoginResponse(
+        access_token=access_token,
+        token_type="bearer",
+        user=UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            role=user["role"],
+            is_active=user["is_active"],
+            created_at=user["created_at"],
+            last_login=user.get("last_login")
+        )
+    )
+
+
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: dict = Depends(get_current_user_with_db)):
+    """
+    Get current logged-in user information
+    
+    Requires: Valid JWT token in Authorization header
+    """
+    return UserResponse(
+        id=current_user["id"],
+        email=current_user["email"],
+        name=current_user["name"],
+        role=current_user["role"],
+        is_active=current_user["is_active"],
+        created_at=current_user["created_at"],
+        last_login=current_user.get("last_login")
+    )
+
+
+@api_router.post("/auth/logout")
+async def logout():
+    """
+    Logout endpoint (stateless - client should delete token)
+    
+    Returns success message
+    """
+    return {"message": "Logged out successfully. Please delete your token."}
+
+
+# ============= USER MANAGEMENT (ADMIN ONLY) =============
+
+@api_router.post("/users", response_model=UserResponse)
+async def create_user(
+    user_data: UserCreate,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Create a new user (Admin only)
+    
+    Requires: Admin role
+    """
+    # Validate role
+    user_data.validate_role()
+    
+    # Check if username already exists
+    existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Username already exists"
+        )
+    
+    # Create user
+    new_user = User(
+        id=str(uuid.uuid4()),
+        email=user_data.email,  # Username
+        password_hash=hash_password(user_data.password),
+        name=user_data.name,
+        role=user_data.role,
+        is_active=True,
+        created_at=datetime.now(timezone.utc).isoformat()
+    )
+    
+    # Insert into database
+    await db.users.insert_one(new_user.model_dump())
+    
+    # Return user (without password_hash)
+    return UserResponse(
+        id=new_user.id,
+        email=new_user.email,
+        name=new_user.name,
+        role=new_user.role,
+        is_active=new_user.is_active,
+        created_at=new_user.created_at,
+        last_login=None
+    )
+
+
+@api_router.get("/users", response_model=List[UserResponse])
+async def list_users(current_user: dict = Depends(require_admin_role)):
+    """
+    List all users (Admin only)
+    
+    Requires: Admin role
+    """
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(100)
+    
+    return [
+        UserResponse(
+            id=u["id"],
+            email=u["email"],
+            name=u["name"],
+            role=u["role"],
+            is_active=u.get("is_active", True),
+            created_at=u["created_at"],
+            last_login=u.get("last_login")
+        )
+        for u in users
+    ]
+
+
+@api_router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user(
+    user_id: str,
+    update_data: dict,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Update a user (Admin only)
+    
+    Requires: Admin role
+    """
+    # Prevent admin from disabling themselves
+    if user_id == current_user["id"] and not update_data.get("is_active", True):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot disable your own account"
+        )
+    
+    update_fields = {}
+    
+    if "name" in update_data:
+        update_fields["name"] = update_data["name"]
+    
+    if "role" in update_data:
+        if update_data["role"] not in ["admin", "staff", "viewer"]:
+            raise HTTPException(status_code=400, detail="Invalid role")
+        update_fields["role"] = update_data["role"]
+    
+    if "is_active" in update_data:
+        update_fields["is_active"] = update_data["is_active"]
+    
+    if "password" in update_data:
+        update_fields["password_hash"] = hash_password(update_data["password"])
+    
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    # Update user
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": update_fields}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get updated user
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    
+    return UserResponse(**user)
+
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Delete a user (Admin only)
+    
+    Requires: Admin role
+    """
+    # Prevent admin from deleting themselves
+    if user_id == current_user["id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete your own account"
+        )
+    
+    result = await db.users.delete_one({"id": user_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "User deleted successfully"}
+
+
+@api_router.put("/users/{user_id}/password")
+async def reset_user_password(
+    user_id: str,
+    password_data: dict,
+    current_user: dict = Depends(require_admin_role)
+):
+    """
+    Reset a user's password (Admin only)
+    
+    Requires: Admin role
+    Body: {"new_password": "new_password_here"}
+    """
+    new_password = password_data.get("new_password")
+    
+    if not new_password:
+        raise HTTPException(status_code=400, detail="new_password is required")
+    
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    
+    # Hash the new password
+    password_hash = hash_password(new_password)
+    
+    # Update user's password
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"password_hash": password_hash}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {"message": "Password reset successfully"}
+
 # ============= ROOMS =============
 
 @api_router.get("/rooms", response_model=List[dict])
@@ -605,6 +992,65 @@ async def get_rooms(category: Optional[RoomCategory] = None, status: Optional[Ro
     
     rooms = await db.rooms.find(query, {"_id": 0}).to_list(100)
     return rooms
+
+@api_router.get("/rooms/available")
+async def get_available_rooms(
+    check_in: str = Query(..., description="Check-in date (YYYY-MM-DD)"),
+    check_out: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
+    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check")
+):
+    """Get available rooms for given date range, optionally excluding a specific booking
+    
+    Booking Time Logic:
+    - Check-in: 1300h (1 PM) on check-in date
+    - Check-out: 0800h (8 AM) on check-out date  
+    - Room Available: 0900h (9 AM) on check-out date
+    
+    Availability Logic:
+    - Room is occupied: check-in date through check-out date (inclusive)
+    - Room becomes available: FROM check-out date for NEW bookings
+    - Example: Booking 8-Apr to 9-Apr → Room occupied 8-Apr and 9-Apr until 08:00
+               → Room available for NEW booking starting 9-Apr (from 13:00)
+    """
+    # Get all rooms
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    
+    # Get bookings that overlap with requested dates
+    # OLD LOGIC: check_out_date > check_in (excludes same-day availability)
+    # NEW LOGIC: check_out_date >= check_in (allows booking on check-out date)
+    # However, we need to think about this carefully:
+    # - Existing booking: 8-Apr to 9-Apr (guest checks out at 08:00 on 9-Apr)
+    # - New booking request: 9-Apr to 10-Apr (guest checks in at 13:00 on 9-Apr)
+    # - These should NOT conflict because check-out is 08:00 and check-in is 13:00
+    # So we keep the original logic where check_out_date > check_in
+    # This way, a booking ending on 9-Apr does NOT block a booking starting on 9-Apr
+    booking_query = {
+        "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+        "check_in_date": {"$lt": check_out},
+        "check_out_date": {"$gt": check_in}
+    }
+    
+    # Exclude the specified booking if provided (for room modification during check-in)
+    if exclude_booking_id:
+        booking_query["id"] = {"$ne": exclude_booking_id}
+    
+    overlapping_bookings = await db.bookings.find(booking_query, {"_id": 0}).to_list(1000)
+    
+    # Collect all booked room IDs
+    booked_room_ids = set()
+    for b in overlapping_bookings:
+        for rid in b.get("room_ids", []):
+            booked_room_ids.add(rid)
+        if b.get("room_id"):
+            booked_room_ids.add(b["room_id"])
+    
+    # Filter available rooms (not booked and not under maintenance)
+    available_rooms = [
+        r for r in all_rooms 
+        if r["id"] not in booked_room_ids and r["status"] != RoomStatus.MAINTENANCE.value
+    ]
+    
+    return available_rooms
 
 @api_router.get("/rooms/{room_id}")
 async def get_room(room_id: str):
@@ -641,6 +1087,215 @@ async def delete_room(room_id: str):
         raise HTTPException(status_code=404, detail="Room not found")
     return {"message": "Room deleted successfully"}
 
+@api_router.post("/rooms/find-optimal-combination")
+async def find_optimal_room_combination(
+    check_in: str = Query(..., description="Check-in date (YYYY-MM-DD)"),
+    check_out: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
+    num_rooms: int = Query(..., ge=1, description="Number of rooms needed per night"),
+    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check")
+):
+    """
+    Find optimal room combination for date range when single rooms aren't available for entire duration.
+    
+    Algorithm:
+    1. For each night, find available rooms
+    2. Prioritize rooms available for longest consecutive periods
+    3. Minimize total room changes during stay
+    4. Return structured segments with room assignments per night
+    
+    Example Response:
+    {
+        "optimal_combination": [
+            {
+                "night_date": "2026-04-11",
+                "rooms": [
+                    {"id": "...", "room_number": "C1-01", "category": "Cat I"},
+                    {"id": "...", "room_number": "C1-02", "category": "Cat I"}
+                ]
+            },
+            ...
+        ],
+        "total_room_changes": 2,
+        "availability_status": "full",
+        "message": "Optimal combination found with minimal room changes"
+    }
+    """
+    from datetime import datetime, timedelta
+    
+    # Parse dates
+    start_date = datetime.strptime(check_in, "%Y-%m-%d").date()
+    end_date = datetime.strptime(check_out, "%Y-%m-%d").date()
+    nights = (end_date - start_date).days
+    
+    if nights <= 0:
+        raise HTTPException(status_code=400, detail="Check-out must be after check-in")
+    
+    # Get all rooms
+    all_rooms = await db.rooms.find(
+        {"status": {"$ne": RoomStatus.MAINTENANCE.value}}, 
+        {"_id": 0}
+    ).to_list(100)
+    
+    # Build availability map for each night
+    # night_availability[night_date] = [available_room_objects]
+    night_availability = {}
+    
+    for i in range(nights):
+        night_date = start_date + timedelta(days=i)
+        night_date_str = night_date.strftime("%Y-%m-%d")
+        
+        # Get bookings that overlap with this specific night
+        booking_query = {
+            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+            "check_in_date": {"$lte": night_date_str},
+            "check_out_date": {"$gt": night_date_str}
+        }
+        
+        if exclude_booking_id:
+            booking_query["id"] = {"$ne": exclude_booking_id}
+        
+        overlapping_bookings = await db.bookings.find(booking_query, {"_id": 0}).to_list(1000)
+        
+        # Collect booked room IDs for this night
+        booked_room_ids = set()
+        for b in overlapping_bookings:
+            for rid in b.get("room_ids", []):
+                booked_room_ids.add(rid)
+            if b.get("room_id"):
+                booked_room_ids.add(b["room_id"])
+        
+        # Available rooms for this night
+        available_for_night = [
+            r for r in all_rooms 
+            if r["id"] not in booked_room_ids
+        ]
+        
+        night_availability[night_date_str] = available_for_night
+    
+    # Check if we have enough rooms for ANY night
+    min_available = min(len(rooms) for rooms in night_availability.values())
+    if min_available < num_rooms:
+        return {
+            "optimal_combination": [],
+            "total_room_changes": None,
+            "availability_status": "insufficient",
+            "message": f"Insufficient rooms. Need {num_rooms} rooms per night, but only {min_available} available on some nights.",
+            "night_availability_summary": {
+                date: len(rooms) for date, rooms in night_availability.items()
+            }
+        }
+    
+    # OPTIMIZATION ALGORITHM: Find room combination that minimizes changes
+    # Strategy: Greedy approach - find rooms available for longest consecutive periods
+    
+    # Calculate "availability spans" for each room
+    # span[room_id] = list of consecutive night ranges where room is available
+    room_spans = {}
+    for room in all_rooms:
+        room_id = room["id"]
+        consecutive_nights = []
+        current_span = []
+        
+        for i in range(nights):
+            night_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+            available_rooms_tonight = night_availability[night_date]
+            
+            if any(r["id"] == room_id for r in available_rooms_tonight):
+                current_span.append(night_date)
+            else:
+                if current_span:
+                    consecutive_nights.append(current_span)
+                    current_span = []
+        
+        if current_span:
+            consecutive_nights.append(current_span)
+        
+        if consecutive_nights:
+            room_spans[room_id] = {
+                "room": room,
+                "spans": consecutive_nights,
+                "total_nights": sum(len(span) for span in consecutive_nights),
+                "max_consecutive": max(len(span) for span in consecutive_nights)
+            }
+    
+    # Greedy allocation: Pick rooms with longest availability first
+    # Sort rooms by max consecutive nights (descending)
+    sorted_rooms = sorted(
+        room_spans.items(),
+        key=lambda x: (x[1]["max_consecutive"], x[1]["total_nights"]),
+        reverse=True
+    )
+    
+    # Allocate rooms greedily
+    allocated_segments = {night: [] for night in night_availability.keys()}
+    used_rooms_per_night = {night: set() for night in night_availability.keys()}
+    
+    for _ in range(num_rooms):
+        # For each room slot, find the best room that hasn't been allocated yet
+        best_room = None
+        best_coverage = 0
+        
+        for room_id, span_data in sorted_rooms:
+            # Check how many nights this room can cover without being already allocated
+            coverage = 0
+            for span in span_data["spans"]:
+                for night in span:
+                    if room_id not in used_rooms_per_night[night] and len(allocated_segments[night]) < num_rooms:
+                        coverage += 1
+            
+            if coverage > best_coverage:
+                best_coverage = coverage
+                best_room = (room_id, span_data)
+        
+        if best_room:
+            room_id, span_data = best_room
+            room_obj = span_data["room"]
+            
+            # Allocate this room to all nights where it's available and not yet allocated
+            for span in span_data["spans"]:
+                for night in span:
+                    if room_id not in used_rooms_per_night[night] and len(allocated_segments[night]) < num_rooms:
+                        allocated_segments[night].append({
+                            "id": room_obj["id"],
+                            "room_number": room_obj["room_number"],
+                            "category": room_obj["category"]
+                        })
+                        used_rooms_per_night[night].add(room_id)
+    
+    # Build final segments structure
+    optimal_combination = []
+    for i in range(nights):
+        night_date = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        optimal_combination.append({
+            "night_date": night_date,
+            "rooms": allocated_segments[night_date]
+        })
+    
+    # Calculate total room changes
+    total_changes = 0
+    for i in range(1, nights):
+        prev_rooms = set(r["id"] for r in optimal_combination[i-1]["rooms"])
+        curr_rooms = set(r["id"] for r in optimal_combination[i]["rooms"])
+        if prev_rooms != curr_rooms:
+            total_changes += 1
+    
+    # Determine status
+    all_nights_fulfilled = all(len(segment["rooms"]) == num_rooms for segment in optimal_combination)
+    status = "full" if all_nights_fulfilled else "partial"
+    
+    return {
+        "optimal_combination": optimal_combination,
+        "total_room_changes": total_changes,
+        "availability_status": status,
+        "message": f"Found optimal combination with {total_changes} room change(s)" if status == "full" else "Partial availability",
+        "summary": {
+            "total_nights": nights,
+            "rooms_per_night": num_rooms,
+            "total_room_changes": total_changes
+        }
+    }
+
+
 # ============= BOOKINGS =============
 
 @api_router.get("/bookings", response_model=List[dict])
@@ -670,41 +1325,140 @@ async def get_booking(booking_id: str):
         raise HTTPException(status_code=404, detail="Booking not found")
     return booking
 
-@api_router.post("/bookings")
-async def create_booking(booking: BookingCreate):
-    if not booking.room_ids or len(booking.room_ids) == 0:
-        raise HTTPException(status_code=400, detail="At least one room must be selected")
-
-    # Validate all rooms exist and are available
+async def process_room_segments(room_segments: List[dict], check_in_date: str, check_out_date: str, is_org: bool):
+    """
+    Process room segments for mix & match bookings.
+    
+    Returns:
+        tuple: (room_ids, room_numbers, room_categories, total_amount, has_room_changes)
+    """
+    from datetime import datetime, timedelta
+    
+    # Extract all unique room IDs from segments
+    all_room_ids = set()
+    for segment in room_segments:
+        for room in segment.get("rooms", []):
+            all_room_ids.add(room["id"])
+    
+    room_ids = list(all_room_ids)
     room_numbers = []
     room_categories = []
-    total_amount = 0.0
-    nights = calculate_nights(booking.check_in_date, booking.check_out_date)
-
-    for rid in booking.room_ids:
+    
+    # Validate that all rooms exist
+    for rid in room_ids:
         room = await db.rooms.find_one({"id": rid}, {"_id": 0})
         if not room:
             raise HTTPException(status_code=404, detail=f"Room {rid} not found")
         if room["status"] == RoomStatus.MAINTENANCE.value:
             raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
-
-        # Check for overlapping bookings (check both old room_id and new room_ids fields)
-        overlapping = await db.bookings.find_one({
-            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
-            "$or": [
-                {"room_ids": rid},
-                {"room_id": rid}  # backward compat with old records
-            ],
-            "check_in_date": {"$lte": booking.check_out_date},
-            "check_out_date": {"$gte": booking.check_in_date}
-        })
-        if overlapping:
-            raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
-
-        rate = await get_room_rate(RoomCategory(room["category"]), booking.guest_rank)
-        total_amount += rate * nights
         room_numbers.append(room["room_number"])
         room_categories.append(room["category"])
+    
+    # Calculate total amount from segments
+    total_amount = 0.0
+    start_date = datetime.strptime(check_in_date, "%Y-%m-%d").date()
+    end_date = datetime.strptime(check_out_date, "%Y-%m-%d").date()
+    nights = (end_date - start_date).days
+    
+    # Validate segments coverage
+    if len(room_segments) != nights:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid room segments: Need {nights} night(s) but got {len(room_segments)} segment(s)"
+        )
+    
+    # Calculate cost for each night
+    for segment in room_segments:
+        for room_data in segment.get("rooms", []):
+            room_category = RoomCategory(room_data["category"])
+            rate = await get_room_rate(db, room_category, is_org)
+            license_fee = await get_room_rate(db, room_category, is_org, is_license_fee=True)
+            total_amount += rate + license_fee
+    
+    # Check if rooms change during stay
+    has_room_changes = False
+    for i in range(1, len(room_segments)):
+        prev_room_ids = set(r["id"] for r in room_segments[i-1]["rooms"])
+        curr_room_ids = set(r["id"] for r in room_segments[i]["rooms"])
+        if prev_room_ids != curr_room_ids:
+            has_room_changes = True
+            break
+    
+    return room_ids, room_numbers, room_categories, total_amount, has_room_changes
+
+
+@api_router.post("/bookings")
+async def create_booking(booking: BookingCreate):
+    # Normalize uppercase fields FIRST (army_number, bank_ifsc)
+    booking_data = booking.model_dump()
+    booking_data = normalize_uppercase_fields(booking_data)
+    booking = BookingCreate(**booking_data)
+    
+    # Validate IFSC code format (after uppercase conversion)
+    if booking.bank_ifsc and not validate_ifsc(booking.bank_ifsc):
+        raise HTTPException(status_code=400, detail="Invalid IFSC code format. Expected format: ABCD0123456 (4 letters + 0 + 6 alphanumeric)")
+    
+    # Validate mobile numbers
+    if booking.guest_contact and not validate_indian_mobile(booking.guest_contact):
+        raise HTTPException(status_code=400, detail="Invalid mobile number. Must be 10 digits starting with 6-9")
+    if booking.upi_phone and not validate_indian_mobile(booking.upi_phone):
+        raise HTTPException(status_code=400, detail="Invalid UPI phone number. Must be 10 digits starting with 6-9")
+    
+    # Determine booking type: traditional (room_ids) or segmented (room_segments)
+    is_segmented = booking.room_segments is not None and len(booking.room_segments) > 0
+    
+    if not is_segmented:
+        # Traditional booking validation
+        if not booking.room_ids or len(booking.room_ids) == 0:
+            raise HTTPException(status_code=400, detail="At least one room must be selected")
+
+        # Validate all rooms exist and are available
+        room_numbers = []
+        room_categories = []
+        total_amount = 0.0
+        nights = calculate_nights(booking.check_in_date, booking.check_out_date)
+
+        for rid in booking.room_ids:
+            room = await db.rooms.find_one({"id": rid}, {"_id": 0})
+            if not room:
+                raise HTTPException(status_code=404, detail=f"Room {rid} not found")
+            if room["status"] == RoomStatus.MAINTENANCE.value:
+                raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
+
+            # Check for overlapping bookings
+            # Use $lt and $gt (not $lte/$gte) to allow same-day bookings
+            # If existing checkout = new checkin → NO conflict (guest leaves 08:00, new arrives 13:00)
+            overlapping = await db.bookings.find_one({
+                "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+                "$or": [
+                    {"room_ids": rid},
+                    {"room_id": rid}  # backward compat with old records
+                ],
+                "check_in_date": {"$lt": booking.check_out_date},
+                "check_out_date": {"$gt": booking.check_in_date}
+            })
+            if overlapping:
+                raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
+
+            rate = await get_room_rate(db, RoomCategory(room["category"]), booking.is_org)
+            license_fee = await get_room_rate(db, RoomCategory(room["category"]), booking.is_org, is_license_fee=True)
+            total_amount += (rate + license_fee) * nights
+            room_numbers.append(room["room_number"])
+            room_categories.append(room["category"])
+        
+        has_room_changes = False
+        room_segments = None
+    
+    else:
+        # Segmented booking (Mix & Match)
+        room_ids, room_numbers, room_categories, total_amount, has_room_changes = await process_room_segments(
+            booking.room_segments,
+            booking.check_in_date,
+            booking.check_out_date,
+            booking.is_org
+        )
+        booking.room_ids = room_ids  # For backward compatibility
+        room_segments = booking.room_segments
 
     # Create or find guest
     guest = None
@@ -713,8 +1467,6 @@ async def create_booking(booking: BookingCreate):
     if not guest:
         guest_obj = Guest(
             name=booking.guest_name,
-            rank=booking.guest_rank,
-            unit=booking.guest_unit,
             contact_number=booking.guest_contact
         )
         guest_doc = serialize_doc(guest_obj.model_dump())
@@ -722,19 +1474,20 @@ async def create_booking(booking: BookingCreate):
         guest = guest_doc
 
     # Generate sequential booking number
-    booking_number = await generate_booking_number()
+    booking_number = await generate_booking_number(db)
 
     booking_obj = Booking(
         booking_number=booking_number,
         guest_id=guest["id"],
         guest_name=booking.guest_name,
         guest_contact=booking.guest_contact,
-        guest_rank=booking.guest_rank,
-        guest_unit=booking.guest_unit,
-        guest_service_status=booking.guest_service_status,
+        is_org=booking.is_org,
+        org_color=booking.org_color,
         room_ids=booking.room_ids,
         room_numbers=room_numbers,
         room_categories=room_categories,
+        room_segments=room_segments,
+        has_room_changes=has_room_changes,
         num_guests=booking.num_guests,
         num_rooms=len(booking.room_ids),
         check_in_date=booking.check_in_date,
@@ -751,14 +1504,10 @@ async def create_booking(booking: BookingCreate):
         bank_account=booking.bank_account,
         upi_id=booking.upi_id,
         upi_phone=booking.upi_phone,
-        service_type=booking.service_type,
-        command_hq=booking.command_hq,
-        army_number=booking.army_number,
         guest_age=booking.guest_age,
         guest_sex=booking.guest_sex,
         guest_address=booking.guest_address,
         aadhaar_number=booking.aadhaar_number,
-        identity_card_number=booking.identity_card_number,
         wife_count=booking.wife_count,
         children_count=booking.children_count,
         family_members=booking.family_members,
@@ -784,6 +1533,27 @@ async def create_booking(booking: BookingCreate):
 
 @api_router.post("/bookings/check-in")
 async def check_in(request: CheckInRequest):
+    # Normalize uppercase fields FIRST (dependent_id in family members, bank_ifsc)
+    request_data = request.model_dump()
+    request_data = normalize_uppercase_fields(request_data)
+    request = CheckInRequest(**request_data)
+    
+    # Validate IFSC code format (after uppercase conversion)
+    if request.bank_ifsc and not validate_ifsc(request.bank_ifsc):
+        raise HTTPException(status_code=400, detail="Invalid IFSC code format. Expected format: ABCD0123456 (4 letters + 0 + 6 alphanumeric)")
+    
+    # Validate mobile numbers
+    if request.guest_contact and not validate_indian_mobile(request.guest_contact):
+        raise HTTPException(status_code=400, detail="Invalid mobile number. Must be 10 digits starting with 6-9")
+    if request.upi_phone and not validate_indian_mobile(request.upi_phone):
+        raise HTTPException(status_code=400, detail="Invalid UPI phone number. Must be 10 digits starting with 6-9")
+    
+    # Validate family member mobiles
+    if request.family_members:
+        for member in request.family_members:
+            if member.get("mobile") and not validate_indian_mobile(member["mobile"]):
+                raise HTTPException(status_code=400, detail=f"Invalid mobile number for family member {member.get('name', 'Unknown')}")
+    
     booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -793,9 +1563,42 @@ async def check_in(request: CheckInRequest):
     
     now = datetime.now(timezone.utc).isoformat()
     
+    # Get settings for rate calculation
+    settings = await db.app_settings.find_one({}, {"_id": 0})
+    
+    # Recalculate room charges based on room_guest_mapping (NEW STRUCTURE)
+    new_room_rent_total = 0.0
+    if request.room_guest_mapping and len(request.room_guest_mapping) > 0:
+        # Calculate nights
+        check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
+        check_out_date = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
+        nights = (check_out_date - check_in_date).days
+        
+        for room in request.room_guest_mapping:
+            room_category = room.get("room_category", "Cat I")
+            charge_category = room.get("charge_category", room_category)
+            
+            # Determine rate per night based on charge category
+            if charge_category == "Non-Org":
+                rate_per_night = settings.get("non_org_room_rent", 570.0) + settings.get("non_org_license_fee", 30.0)
+            else:
+                # Regular Cat I/II rates
+                if room_category == "Cat I":
+                    rate_per_night = settings.get("cat_i_rate", 500.0)
+                else:
+                    rate_per_night = settings.get("cat_ii_rate", 400.0)
+            
+            new_room_rent_total += rate_per_night * nights
+    else:
+        # Fallback to original total if no mapping provided (backward compatibility)
+        new_room_rent_total = booking.get("room_rent_total", 0.0)
+    
     # Calculate extra bed charge
     extra_bed_charge = request.extra_beds * 75.0
-    new_balance = booking["balance_amount"] + extra_bed_charge
+    
+    # Recalculate total and balance
+    new_total_amount = new_room_rent_total + booking.get("license_fee_total", 0.0)
+    new_balance = new_total_amount + extra_bed_charge - booking.get("advance_paid", 0.0)
 
     # Build update fields — only overwrite non-None values
     update_fields = {
@@ -804,7 +1607,9 @@ async def check_in(request: CheckInRequest):
         "checked_in_by": request.staff_id,
         "extra_beds": request.extra_beds,
         "extra_bed_charge": extra_bed_charge,
-        "balance_amount": new_balance,
+        "room_rent_total": new_room_rent_total,  # Update room rent based on new pricing
+        "total_amount": new_total_amount,  # Update total amount
+        "balance_amount": new_balance,  # Update balance
         "updated_at": now
     }
     optional_fields = {
@@ -812,21 +1617,21 @@ async def check_in(request: CheckInRequest):
         "guest_age": request.guest_age,
         "guest_sex": request.guest_sex,
         "guest_address": request.guest_address,
-        "identity_card_number": request.identity_card_number,
-        "guest_service_status": request.guest_service_status,
-        "service_type": request.service_type,
-        "command_hq": request.command_hq,
+        "org_color": request.org_color,  # Organization color if Org guest
         "bank_name": request.bank_name,
         "bank_ifsc": request.bank_ifsc,
         "bank_account": request.bank_account,
         "upi_id": request.upi_id,
         "upi_phone": request.upi_phone,
+        "planned_early_checkout_date": request.planned_early_checkout_date,  # Track if guest informed about early checkout
     }
     for k, v in optional_fields.items():
         if v is not None:
             update_fields[k] = v
     if request.family_members:
         update_fields["family_members"] = request.family_members
+    if request.room_guest_mapping:
+        update_fields["room_guest_mapping"] = request.room_guest_mapping  # Store the mapping (NEW STRUCTURE)
     if request.notes:
         update_fields["notes"] = request.notes
 
@@ -850,6 +1655,47 @@ async def check_in(request: CheckInRequest):
     updated_booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     return {"message": "Check-in successful", "booking_id": request.booking_id, "booking": updated_booking}
 
+@api_router.put("/bookings/{booking_id}/update-rooms")
+async def update_booking_rooms(booking_id: str, request: dict):
+    """P2: Update room assignments for a confirmed booking before check-in"""
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    if booking["status"] != BookingStatus.CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="Can only modify rooms for confirmed bookings")
+    
+    new_room_ids = request.get("room_ids", [])
+    if not new_room_ids or len(new_room_ids) != len(booking.get("room_ids", [])):
+        raise HTTPException(status_code=400, detail="Invalid room_ids - must match number of originally booked rooms")
+    
+    # Get new room details
+    new_rooms = []
+    for room_id in new_room_ids:
+        room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
+        if not room:
+            raise HTTPException(status_code=404, detail=f"Room {room_id} not found")
+        new_rooms.append(room)
+    
+    # Extract room details for booking
+    room_numbers = [r["room_number"] for r in new_rooms]
+    room_categories = [r["category"] for r in new_rooms]
+    
+    # Update booking with new room assignments
+    now = datetime.now(timezone.utc).isoformat()
+    await db.bookings.update_one(
+        {"id": booking_id},
+        {"$set": {
+            "room_ids": new_room_ids,
+            "room_numbers": room_numbers,
+            "room_categories": room_categories,
+            "updated_at": now
+        }}
+    )
+    
+    updated_booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    return {"message": "Room assignments updated", "booking": updated_booking}
+
 @api_router.post("/bookings/check-out")
 async def check_out(request: CheckOutRequest):
     booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
@@ -861,19 +1707,116 @@ async def check_out(request: CheckOutRequest):
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Calculate final balance
-    new_balance = booking["balance_amount"] - request.final_payment
+    # Get settings for rate calculation
+    settings = await db.app_settings.find_one({}, {"_id": 0})
+    
+    # Calculate charges based on early checkout logic
+    original_check_in = booking["check_in_date"]
+    original_check_out = booking["check_out_date"]
+    planned_early_checkout = booking.get("planned_early_checkout_date")  # Informed at check-in
+    actual_checkout_date = request.actual_checkout_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    # Parse dates
+    check_in_dt = datetime.fromisoformat(original_check_in.replace('Z', '+00:00')).date() if isinstance(original_check_in, str) else original_check_in
+    original_checkout_dt = datetime.fromisoformat(original_check_out.replace('Z', '+00:00')).date() if isinstance(original_check_out, str) else original_check_out
+    actual_checkout_dt = datetime.strptime(actual_checkout_date, "%Y-%m-%d").date()
+    
+    # Determine which nights to charge
+    if actual_checkout_dt < original_checkout_dt:
+        # Early checkout scenario
+        if planned_early_checkout:
+            # Guest informed at check-in → charge only actual days
+            charged_nights = (actual_checkout_dt - check_in_dt).days
+            charge_reason = "early_checkout_informed"
+        else:
+            # Guest did NOT inform at check-in → charge full booking
+            charged_nights = (original_checkout_dt - check_in_dt).days
+            charge_reason = "early_checkout_not_informed"
+    else:
+        # Normal or late checkout → charge booked nights
+        charged_nights = (original_checkout_dt - check_in_dt).days
+        charge_reason = "normal"
+    
+    # Recalculate room charges for charged nights
+    room_rent_recalculated = 0.0
+    room_guest_mapping = booking.get("room_guest_mapping", [])
+    
+    if room_guest_mapping and len(room_guest_mapping) > 0:
+        for room in room_guest_mapping:
+            room_category = room.get("room_category", "Cat I")
+            charge_category = room.get("charge_category", room_category)
+            
+            # Determine rate per night based on charge category
+            if charge_category == "Non-Org":
+                # Non-Org rates
+                rate_per_night = (settings.get("non_org_room_rent", 570) + settings.get("non_org_license_fee", 30))
+            else:
+                # Org rates
+                if room_category == "Cat I":
+                    rate_per_night = (settings.get("cat_i_room_rent", 470) + settings.get("cat_i_license_fee", 30))
+                else:
+                    rate_per_night = (settings.get("cat_ii_room_rent", 385) + settings.get("cat_ii_license_fee", 15))
+            
+            room_rent_recalculated += rate_per_night * charged_nights
+    else:
+        # Fallback to original calculation if no mapping
+        original_nights = (original_checkout_dt - check_in_dt).days
+        if original_nights > 0:
+            per_night_rate = booking.get("room_rent_total", 0) / original_nights
+            room_rent_recalculated = per_night_rate * charged_nights
+        else:
+            room_rent_recalculated = booking.get("room_rent_total", 0)
+    
+    # Calculate extra bed charges
+    extra_bed_charge_checkout = (request.extra_beds_checkout or 0) * (request.extra_bed_days or 0) * 75
+    
+    # Total amount due
+    total_amount_due = room_rent_recalculated + extra_bed_charge_checkout
+    
+    # Balance after subtracting advance
+    advance_paid = booking.get("advance_paid", 0)
+    final_balance = total_amount_due - advance_paid
+    
+    # Build update fields
+    update_fields = {
+        "status": BookingStatus.CHECKED_OUT.value,
+        "actual_check_out": now,
+        "checked_out_by": request.staff_id,
+        "actual_checkout_date": actual_checkout_date,
+        "charged_nights": charged_nights,
+        "charge_reason": charge_reason,
+        "room_rent_total": room_rent_recalculated,
+        "extra_beds_checkout": request.extra_beds_checkout,
+        "extra_bed_days": request.extra_bed_days,
+        "extra_bed_charge_checkout": extra_bed_charge_checkout,
+        "total_amount": total_amount_due,
+        "balance_amount": final_balance - request.final_payment,
+        "final_payment": request.final_payment,
+        "updated_at": now
+    }
+    
+    # Optional fields
+    optional_fields = {
+        "payment_mode": request.payment_mode,
+        "payment_id": request.payment_id,
+        "notes": request.notes,
+        "org_color": request.org_color,
+        "card_last4": request.card_last4,
+        "card_type": request.card_type,
+        "upi_id": request.upi_id,
+        "upi_phone": request.upi_phone,
+        "bank_name": request.bank_name,
+        "bank_ifsc": request.bank_ifsc,
+        "bank_account": request.bank_account
+    }
+    for k, v in optional_fields.items():
+        if v is not None:
+            update_fields[k] = v
     
     # Update booking
     await db.bookings.update_one(
         {"id": request.booking_id},
-        {"$set": {
-            "status": BookingStatus.CHECKED_OUT.value,
-            "actual_check_out": now,
-            "checked_out_by": request.staff_id,
-            "balance_amount": new_balance,
-            "updated_at": now
-        }}
+        {"$set": update_fields}
     )
     
     # Update room status for all rooms in this booking
@@ -902,33 +1845,40 @@ async def check_out(request: CheckOutRequest):
 
 @api_router.get("/bookings/{booking_id}/calculate-refund")
 async def calculate_refund(booking_id: str):
-    """Calculate refund amount based on cancellation policy"""
+    """Calculate refund amount based on cancellation policy
+    
+    Policy (flexible - supports both hours_before and days_before):
+    - >96 hours (4 days) before check-in: 0% charge (100% refund)
+    - 48-96 hours (2-4 days) before check-in: 50% charge (50% refund)
+    - <48 hours (2 days) before check-in: 100% charge (0% refund)
+    """
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
     settings = await db.app_settings.find_one({}, {"_id": 0})
     cancellation_policy = settings.get("cancellation_policy", [
-        {"days_before": 7, "charge_percent": 0},
-        {"days_before": 3, "charge_percent": 25},
-        {"days_before": 1, "charge_percent": 50},
-        {"days_before": 0, "charge_percent": 100}
+        {"hours_before": 96, "charge_percent": 0},
+        {"hours_before": 48, "charge_percent": 50},
+        {"hours_before": 0, "charge_percent": 100}
     ])
     
-    # Calculate days until check-in
+    # Calculate hours until check-in
     check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
     if isinstance(check_in_date, datetime) and check_in_date.tzinfo is None:
         check_in_date = check_in_date.replace(tzinfo=timezone.utc)
     
-    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    check_in_date = check_in_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    days_until_checkin = (check_in_date - today).days
+    now = datetime.now(timezone.utc)
+    hours_until_checkin = (check_in_date - now).total_seconds() / 3600
     
     # Find applicable charge percent
+    # Support both hours_before and days_before formats
     charge_percent = 100  # Default: no refund
-    for slab in sorted(cancellation_policy, key=lambda x: x["days_before"], reverse=True):
-        if days_until_checkin >= slab["days_before"]:
+    for slab in sorted(cancellation_policy, key=lambda x: x.get("hours_before", x.get("days_before", 0) * 24), reverse=True):
+        # Convert days to hours if needed
+        threshold_hours = slab.get("hours_before") if "hours_before" in slab else slab.get("days_before", 0) * 24
+        
+        if hours_until_checkin >= threshold_hours:
             charge_percent = slab["charge_percent"]
             break
     
@@ -941,7 +1891,7 @@ async def calculate_refund(booking_id: str):
         "booking_number": booking["booking_number"],
         "guest_name": booking["guest_name"],
         "check_in_date": booking["check_in_date"],
-        "days_until_checkin": days_until_checkin,
+        "hours_until_checkin": round(hours_until_checkin, 1),
         "advance_paid": advance_paid,
         "charge_percent": charge_percent,
         "cancellation_charge": cancellation_charge,
@@ -999,34 +1949,331 @@ async def cancel_booking(request: CancelBookingRequest):
     
     return {"message": "Booking cancelled successfully", "booking_id": request.booking_id}
 
-# ============= GUEST HISTORY =============
+@api_router.delete("/bookings/{booking_id}")
+async def delete_booking(booking_id: str):
+    """
+    Permanently delete a booking (NOT cancellation - complete removal)
+    
+    Use case: Wrong entry that needs to be completely removed from system
+    
+    This will:
+    - Delete booking from database
+    - Free up occupied rooms
+    - Remove from all analytics (automatic via database query)
+    - Remove from planner (automatic via database query)
+    - Remove associated payments/refunds (optional - kept for audit)
+    
+    WARNING: This is irreversible. Use cancellation for normal booking cancellations.
+    """
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    # Free up rooms if booking is confirmed or checked_in
+    if booking["status"] in [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]:
+        room_ids = booking.get("room_ids", [])
+        if not room_ids and booking.get("room_id"):
+            room_ids = [booking["room_id"]]
+        
+        for rid in room_ids:
+            await db.rooms.update_one(
+                {"id": rid},
+                {"$set": {"status": RoomStatus.AVAILABLE.value}}
+            )
+    
+    # Delete the booking
+    result = await db.bookings.delete_one({"id": booking_id})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Booking not found or already deleted")
+    
+    return {
+        "message": "Booking permanently deleted",
+        "booking_id": booking_id,
+        "booking_number": booking.get("booking_number"),
+        "guest_name": booking.get("guest_name")
+    }
 
-@api_router.get("/bookings/guest-history")
-async def get_guest_history(
-    phone_number: Optional[str] = Query(None, description="Guest phone number"),
-    army_number: Optional[str] = Query(None, description="Army/Service number")
-):
+@api_router.post("/bookings/amend")
+async def amend_booking(request: AmendBookingRequest):
     """
-    Get booking history for a guest by phone number or army number.
-    Returns all bookings, statistics, and guest information.
+    Amend a confirmed booking
+    
+    Allows changes to: dates, rooms, party composition
+    Restrictions: Only CONFIRMED bookings can be amended
+    Payment: Collects additional advance if cost increases
+    
+    Amendment Policy:
+    - Amendments made >24 hours before check-in: No cancellation charges
+    - Amendments made <24 hours before check-in: Subject to cancellation policy if dates moved forward
     """
-    if not phone_number and not army_number:
+    from datetime import date as date_type
+    
+    # Fetch existing booking
+    booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    
+    # Restriction: Only CONFIRMED bookings
+    if booking["status"] != BookingStatus.CONFIRMED.value:
         raise HTTPException(
             status_code=400, 
-            detail="Please provide either phone_number or army_number"
+            detail=f"Only CONFIRMED bookings can be amended. Current status: {booking['status']}"
         )
     
-    # Build query
-    query = {}
+    # Check amendment timing (for informational purposes)
+    original_check_in = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
+    if isinstance(original_check_in, datetime) and original_check_in.tzinfo is None:
+        original_check_in = original_check_in.replace(tzinfo=timezone.utc)
+    
+    now = datetime.now(timezone.utc)
+    hours_until_checkin = (original_check_in - now).total_seconds() / 3600
+    
+    # Prepare amendment data
+    amendment_data = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "amendment_hours_before_checkin": round(hours_until_checkin, 1)
+    }
+    
+    # Track changes for amendment log
+    changes = []
+    
+    # Amend dates
+    if request.check_in_date and request.check_in_date != booking["check_in_date"]:
+        changes.append(f"Check-in: {booking['check_in_date']} → {request.check_in_date}")
+        amendment_data["check_in_date"] = request.check_in_date
+    
+    if request.check_out_date and request.check_out_date != booking["check_out_date"]:
+        changes.append(f"Check-out: {booking['check_out_date']} → {request.check_out_date}")
+        amendment_data["check_out_date"] = request.check_out_date
+    
+    # Amend rooms
+    if request.room_ids and request.room_ids != booking.get("room_ids", []):
+        # Validate room availability for new dates
+        check_in = request.check_in_date or booking["check_in_date"]
+        check_out = request.check_out_date or booking["check_out_date"]
+        
+        # Check if new rooms are available
+        for new_room_id in request.room_ids:
+            conflicting = await db.bookings.find_one({
+                "id": {"$ne": request.booking_id},
+                "room_ids": new_room_id,
+                "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+                "$or": [
+                    {"check_in_date": {"$lt": check_out}, "check_out_date": {"$gt": check_in}},
+                ]
+            })
+            if conflicting:
+                room = await db.rooms.find_one({"id": new_room_id}, {"_id": 0})
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Room {room.get('room_number') if room else new_room_id} not available for selected dates"
+                )
+        
+        # Fetch new room details
+        new_rooms = []
+        new_room_numbers = []
+        new_room_categories = []
+        for room_id in request.room_ids:
+            room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
+            if room:
+                new_rooms.append(room["id"])
+                new_room_numbers.append(room["room_number"])
+                new_room_categories.append(room["category"])
+        
+        changes.append(f"Rooms: {', '.join(booking.get('room_numbers', []))} → {', '.join(new_room_numbers)}")
+        amendment_data["room_ids"] = new_rooms
+        amendment_data["room_numbers"] = new_room_numbers
+        amendment_data["room_categories"] = new_room_categories
+        if request.num_rooms:
+            amendment_data["num_rooms"] = request.num_rooms
+    
+    # Amend party composition
+    if request.total_members and request.total_members != booking.get("total_members"):
+        changes.append(f"Members: {booking.get('total_members', 1)} → {request.total_members}")
+        amendment_data["total_members"] = request.total_members
+    
+    if request.member_ages:
+        amendment_data["member_ages"] = request.member_ages
+    
+    # Recalculate total amount
+    if "check_in_date" in amendment_data or "check_out_date" in amendment_data or "room_ids" in amendment_data:
+        from datetime import date as date_type
+        
+        # FIX: Use correct collection name 'app_settings'
+        settings = await db.app_settings.find_one({}, {"_id": 0})
+        if not settings:
+            settings = {}
+        
+        print(f"DEBUG: Settings fetched from app_settings: {bool(settings)}, Keys: {list(settings.keys()) if settings else []}")
+        
+        check_in = date_type.fromisoformat(amendment_data.get("check_in_date", booking["check_in_date"]))
+        check_out = date_type.fromisoformat(amendment_data.get("check_out_date", booking["check_out_date"]))
+        nights = (check_out - check_in).days
+        
+        print("=== BACKEND COST CALCULATION ===")
+        print(f"Check-in: {check_in}, Check-out: {check_out}, Nights: {nights}")
+        
+        # Get room categories (either new or existing)
+        room_categories = amendment_data.get("room_categories", booking.get("room_categories", []))
+        print(f"Room categories: {room_categories}")
+        
+        # Calculate total for each category
+        cat_i_count = sum(1 for cat in room_categories if cat == "Cat I")
+        cat_ii_count = sum(1 for cat in room_categories if cat == "Cat II")
+        print(f"Cat I count: {cat_i_count}, Cat II count: {cat_ii_count}")
+        
+        # Use is_org to determine rates
+        is_org = booking.get("is_org", False)
+        print(f"Is Org: {is_org}")
+        print(f"Settings keys: {list(settings.keys())}")
+        print(f"Raw cat_i_rate from settings: {settings.get('cat_i_rate')}")
+        print(f"Raw cat_ii_rate from settings: {settings.get('cat_ii_rate')}")
+        
+        if is_org:
+            cat_i_rate = float(settings.get("cat_i_rate", 500))
+            cat_ii_rate = float(settings.get("cat_ii_rate", 400))
+        else:
+            # Non-Org uses same rate for both Cat I and Cat II (570+30=600)
+            non_org_room_rent = float(settings.get("non_org_room_rent", 570))
+            non_org_license_fee = float(settings.get("non_org_license_fee", 30))
+            cat_i_rate = non_org_room_rent + non_org_license_fee
+            cat_ii_rate = non_org_room_rent + non_org_license_fee
+        
+        print(f"Cat I rate: {cat_i_rate}, Cat II rate: {cat_ii_rate}")
+        
+        new_total = (cat_i_count * cat_i_rate + cat_ii_count * cat_ii_rate) * nights
+        old_total = booking.get("total_amount", 0)
+        
+        print(f"Calculation: ({cat_i_count} × {cat_i_rate} + {cat_ii_count} × {cat_ii_rate}) × {nights} = {new_total}")
+        print(f"Old Total: {old_total}, New Total: {new_total}, Difference: {new_total - old_total}")
+        print("=== END BACKEND CALCULATION ===")
+        
+        amendment_data["total_amount"] = new_total
+        
+        # Calculate payment difference and update advance_paid accordingly
+        old_advance = booking.get("advance_paid", 0)
+        
+        if new_total > old_total:
+            # Increased cost - additional payment OPTIONAL (can collect later at checkout)
+            additional_required = new_total - old_total
+            
+            # If payment provided, validate and record it
+            if request.additional_advance > 0:
+                if request.additional_advance < additional_required:
+                    # Partial payment allowed
+                    pass
+                
+                # Update advance paid (add the additional amount collected)
+                amendment_data["advance_paid"] = old_advance + request.additional_advance
+                
+                # Update payment details if provided
+                if request.payment_mode:
+                    amendment_data["payment_mode"] = request.payment_mode
+                if request.payment_id:
+                    amendment_data["payment_id"] = request.payment_id
+                if request.bank_name:
+                    amendment_data["bank_name"] = request.bank_name
+                if request.bank_ifsc:
+                    amendment_data["bank_ifsc"] = request.bank_ifsc.upper()
+                if request.bank_account:
+                    amendment_data["bank_account"] = request.bank_account
+                if request.upi_id:
+                    amendment_data["upi_id"] = request.upi_id
+                if request.upi_phone:
+                    amendment_data["upi_phone"] = request.upi_phone
+                
+                changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{request.additional_advance} collected, ₹{additional_required - request.additional_advance} due at checkout)")
+            else:
+                # No payment collected now - will be collected at checkout
+                changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{additional_required} will be collected at checkout)")
+        
+        elif new_total < old_total:
+            # Decreased cost - refund scenario
+            refund_due = old_total - new_total
+            
+            # Keep advance_paid as is - the refund will be processed at checkout
+            # Mark this booking as having a pending refund
+            amendment_data["refund_due"] = refund_due
+            amendment_data["refund_reason"] = "Booking amended - cost reduced"
+            
+            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Refund due: ₹{refund_due} - will be processed at checkout)")
+        
+        else:
+            # No cost change
+            changes.append(f"Booking details updated (Amount unchanged: ₹{new_total})")
+        
+        # Recalculate balance amount
+        # Balance = New Total - Advance Paid + Any Refund Due
+        current_advance = amendment_data.get("advance_paid", old_advance)
+        refund_due = amendment_data.get("refund_due", 0)
+        amendment_data["balance_amount"] = new_total - current_advance + refund_due
+    
+    # Add amendment log
+    amendment_log = booking.get("amendment_log", [])
+    amendment_log.append({
+        "amended_at": datetime.now(timezone.utc).isoformat(),
+        "changes": changes,
+        "reason": request.amendment_reason or "No reason provided"
+    })
+    amendment_data["amendment_log"] = amendment_log
+    
+    # Add notes
+    notes = booking.get("notes", "") or ""
+    notes += f"\n[AMENDED {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}]: {'; '.join(changes)}"
+    amendment_data["notes"] = notes.strip()
+    
+    # Update booking
+    await db.bookings.update_one(
+        {"id": request.booking_id},
+        {"$set": amendment_data}
+    )
+    
+    # Fetch updated booking
+    updated_booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
+    
+    return {
+        "message": "Booking amended successfully",
+        "booking": updated_booking,
+        "changes": changes
+    }
+
+# ============= GUEST HISTORY =============
+
+@api_router.get("/guest-history")
+async def get_guest_history(
+    phone_number: Optional[str] = Query(None, description="Guest phone number"),
+    aadhaar_number: Optional[str] = Query(None, description="Guest Aadhaar number"),
+    guest_name: Optional[str] = Query(None, description="Guest name (full or partial)")
+):
+    """
+    Get booking history for a guest by phone number, Aadhaar, or name.
+    Returns all bookings, statistics, and guest information.
+    """
+    if not phone_number and not aadhaar_number and not guest_name:
+        raise HTTPException(
+            status_code=400, 
+            detail="Please provide at least one search parameter (phone_number, aadhaar_number, or guest_name)"
+        )
+    
+    # Build query - combine multiple search criteria
+    or_conditions = []
+    
     if phone_number:
-        # Remove spaces and format for search (support multiple formats)
         phone_clean = phone_number.replace(" ", "").replace("+91", "").replace("-", "")
-        query["$or"] = [
+        or_conditions.extend([
             {"guest_contact": {"$regex": phone_clean, "$options": "i"}},
             {"guest_contact": {"$regex": f"\\+91.*{phone_clean}", "$options": "i"}}
-        ]
-    elif army_number:
-        query["army_number"] = {"$regex": army_number, "$options": "i"}
+        ])
+    
+    if aadhaar_number:
+        aadhaar_clean = aadhaar_number.replace(" ", "").replace("-", "")
+        or_conditions.append({"id_proof_number": {"$regex": aadhaar_clean, "$options": "i"}})
+    
+    if guest_name:
+        or_conditions.append({"guest_name": {"$regex": guest_name, "$options": "i"}})
+    
+    query = {"$or": or_conditions}
     
     # Fetch all bookings for this guest
     bookings = await db.bookings.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
@@ -1044,10 +2291,8 @@ async def get_guest_history(
     guest_info = {
         "guest_name": first_booking.get("guest_name"),
         "guest_contact": first_booking.get("guest_contact"),
-        "army_number": first_booking.get("army_number"),
-        "guest_rank": first_booking.get("guest_rank"),
-        "guest_unit": first_booking.get("guest_unit"),
-        "guest_service_status": first_booking.get("guest_service_status")
+        "is_org": first_booking.get("is_org", False),
+        "org_color": first_booking.get("org_color")
     }
     
     # Calculate statistics
@@ -1068,7 +2313,7 @@ async def get_guest_history(
                 checkout = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
                 nights = (checkout - checkin).days
                 total_nights += nights
-            except:
+            except Exception:
                 pass
     
     statistics = {
@@ -1309,20 +2554,110 @@ async def get_toiletry_transactions(
 
 # ============= DASHBOARD =============
 
+@api_router.post("/admin/sync-room-status")
+async def sync_room_status():
+    """
+    Admin utility: Sync room status based on checked-in bookings
+    
+    Use this to fix inconsistencies where rooms should be occupied 
+    but their status field wasn't updated.
+    """
+    # Get all checked-in bookings
+    checked_in_bookings = await db.bookings.find({
+        "status": BookingStatus.CHECKED_IN.value
+    }, {"_id": 0}).to_list(1000)
+    
+    # Collect all occupied room IDs
+    occupied_room_ids = set()
+    for booking in checked_in_bookings:
+        for rid in booking.get("room_ids", []):
+            occupied_room_ids.add(rid)
+        if booking.get("room_id"):
+            occupied_room_ids.add(booking["room_id"])
+    
+    # Update all rooms with checked-in bookings to occupied
+    updated_count = 0
+    for rid in occupied_room_ids:
+        result = await db.rooms.update_one(
+            {"id": rid},
+            {"$set": {"status": RoomStatus.OCCUPIED.value}}
+        )
+        if result.modified_count > 0:
+            updated_count += 1
+    
+    # Also mark all other rooms as available (unless in maintenance)
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    freed_count = 0
+    for room in all_rooms:
+        if room["id"] not in occupied_room_ids and room["status"] == RoomStatus.OCCUPIED.value:
+            await db.rooms.update_one(
+                {"id": room["id"]},
+                {"$set": {"status": RoomStatus.AVAILABLE.value}}
+            )
+            freed_count += 1
+    
+    return {
+        "message": "Room status synchronized",
+        "occupied_rooms_updated": updated_count,
+        "freed_rooms": freed_count,
+        "total_checked_in_bookings": len(checked_in_bookings),
+        "total_occupied_rooms": len(occupied_room_ids)
+    }
+
 @api_router.get("/dashboard/occupancy")
 async def get_occupancy():
-    """Get real-time occupancy data"""
+    """
+    Get real-time occupancy data
+    
+    Calculates occupancy by checking:
+    1. Rooms with status = 'occupied' (fast check)
+    2. Bookings with status = 'checked_in' (accurate check)
+    
+    Uses the union of both to handle edge cases where room status wasn't updated
+    """
     rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    
+    # Get all checked-in bookings
+    checked_in_bookings = await db.bookings.find({
+        "status": BookingStatus.CHECKED_IN.value
+    }, {"_id": 0}).to_list(1000)
+    
+    # Collect all occupied room IDs and room numbers from checked-in bookings
+    occupied_room_ids_from_bookings = set()
+    occupied_room_numbers_from_bookings = set()
+    
+    for booking in checked_in_bookings:
+        # Collect room IDs
+        for rid in booking.get("room_ids", []):
+            occupied_room_ids_from_bookings.add(rid)
+        if booking.get("room_id"):
+            occupied_room_ids_from_bookings.add(booking["room_id"])
+        
+        # Also collect room numbers (fallback for data inconsistency)
+        for room_num in booking.get("room_numbers", []):
+            occupied_room_numbers_from_bookings.add(room_num)
+    
+    # Mark rooms as occupied if either:
+    # 1. Room status is "occupied" OR
+    # 2. Room ID is in a checked-in booking OR
+    # 3. Room number is in a checked-in booking (fallback for data inconsistency)
+    def is_room_occupied(room):
+        return (
+            room["status"] == RoomStatus.OCCUPIED.value or 
+            room["id"] in occupied_room_ids_from_bookings or
+            room.get("room_number") in occupied_room_numbers_from_bookings
+        )
     
     total_rooms = len(rooms)
     cat_i_rooms = [r for r in rooms if r["category"] == RoomCategory.CAT_I.value]
     cat_ii_rooms = [r for r in rooms if r["category"] == RoomCategory.CAT_II.value]
     
-    occupied_rooms = [r for r in rooms if r["status"] == RoomStatus.OCCUPIED.value]
-    occupied_cat_i = [r for r in cat_i_rooms if r["status"] == RoomStatus.OCCUPIED.value]
-    occupied_cat_ii = [r for r in cat_ii_rooms if r["status"] == RoomStatus.OCCUPIED.value]
+    occupied_rooms = [r for r in rooms if is_room_occupied(r)]
+    occupied_cat_i = [r for r in cat_i_rooms if is_room_occupied(r)]
+    occupied_cat_ii = [r for r in cat_ii_rooms if is_room_occupied(r)]
     
     return {
+        "version": "v2.2_fixed_occupancy",  # Proof new code is running
         "overall": {
             "total": total_rooms,
             "occupied": len(occupied_rooms),
@@ -1486,7 +2821,16 @@ async def check_room_availability(
     check_out_date: str,
     category: Optional[RoomCategory] = None
 ):
-    """Check available rooms for given dates"""
+    """
+    Check available rooms for given dates
+    
+    Booking Time Logic:
+    - Check-in: 13:00 (1 PM) on check-in date
+    - Check-out: 08:00 (8 AM) on check-out date
+    - Room becomes available FROM check-out date for new bookings
+    
+    Example: Room booked Apr 16-17 → Available for new booking from Apr 17
+    """
     query = {}
     if category:
         query["category"] = category.value
@@ -1494,11 +2838,12 @@ async def check_room_availability(
     all_rooms = await db.rooms.find(query, {"_id": 0}).to_list(100)
     
     # Get bookings that overlap with requested dates
+    # Use $lt and $gt (not $lte/$gte) to allow same-day bookings
+    # If existing checkout = new checkin → NO conflict (guest leaves 08:00, new guest arrives 13:00)
     overlapping_bookings = await db.bookings.find({
         "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
-        "$or": [
-            {"check_in_date": {"$lte": check_out_date}, "check_out_date": {"$gte": check_in_date}}
-        ]
+        "check_in_date": {"$lt": check_out_date},
+        "check_out_date": {"$gt": check_in_date}
     }, {"_id": 0}).to_list(1000)
     
     booked_room_ids = set()
@@ -1521,7 +2866,18 @@ async def check_room_availability(
 
 @api_router.get("/dashboard/calendar")
 async def get_calendar_data(month: int, year: int):
-    """Get calendar/planner data for a given month showing room bookings per day"""
+    """Get calendar/planner data for a given month showing room bookings per day
+    
+    Booking Time Logic:
+    - Check-in: 1300h (1 PM) on check-in date
+    - Check-out: 0800h (8 AM) on check-out date
+    - Room Available: 0900h (9 AM) on check-out date
+    
+    Calendar Display:
+    - Room shows as occupied on check-in date
+    - Room shows as occupied on check-out date (until 08:00)
+    - Room becomes available for NEW bookings from check-out date
+    """
     import calendar
     
     days_in_month = calendar.monthrange(year, month)[1]
@@ -1543,12 +2899,29 @@ async def get_calendar_data(month: int, year: int):
     }, {"_id": 0}).to_list(5000)
     
     # Build a mapping: room_id -> list of {date_range, status, guest_name, booking_id}
+    # Also build room_number -> room_id mapping for fallback (handles room ID mismatches)
+    room_number_to_id = {r["room_number"]: r["id"] for r in all_rooms}
+    
     room_bookings = {}
     for b in bookings:
         # Get room IDs (handle both old and new format)
         rids = b.get("room_ids", [])
         if not rids and b.get("room_id"):
             rids = [b["room_id"]]
+        
+        # Also try to get room numbers if available (fallback for ID mismatches)
+        room_numbers = b.get("room_numbers", [])
+        if not room_numbers and b.get("room_number"):
+            room_numbers = [b["room_number"]]
+        
+        # Map room numbers to IDs (fallback mechanism for data migration)
+        if room_numbers:
+            for rnum in room_numbers:
+                if rnum in room_number_to_id:
+                    rid = room_number_to_id[rnum]
+                    if rid not in rids:
+                        rids.append(rid)
+        
         for rid in rids:
             if rid not in room_bookings:
                 room_bookings[rid] = []
@@ -1576,12 +2949,17 @@ async def get_calendar_data(month: int, year: int):
             day_status = "available"
             day_info = None
             for bk in rb:
-                if bk["check_in_date"] <= date_str and bk["check_out_date"] > date_str:
+                # UPDATED LOGIC: Show booking on both check-in and check-out date
+                # Room is occupied until check-out date (08:00), available from 09:00 same day
+                # For calendar display, we include the check-out date as occupied
+                if bk["check_in_date"] <= date_str <= bk["check_out_date"]:
                     day_status = bk["status"]
                     day_info = {
                         "booking_id": bk["booking_id"],
                         "booking_number": bk["booking_number"],
-                        "guest_name": bk["guest_name"]
+                        "guest_name": bk["guest_name"],
+                        "is_checkin_date": date_str == bk["check_in_date"],
+                        "is_checkout_date": date_str == bk["check_out_date"]
                     }
                     break
             room_entry["days"][date_str] = {
@@ -1659,10 +3037,9 @@ async def create_feedback(fb: FeedbackCreate):
         "booking_id": fb.booking_id,
         "booking_number": booking.get("booking_number", ""),
         "guest_name": booking.get("guest_name", ""),
-        "guest_rank": booking.get("guest_rank"),
-        "guest_unit": booking.get("guest_unit"),
         "guest_contact": booking.get("guest_contact"),
-        "service_status": booking.get("guest_service_status"),
+        "is_org": booking.get("is_org", False),
+        "org_color": booking.get("org_color"),
         "check_in_date": booking.get("check_in_date", ""),
         "check_out_date": booking.get("check_out_date", ""),
         "duration_nights": nights,
@@ -1751,15 +3128,15 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
 
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
     
-    command_map = {
-        "Northern Command": "N Command", "Eastern Command": "E Command",
-        "Western Command": "W Command", "Southern Command": "S Command",
-        "South Western Command": "SW Command", "Central Command": "C Command",
-        "ARTRAC": "ARTRAC", "SFC": "SFC", "Army HQ": "Army HQ"
-    }
+    # Color-based grouping for Org guests + Non-Org category
+    colors_list = settings.get("colors", COLOR_OPTIONS)
+    color_stats = {color: {"guests": 0, "days": 0} for color in colors_list}
+    color_stats["Non-Org"] = {"guests": 0, "days": 0}  # For non-organization guests
+    color_stats["Unassigned"] = {"guests": 0, "days": 0}  # For Org guests without color yet
     
-    commands = {cmd: {"guests": 0, "days": 0} for cmd in COMMAND_ORDER}
-    jco_days = 0; or_days = 0; def_civ_days = 0
+    org_cat_i_days = 0  # Organization Cat I
+    org_cat_ii_days = 0  # Organization Cat II
+    non_org_days = 0  # Non-Org (all categories)
     extra_beds_total = 0
     
     for bk in bookings:
@@ -1771,52 +3148,57 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         if nights == 0:
             continue
         
-        rank = (bk.get("guest_rank") or "").strip().lower()
-        is_def_civ = rank == "def civ"
-        svc = bk.get("service_type", "")
+        is_org = bk.get("is_org", False)
+        org_color = bk.get("org_color")
         
-        if is_def_civ:
-            cmd_key = "Def Civ"
-        elif svc == "Air Force":
-            cmd_key = "Air Force"
-        elif svc == "Navy":
-            cmd_key = "Navy"
-        elif svc == "SFC":
-            cmd_key = "SFC"
-        elif svc == "Army":
-            cmd_key = command_map.get(bk.get("command_hq", ""), "Army HQ")
+        # Categorize by Org/Non-Org and color
+        if is_org:
+            if org_color and org_color in color_stats:
+                color_key = org_color
+            else:
+                color_key = "Unassigned"  # Org guest but no color assigned yet
         else:
-            cmd_key = "Others"
+            color_key = "Non-Org"
         
-        if cmd_key in commands:
-            commands[cmd_key]["guests"] += 1
-            commands[cmd_key]["days"] += nights
+        if color_key in color_stats:
+            color_stats[color_key]["guests"] += 1
+            color_stats[color_key]["days"] += nights
+        
+        # Calculate room-days by category for revenue
+        # Each room contributes 1 night per night stayed
+        num_rooms = len(bk.get("room_ids", []))
+        if num_rooms == 0:
+            num_rooms = 1  # Fallback for old bookings
         
         cats = bk.get("room_categories", [])
-        if is_def_civ:
-            def_civ_days += nights * max(1, len(cats))
+        if is_org:
+            # Organization rates - Cat I or Cat II
+            # Count each category once (not per night)
+            cat_i_count = cats.count("Cat I")
+            cat_ii_count = cats.count("Cat II")
+            
+            org_cat_i_days += cat_i_count * nights
+            org_cat_ii_days += cat_ii_count * nights
         else:
-            for cat in (cats or ["Cat II"]):
-                if cat == "Cat I":
-                    jco_days += nights
-                else:
-                    or_days += nights
+            # Non-Org rates (flat rate regardless of category)
+            # All rooms get same rate, so just count total room-nights
+            non_org_days += num_rooms * nights
         
         extra_beds_total += bk.get("extra_beds", 0) * nights
     
     s = settings
     cat_i_lf = s.get("cat_i_license_fee", 30)
     cat_ii_lf = s.get("cat_ii_license_fee", 15)
-    def_civ_lf = s.get("def_civ_license_fee", 30)
+    non_org_lf = s.get("non_org_license_fee", 30)
     cat_i_rr = s.get("cat_i_room_rent", 470)
     cat_ii_rr = s.get("cat_ii_room_rent", 385)
-    def_civ_rr = s.get("def_civ_room_rent", 570)
+    non_org_rr = s.get("non_org_room_rent", 570)
     
-    room_rent_total = round(jco_days * cat_i_rr + or_days * cat_ii_rr + def_civ_days * def_civ_rr, 2)
-    lf_jco = round(jco_days * cat_i_lf, 2)
-    lf_or = round(or_days * cat_ii_lf, 2)
-    lf_def_civ = round(def_civ_days * def_civ_lf, 2)
-    total_license_fee = round(lf_jco + lf_or + lf_def_civ, 2)
+    room_rent_total = round(org_cat_i_days * cat_i_rr + org_cat_ii_days * cat_ii_rr + non_org_days * non_org_rr, 2)
+    lf_org_cat_i = round(org_cat_i_days * cat_i_lf, 2)
+    lf_org_cat_ii = round(org_cat_ii_days * cat_ii_lf, 2)
+    lf_non_org = round(non_org_days * non_org_lf, 2)
+    total_license_fee = round(lf_org_cat_i + lf_org_cat_ii + lf_non_org, 2)
     extra_bed_amount = round(extra_beds_total * 75, 2)
     grand_total = round(room_rent_total + total_license_fee + extra_bed_amount, 2)
     
@@ -1833,7 +3215,7 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     ), 2)
     
     total_rooms = s.get("cat_i_rooms_count", 6) + s.get("cat_ii_rooms_count", 9)
-    total_booked_days = sum(v["days"] for v in commands.values())
+    total_booked_days = sum(v["days"] for v in color_stats.values())
     avg_occ = round(total_booked_days / (total_rooms * days_in_month) * 100, 2) if total_rooms * days_in_month > 0 else 0
     
     no_shows = await db.bookings.count_documents({
@@ -1845,18 +3227,18 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         "month": month, "year": year,
         "month_name": cal_mod.month_name[month],
         "days_in_month": days_in_month, "total_rooms": total_rooms,
-        "command_breakdown": [
-            {"command": c, "guests": commands[c]["guests"], "days": commands[c]["days"]}
-            for c in COMMAND_ORDER if commands[c]["guests"] > 0 or commands[c]["days"] > 0
+        "color_breakdown": [
+            {"color": c, "guests": color_stats[c]["guests"], "days": color_stats[c]["days"]}
+            for c in color_stats.keys() if color_stats[c]["guests"] > 0 or color_stats[c]["days"] > 0
         ],
-        "total_guests": sum(v["guests"] for v in commands.values()),
+        "total_guests": sum(v["guests"] for v in color_stats.values()),
         "total_days": total_booked_days,
-        "jco_days": jco_days, "or_days": or_days, "def_civ_days": def_civ_days,
+        "org_cat_i_days": org_cat_i_days, "org_cat_ii_days": org_cat_ii_days, "non_org_days": non_org_days,
         "extra_beds_total": extra_beds_total,
         "license_fees": {
-            "jco": {"days": jco_days, "rate": cat_i_lf, "total": lf_jco},
-            "or": {"days": or_days, "rate": cat_ii_lf, "total": lf_or},
-            "def_civ": {"days": def_civ_days, "rate": def_civ_lf, "total": lf_def_civ}
+            "org_cat_i": {"days": org_cat_i_days, "rate": cat_i_lf, "total": lf_org_cat_i},
+            "org_cat_ii": {"days": org_cat_ii_days, "rate": cat_ii_lf, "total": lf_org_cat_ii},
+            "non_org": {"days": non_org_days, "rate": non_org_lf, "total": lf_non_org}
         },
         "room_rent_total": room_rent_total,
         "total_license_fee": total_license_fee,
@@ -1869,16 +3251,491 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         "total_booked_days": total_booked_days,
         "avg_occupancy": avg_occ,
         "rates": {
-            "cat_i_rate": s.get("cat_i_rate", 500), "cat_ii_rate": s.get("cat_ii_rate", 400),
-            "def_civ_rate": s.get("def_civ_cat_i_rate", 600),
-            "cat_i_room_rent": cat_i_rr, "cat_ii_room_rent": cat_ii_rr, "def_civ_room_rent": def_civ_rr,
-            "cat_i_license_fee": cat_i_lf, "cat_ii_license_fee": cat_ii_lf, "def_civ_license_fee": def_civ_lf
+            "cat_i_room_rent": cat_i_rr, "cat_ii_room_rent": cat_ii_rr, "non_org_room_rent": non_org_rr,
+            "cat_i_license_fee": cat_i_lf, "cat_ii_license_fee": cat_ii_lf, "non_org_license_fee": non_org_lf
         }
     }
 
-# Include the router in the main app
-app.include_router(api_router)
+# ============= NEW REPORT ENDPOINTS =============
 
+@api_router.get("/reports/room-occupancy")
+async def get_room_occupancy_report(
+    filter_type: str = Query(...),
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    quarter: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get room occupancy report with flexible date filters"""
+    import calendar as cal_mod
+    
+    # Initialize period_label to avoid undefined variable warning
+    period_label = None
+    
+    # Determine date range based on filter type
+    if filter_type == "daily":
+        if not start_date:
+            start_date = date_type.today().isoformat()
+        end_date = start_date
+        period_label = f"Daily Report - {start_date}"
+    elif filter_type == "monthly":
+        if not month or not year:
+            raise HTTPException(400, "Month and year required for monthly filter")
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date = f"{year}-{month:02d}-{days_in_month:02d}"
+        period_label = f"{cal_mod.month_name[month]} {year}"
+    elif filter_type == "quarterly":
+        if not quarter or not year:
+            raise HTTPException(400, "Quarter and year required for quarterly filter")
+        start_month = (quarter - 1) * 3 + 1
+        end_month = start_month + 2
+        start_date = f"{year}-{start_month:02d}-01"
+        days_in_end_month = cal_mod.monthrange(year, end_month)[1]
+        end_date = f"{year}-{end_month:02d}-{days_in_end_month:02d}"
+        period_label = f"Q{quarter} {year}"
+    elif filter_type == "annual":
+        if not year:
+            raise HTTPException(400, "Year required for annual filter")
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        period_label = f"Year {year}"
+    elif filter_type == "custom":
+        if not start_date or not end_date:
+            raise HTTPException(400, "Start and end dates required for custom filter")
+        period_label = f"{start_date} to {end_date}"
+    else:
+        raise HTTPException(400, "Invalid filter type")
+    
+    # Get all rooms
+    all_rooms = await db.rooms.find({}, {"_id": 0}).sort("room_number", 1).to_list(100)
+    
+    # Get bookings in the date range (checked_in or checked_out)
+    bookings = await db.bookings.find({
+        "status": {"$in": ["checked_in", "checked_out"]},
+        "check_in_date": {"$lte": end_date},
+        "check_out_date": {"$gt": start_date}
+    }, {"_id": 0}).to_list(5000)
+    
+    # Calculate total days in period
+    start_dt = date_type.fromisoformat(start_date)
+    end_dt = date_type.fromisoformat(end_date)
+    total_days = (end_dt - start_dt).days + 1
+    
+    # Get settings for rates
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    cat_i_rr = settings.get("cat_i_room_rent", 470)
+    cat_ii_rr = settings.get("cat_ii_room_rent", 385)
+    non_org_rr = settings.get("non_org_room_rent", 570)
+    cat_i_lf = settings.get("cat_i_license_fee", 30)
+    cat_ii_lf = settings.get("cat_ii_license_fee", 15)
+    non_org_lf = settings.get("non_org_license_fee", 30)
+    
+    # Calculate room-wise occupancy
+    room_details = []
+    total_occupied = 0
+    total_revenue = 0
+    
+    for room in all_rooms:
+        room_id = room["id"]
+        room_number = room["room_number"]
+        category = room["category"]
+        
+        # Find bookings for this room
+        room_bookings = []
+        for bk in bookings:
+            room_ids = bk.get("room_ids", [])
+            if not room_ids and bk.get("room_id"):
+                room_ids = [bk["room_id"]]
+            if room_id in room_ids:
+                room_bookings.append(bk)
+        
+        # Calculate occupied days and build detailed booking list
+        occupied_days = 0
+        room_revenue = 0
+        bookings_detail = []
+        
+        for bk in room_bookings:
+            checkin = date_type.fromisoformat(bk["check_in_date"])
+            checkout = date_type.fromisoformat(bk["check_out_date"])
+            eff_in = max(checkin, start_dt)
+            eff_out = min(checkout, end_dt + timedelta(days=1))
+            nights = max(0, (eff_out - eff_in).days)
+            occupied_days += nights
+            
+            # Calculate revenue for this booking
+            is_org = bk.get("is_org", False)
+            
+            if is_org:
+                # Organization rates based on category
+                if category == "Cat I":
+                    rate_per_day = cat_i_rr + cat_i_lf
+                else:
+                    rate_per_day = cat_ii_rr + cat_ii_lf
+            else:
+                # Non-Org flat rate
+                rate_per_day = non_org_rr + non_org_lf
+            
+            booking_revenue = nights * rate_per_day
+            room_revenue += booking_revenue
+            
+            # Count total members (main guest + family)
+            total_members = 1 + len(bk.get("family_members", []))
+            
+            # Build detailed booking info for expandable row
+            bookings_detail.append({
+                "booking_number": bk.get("booking_number", "N/A"),
+                "is_org": is_org,
+                "org_color": bk.get("org_color", "N/A"),
+                "name": bk.get("guest_name", "N/A"),
+                "from_date": bk["check_in_date"],
+                "to_date": bk["check_out_date"],
+                "days": nights,
+                "total_members": total_members,
+                "rate_per_day": rate_per_day,
+                "total_revenue_due": round(booking_revenue, 2),
+                "bill_no": bk.get("booking_number", "N/A"),  # Using booking number as bill number
+                "advance_paid": bk.get("advance_paid", 0),
+                "final_amount_paid": bk.get("balance_amount", 0) if bk.get("status") == "checked_out" else 0
+            })
+        
+        available_days = total_days - occupied_days
+        occupancy_percent = round((occupied_days / total_days) * 100, 2) if total_days > 0 else 0
+        
+        room_details.append({
+            "room_number": room_number,
+            "category": category,
+            "occupied_days": occupied_days,
+            "available_days": available_days,
+            "occupancy_percent": occupancy_percent,
+            "revenue": round(room_revenue, 2),
+            "bookings_detail": bookings_detail  # NEW: Expandable booking details
+        })
+        
+        total_occupied += occupied_days
+        total_revenue += room_revenue
+    
+    total_available = (len(all_rooms) * total_days) - total_occupied
+    avg_occupancy = round((total_occupied / (len(all_rooms) * total_days)) * 100, 2) if len(all_rooms) * total_days > 0 else 0
+    
+    return {
+        "period_label": period_label,
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_rooms": len(all_rooms),
+        "total_days": total_days,
+        "total_occupied_days": total_occupied,
+        "total_available_days": total_available,
+        "avg_occupancy": avg_occupancy,
+        "total_bookings": len(bookings),
+        "total_revenue": round(total_revenue, 2),
+        "room_details": room_details
+    }
+
+
+@api_router.get("/reports/room-allotment")
+async def get_room_allotment_report(
+    filter_type: str = Query(...),
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    quarter: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get room allotment report showing all bookings with room assignments"""
+    import calendar as cal_mod
+    
+    # Initialize period_label to avoid undefined variable warning
+    period_label = None
+    
+    # Determine date range based on filter type (same logic as occupancy)
+    if filter_type == "daily":
+        if not start_date:
+            start_date = date_type.today().isoformat()
+        end_date = start_date
+        period_label = f"Daily Report - {start_date}"
+    elif filter_type == "monthly":
+        if not month or not year:
+            raise HTTPException(400, "Month and year required for monthly filter")
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date = f"{year}-{month:02d}-{days_in_month:02d}"
+        period_label = f"{cal_mod.month_name[month]} {year}"
+    elif filter_type == "quarterly":
+        if not quarter or not year:
+            raise HTTPException(400, "Quarter and year required for quarterly filter")
+        start_month = (quarter - 1) * 3 + 1
+        end_month = start_month + 2
+        start_date = f"{year}-{start_month:02d}-01"
+        days_in_end_month = cal_mod.monthrange(year, end_month)[1]
+        end_date = f"{year}-{end_month:02d}-{days_in_end_month:02d}"
+        period_label = f"Q{quarter} {year}"
+    elif filter_type == "annual":
+        if not year:
+            raise HTTPException(400, "Year required for annual filter")
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        period_label = f"Year {year}"
+    elif filter_type == "custom":
+        if not start_date or not end_date:
+            raise HTTPException(400, "Start and end dates required for custom filter")
+        period_label = f"{start_date} to {end_date}"
+    else:
+        raise HTTPException(400, "Invalid filter type")
+    
+    # Get bookings in the date range
+    bookings = await db.bookings.find({
+        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
+        "check_in_date": {"$lte": end_date},
+        "check_out_date": {"$gt": start_date}
+    }, {"_id": 0}).sort("check_in_date", 1).to_list(5000)
+    
+    # Get settings for financial calculations
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    
+    allotments = []
+    for bk in bookings:
+        checkin = date_type.fromisoformat(bk["check_in_date"])
+        checkout = date_type.fromisoformat(bk["check_out_date"])
+        nights = (checkout - checkin).days
+        
+        # Calculate total amount
+        is_org = bk.get("is_org", False)
+        cats = bk.get("room_categories", [])
+        num_rooms = len(bk.get("room_ids", [])) or 1
+        
+        if is_org:
+            # Organization rates based on category
+            if "Cat I" in cats:
+                room_rent = settings.get("cat_i_room_rent", 470)
+                license_fee = settings.get("cat_i_license_fee", 30)
+            else:
+                room_rent = settings.get("cat_ii_room_rent", 385)
+                license_fee = settings.get("cat_ii_license_fee", 15)
+        else:
+            # Non-Org flat rate
+            room_rent = settings.get("non_org_room_rent", 570)
+            license_fee = settings.get("non_org_license_fee", 30)
+        
+        total_amount = (room_rent + license_fee) * nights * num_rooms
+        total_amount += bk.get("extra_beds", 0) * 75 * nights
+        
+        # Calculate party composition
+        self_count = 1  # Main guest
+        wife_count = 0
+        child_count = 0
+        dependents_count = 0  # Those WITH org_id (formerly dependent_id)
+        non_dependents_count = 0  # Those WITHOUT org_id
+        
+        family_members = bk.get("family_members", [])
+        for fm in family_members:
+            relation = (fm.get("relation") or "").lower()
+            has_org_card = fm.get("has_org_card", False)
+            org_id = fm.get("org_id", "")
+            
+            # Count by relationship
+            if "w/o" in relation or "wife" in relation:
+                wife_count += 1
+            elif "s/o" in relation or "d/o" in relation or "son" in relation or "daughter" in relation or "child" in relation:
+                child_count += 1
+            
+            # Count dependents vs non-dependents
+            if has_org_card and org_id:
+                dependents_count += 1
+            else:
+                non_dependents_count += 1
+        
+        allotments.append({
+            "booking_id": bk["id"],
+            "booking_number": bk.get("booking_number", "N/A"),
+            "guest_name": bk.get("guest_name", "N/A"),
+            "is_org": is_org,
+            "org_color": bk.get("org_color", "N/A"),
+            "room_numbers": bk.get("room_numbers", []),
+            "room_categories": bk.get("room_categories", []),
+            "check_in_date": bk["check_in_date"],
+            "check_out_date": bk["check_out_date"],
+            "nights": nights,
+            "self_count": self_count,
+            "wife_count": wife_count,
+            "child_count": child_count,
+            "dependents": dependents_count,
+            "non_dependents": non_dependents_count,
+            "aadhaar_no": bk.get("aadhaar_number", "N/A"),
+            "mobile_no": bk.get("guest_contact", "N/A"),
+            "total_amount": round(total_amount, 2)
+        })
+    
+    return {
+        "period_label": period_label,
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_allotments": len(allotments),
+        "allotments": allotments
+    }
+
+
+@api_router.get("/reports/guest-details")
+async def get_guest_details_report(
+    filter_type: str = Query(...),
+    month: Optional[int] = None,
+    year: Optional[int] = None,
+    quarter: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get comprehensive guest details report - includes ALL party members"""
+    import calendar as cal_mod
+    
+    # Determine date range based on filter type
+    if filter_type == "daily":
+        if not start_date:
+            start_date = date_type.today().isoformat()
+        end_date = start_date
+        period_label = f"Daily Report - {start_date}"
+    elif filter_type == "monthly":
+        if not month or not year:
+            raise HTTPException(400, "Month and year required for monthly filter")
+        days_in_month = cal_mod.monthrange(year, month)[1]
+        start_date = f"{year}-{month:02d}-01"
+        end_date = f"{year}-{month:02d}-{days_in_month:02d}"
+        period_label = f"{cal_mod.month_name[month]} {year}"
+    elif filter_type == "quarterly":
+        if not quarter or not year:
+            raise HTTPException(400, "Quarter and year required for quarterly filter")
+        start_month = (quarter - 1) * 3 + 1
+        end_month = start_month + 2
+        start_date = f"{year}-{start_month:02d}-01"
+        days_in_end_month = cal_mod.monthrange(year, end_month)[1]
+        end_date = f"{year}-{end_month:02d}-{days_in_end_month:02d}"
+        period_label = f"Q{quarter} {year}"
+    elif filter_type == "annual":
+        if not year:
+            raise HTTPException(400, "Year required for annual filter")
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+        period_label = f"Year {year}"
+    elif filter_type == "custom":
+        if not start_date or not end_date:
+            raise HTTPException(400, "Start and end dates required for custom filter")
+        period_label = f"{start_date} to {end_date}"
+    else:
+        raise HTTPException(400, "Invalid filter type")
+    
+    # Get bookings in the date range
+    bookings = await db.bookings.find({
+        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
+        "check_in_date": {"$lte": end_date},
+        "check_out_date": {"$gt": start_date}
+    }, {"_id": 0}).sort("check_in_date", 1).to_list(5000)
+    
+    # Get settings for financial calculations
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    
+    guest_party_members = []
+    total_nights = 0
+    total_revenue = 0
+    total_party_members = 0
+    
+    for bk in bookings:
+        checkin = date_type.fromisoformat(bk["check_in_date"])
+        checkout = date_type.fromisoformat(bk["check_out_date"])
+        nights = (checkout - checkin).days
+        total_nights += nights
+        
+        # Calculate total amount
+        is_org = bk.get("is_org", False)
+        cats = bk.get("room_categories", [])
+        num_rooms = len(bk.get("room_ids", [])) or 1
+        
+        if is_org:
+            # Organization rates based on category
+            if "Cat I" in cats:
+                room_rent = settings.get("cat_i_room_rent", 470)
+                license_fee = settings.get("cat_i_license_fee", 30)
+            else:
+                room_rent = settings.get("cat_ii_room_rent", 385)
+                license_fee = settings.get("cat_ii_license_fee", 15)
+        else:
+            # Non-Org flat rate
+            room_rent = settings.get("non_org_room_rent", 570)
+            license_fee = settings.get("non_org_license_fee", 30)
+        
+        total_amount = (room_rent + license_fee) * nights * num_rooms
+        total_amount += bk.get("extra_beds", 0) * 75 * nights
+        total_revenue += total_amount
+        
+        # Add main guest (Self)
+        guest_party_members.append({
+            "booking_number": bk.get("booking_number", "N/A"),
+            "room_numbers": ", ".join(bk.get("room_numbers", [])),
+            "is_org": "Org" if is_org else "Non-Org",
+            "org_color": bk.get("org_color", "—"),
+            "name": bk.get("guest_name", "N/A"),
+            "age": bk.get("guest_age") or "—",
+            "sex": bk.get("guest_sex") or "—",
+            "relationship": "Self",
+            "address": bk.get("guest_address") or "—",
+            "aadhaar_no": bk.get("aadhaar_number") or "—",
+            "mobile_no": bk.get("guest_contact") or "—",
+            "check_in_date": bk["check_in_date"],
+            "check_out_date": bk["check_out_date"],
+            "nights": nights,
+            "total_amount": round(total_amount, 2)
+        })
+        total_party_members += 1
+        
+        # Add family members
+        family_members = bk.get("family_members", [])
+        for fm in family_members:
+            guest_party_members.append({
+                "booking_number": bk.get("booking_number", "N/A"),
+                "room_numbers": ", ".join(bk.get("room_numbers", [])),
+                "is_org": "—",  # Family members inherit from main guest
+                "org_color": "—",
+                "name": fm.get("name", "—"),
+                "age": fm.get("age", "—"),
+                "sex": fm.get("sex", "—"),
+                "relationship": fm.get("relation", "—").title(),
+                "address": bk.get("guest_address") or "—",  # Same as main guest
+                "aadhaar_no": "—",  # Not stored for family members
+                "mobile_no": fm.get("mobile", "—"),
+                "check_in_date": bk["check_in_date"],
+                "check_out_date": bk["check_out_date"],
+                "nights": nights,
+                "total_amount": "—"  # Amount is for the whole booking
+            })
+            total_party_members += 1
+    
+    return {
+        "period_label": period_label,
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_party_members": total_party_members,
+        "total_bookings": len(bookings),
+        "total_nights": total_nights,
+        "total_revenue": round(total_revenue, 2),
+        "guest_party_members": guest_party_members
+    }
+
+# Health check endpoint for Render
+@api_router.get("/health")
+async def health_check():
+    """Health check endpoint for cloud deployment monitoring"""
+    try:
+        # Test database connection
+        await db.command("ping")
+        return {
+            "status": "healthy",
+            "service": "SARAI Backend",
+            "database": "connected"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail="Service unhealthy")
+
+# ============= CORS & ROUTER SETUP =============
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -1887,6 +3744,321 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============= STARTUP & SHUTDOWN EVENTS =============
+@app.on_event("startup")
+async def startup_event():
+    """Initialize scheduler, run migrations, and check for missed backups on startup"""
+    logger.info("🚀 Application starting up...")
+    
+    try:
+        # Run one-time database migrations
+        logger.info("🔄 Running database migrations...")
+        migration_result = await run_startup_migrations(db)
+        
+        if migration_result["status"] == "success":
+            logger.info(f"✅ Migration completed: {migration_result['message']}")
+        elif migration_result["status"] == "already_completed":
+            logger.info("✅ Migrations already completed")
+        else:
+            logger.warning(f"⚠️ Migration status: {migration_result['status']}")
+    except Exception as e:
+        logger.error(f"❌ Migration failed: {str(e)}", exc_info=True)
+        logger.warning("⚠️ Application will continue despite migration failure")
+    
+    try:
+        # Initialize backup scheduler
+        scheduler_service.init_scheduler(db)
+        logger.info("Backup scheduler initialized")
+        
+        # Check for missed backups
+        missed_check = await scheduler_service.check_missed_backups(db)
+        if missed_check.get("missed"):
+            logger.warning(f"Backup warning: {missed_check.get('message')}")
+    except Exception as e:
+        logger.error(f"Startup initialization error: {str(e)}")
+    
+    logger.info("✅ Application startup complete")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+# ============= BACKUP & RESTORE APIs =============
+
+@api_router.post("/backups/manual/full")
+async def trigger_full_backup():
+    """Manually trigger a full backup"""
+    try:
+        metadata = await backup_service.perform_full_backup(db)
+        return {
+            "success": True,
+            "message": "Full backup completed successfully",
+            "backup": metadata
+        }
+    except Exception as e:
+        logger.error(f"Manual full backup failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+
+@api_router.post("/backups/manual/incremental")
+async def trigger_incremental_backup():
+    """Manually trigger an incremental backup"""
+    try:
+        metadata = await backup_service.perform_incremental_backup(db)
+        return {
+            "success": True,
+            "message": "Incremental backup completed successfully",
+            "backup": metadata
+        }
+    except Exception as e:
+        logger.error(f"Manual incremental backup failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+
+@api_router.get("/backups/status")
+async def get_backup_status():
+    """Get current backup status and statistics"""
+    try:
+        # Get last backup
+        last_backup = await backup_service.get_last_backup_metadata(db)
+        
+        # Get total backup count
+        total_backups = await db.backup_metadata.count_documents({"status": "SUCCESS"})
+        
+        # Get first backup date
+        first_backup = await db.backup_metadata.find_one(
+            {"status": "SUCCESS"},
+            {"_id": 0, "timestamp": 1},
+            sort=[("timestamp", 1)]
+        )
+        
+        # Check for missed backups
+        missed_check = await scheduler_service.check_missed_backups(db)
+        
+        # Get scheduler status
+        scheduler_status = scheduler_service.get_scheduler_status()
+        
+        return {
+            "last_backup": last_backup,
+            "total_backups": total_backups,
+            "first_backup_date": first_backup.get("timestamp") if first_backup else None,
+            "missed_backup_warning": missed_check,
+            "scheduler": scheduler_status
+        }
+    except Exception as e:
+        logger.error(f"Error fetching backup status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/backups/history")
+async def get_backup_history(limit: int = Query(50, ge=1, le=100)):
+    """Get backup history"""
+    try:
+        history = await backup_service.get_backup_history(db, limit=limit)
+        return {
+            "backups": history,
+            "count": len(history)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching backup history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/backups/restore/full/{backup_id}")
+async def restore_full_backup(backup_id: str):
+    """Restore a specific backup (MERGE strategy)"""
+    try:
+        result = await restore_service.restore_full(backup_id, db)
+        return {
+            "success": True,
+            "message": "Restore completed successfully",
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Restore failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+
+@api_router.post("/backups/restore/last")
+async def restore_last_backup():
+    """Restore the most recent successful backup"""
+    try:
+        result = await restore_service.restore_last_backup(db)
+        return {
+            "success": True,
+            "message": "Last backup restored successfully",
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Restore failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+
+class DateRangeRestore(BaseModel):
+    start_date: str
+    end_date: str
+
+@api_router.post("/backups/restore/range")
+async def restore_date_range(request: DateRangeRestore):
+    """Restore all backups within a date range"""
+    try:
+        start = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
+        end = datetime.fromisoformat(request.end_date.replace('Z', '+00:00'))
+        
+        result = await restore_service.restore_by_date_range(start, end, db)
+        return {
+            "success": True,
+            "message": "Date range restore completed",
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Date range restore failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Restore failed: {str(e)}")
+
+
+class ScheduleUpdate(BaseModel):
+    hour: int = Field(..., ge=0, le=23)
+    minute: int = Field(..., ge=0, le=59)
+
+@api_router.put("/backups/schedule")
+async def update_backup_schedule(request: ScheduleUpdate):
+    """Update scheduled backup time"""
+    try:
+        result = await scheduler_service.update_backup_schedule(
+            request.hour,
+            request.minute,
+            db
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to update schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/backups/restore-history")
+async def get_restore_history(limit: int = Query(20, ge=1, le=50)):
+    """Get restore operation history"""
+    try:
+        history = await restore_service.get_restore_history(db, limit=limit)
+        return {
+            "restores": history,
+            "count": len(history)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching restore history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============= MIGRATION ENDPOINTS =============
+
+@api_router.get("/migration/status")
+async def get_migration_status():
+    """Get status of one-time data sanitization migration"""
+    try:
+        status = await db.migration_status.find_one(
+            {"migration_id": "2026_04_10_sanitize_defense_data"},
+            {"_id": 0}
+        )
+        
+        if not status:
+            return {
+                "status": "pending",
+                "message": "Migration not yet run"
+            }
+        
+        return status
+    except Exception as e:
+        logger.error(f"Error fetching migration status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/migration/download-archive")
+async def download_migration_archive():
+    """Download the defense data archive file"""
+    try:
+        # Get migration status to find archive file
+        status = await db.migration_status.find_one(
+            {"migration_id": "2026_04_10_sanitize_defense_data"},
+            {"_id": 0}
+        )
+        
+        if not status or not status.get("archive_file"):
+            raise HTTPException(
+                status_code=404,
+                detail="Archive file not found. Migration may not have completed yet."
+            )
+        
+        archive_filename = status["archive_file"]
+        migrations_dir = Path(__file__).parent / "migrations"
+        archive_path = migrations_dir / archive_filename
+        
+        if not archive_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Archive file {archive_filename} not found on server"
+            )
+        
+        return FileResponse(
+            path=str(archive_path),
+            filename=archive_filename,
+            media_type="text/csv"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading archive: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/migration/delete-archive")
+async def delete_migration_archive():
+    """Delete the migration archive file (after verification)"""
+    try:
+        # Get migration status to find archive file
+        status = await db.migration_status.find_one(
+            {"migration_id": "2026_04_10_sanitize_defense_data"},
+            {"_id": 0}
+        )
+        
+        if not status or not status.get("archive_file"):
+            raise HTTPException(
+                status_code=404,
+                detail="Archive file not found"
+            )
+        
+        archive_filename = status["archive_file"]
+        migrations_dir = Path(__file__).parent / "migrations"
+        archive_path = migrations_dir / archive_filename
+        
+        if archive_path.exists():
+            archive_path.unlink()
+            
+            # Update migration status
+            await db.migration_status.update_one(
+                {"migration_id": "2026_04_10_sanitize_defense_data"},
+                {
+                    "$set": {
+                        "archive_deleted": True,
+                        "archive_deleted_at": datetime.now(timezone.utc).isoformat()
+                    }
+                }
+            )
+            
+            return {
+                "success": True,
+                "message": f"Archive file {archive_filename} deleted successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Archive file not found on server"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting archive: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============= INCLUDE ROUTER (MUST BE AFTER ALL ROUTES) =============
+app.include_router(api_router)

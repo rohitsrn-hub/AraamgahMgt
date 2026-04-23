@@ -3,9 +3,12 @@ import axios from "axios";
 import { API } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import { toast } from "sonner";
-import { ChartBar, Star, ThumbsUp, Users } from "@phosphor-icons/react";
+import { ChartBar, Star, ThumbsUp, Users, Printer } from "@phosphor-icons/react";
+import jsPDF from "jspdf";
+import "jspdf-autotable";
 
 const CATEGORY_LABELS = {
   cleanliness: { en: "Cleanliness", hi: "Swachhata" },
@@ -55,6 +58,178 @@ export default function FeedbackPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const printFeedback = (fb) => {
+    const doc = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    let yPos = 20;
+
+    // Header
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GUEST FEEDBACK FORM', pageWidth / 2, yPos, { align: 'center' });
+    
+    yPos += 6;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('ATITHI PRATIKRIYA PRAPATRA / अतिथि प्रतिक्रिया प्रपत्र', pageWidth / 2, yPos, { align: 'center' });
+    
+    yPos += 10;
+    
+    // Section 1: Personal Information
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('1. Personal Information / Vyaktigat Jankari', margin, yPos);
+    yPos += 7;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    const personalInfo = [
+      ['Rank & Name:', `${fb.guest_rank || ''} ${fb.guest_name || ''}`],
+      ['Service Status:', fb.service_status || '—'],
+      ['Unit:', fb.guest_unit || '—'],
+      ['Phone:', fb.guest_contact || '—']
+    ];
+    
+    personalInfo.forEach(([label, value]) => {
+      doc.text(label, margin, yPos);
+      doc.text(value, margin + 50, yPos);
+      yPos += 6;
+    });
+    
+    yPos += 3;
+    
+    // Section 2: Visit Details
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('2. Visit Details / Yatra Vivaran', margin, yPos);
+    yPos += 7;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Date of Visit:', margin, yPos);
+    doc.text(`${fb.check_in_date} to ${fb.check_out_date}`, margin + 50, yPos);
+    yPos += 6;
+    
+    const nights = Math.ceil((new Date(fb.check_out_date) - new Date(fb.check_in_date)) / 86400000);
+    doc.text('Duration:', margin, yPos);
+    doc.text(`${nights} Night(s)`, margin + 50, yPos);
+    yPos += 8;
+    
+    // Section 3: Satisfaction Ratings
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('3. Satisfaction Rating (1 = Very Dissatisfied, 5 = Very Satisfied)', margin, yPos);
+    yPos += 7;
+    
+    const ratings = [
+      ['Cleanliness / Swachhata', fb.cleanliness],
+      ['Room Comfort / Kamre Ki Gunvatta', fb.room_comfort],
+      ['Basic Amenities / Khane Ki Gunvatta', fb.basic_amenities],
+      ['Check-In Procedure / Check-In Prakriya', fb.check_in_procedure],
+      ['Check-Out Procedure / Check-Out Prakriya', fb.check_out_procedure],
+      ['Overall Stay / Samagra Pravas', fb.overall_stay],
+      ['Staff Behaviour / Staff Vyavhar', fb.staff_behaviour]
+    ];
+    
+    doc.autoTable({
+      startY: yPos,
+      head: [['Category', 'Rating']],
+      body: ratings,
+      theme: 'grid',
+      headStyles: { fillColor: [59, 130, 246], fontSize: 10 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 0: { cellWidth: 120 }, 1: { cellWidth: 30, halign: 'center' } },
+      margin: { left: margin }
+    });
+    
+    yPos = doc.lastAutoTable.finalY + 8;
+    
+    // Average Score
+    const avgScore = ((fb.cleanliness + fb.room_comfort + fb.basic_amenities +
+      fb.check_in_procedure + fb.check_out_procedure + fb.overall_stay + fb.staff_behaviour) / 7).toFixed(2);
+    
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Average Score: ${avgScore} / 5`, margin, yPos);
+    yPos += 8;
+    
+    // Section 4: Specific Feedback
+    doc.setFontSize(12);
+    doc.text('4. Specific Feedback / Vishishi Pratikriya', margin, yPos);
+    yPos += 7;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    
+    if (fb.enjoyed_most) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('What did you enjoy most?', margin, yPos);
+      yPos += 5;
+      doc.setFont('helvetica', 'normal');
+      const enjoyedLines = doc.splitTextToSize(fb.enjoyed_most, pageWidth - 2 * margin);
+      doc.text(enjoyedLines, margin, yPos);
+      yPos += enjoyedLines.length * 5 + 3;
+    }
+    
+    if (fb.issues_problems) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('Were there any issues or problems?', margin, yPos);
+      yPos += 5;
+      doc.setFont('helvetica', 'normal');
+      const issuesLines = doc.splitTextToSize(fb.issues_problems, pageWidth - 2 * margin);
+      doc.text(issuesLines, margin, yPos);
+      yPos += issuesLines.length * 5 + 3;
+    }
+    
+    if (fb.improvement_suggestions) {
+      doc.setFont('helvetica', 'bold');
+      doc.text('How can we improve?', margin, yPos);
+      yPos += 5;
+      doc.setFont('helvetica', 'normal');
+      const suggestionsLines = doc.splitTextToSize(fb.improvement_suggestions, pageWidth - 2 * margin);
+      doc.text(suggestionsLines, margin, yPos);
+      yPos += suggestionsLines.length * 5 + 3;
+    }
+    
+    // Section 5: Additional Comments
+    if (fb.additional_comments) {
+      yPos += 2;
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('5. Additional Comments / Atiriki Tippaniya', margin, yPos);
+      yPos += 7;
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      const commentsLines = doc.splitTextToSize(fb.additional_comments, pageWidth - 2 * margin);
+      doc.text(commentsLines, margin, yPos);
+      yPos += commentsLines.length * 5 + 5;
+    }
+    
+    // Section 6: Recommendation
+    yPos += 2;
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.text('6. Would you recommend us?', margin, yPos);
+    yPos += 7;
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(fb.would_recommend ? '[✓] Yes / Ha' : '[✗] No / Nahi', margin, yPos);
+    
+    // Footer
+    yPos = doc.internal.pageSize.getHeight() - 20;
+    doc.setFontSize(9);
+    doc.text(`Date: ${format(new Date(), 'dd MMM yyyy')}`, margin, yPos);
+    doc.text('(Signature of Guest / Atithi ka hastakshar)', pageWidth - margin - 60, yPos);
+    
+    // Save PDF
+    const fileName = `Feedback_${fb.guest_name?.replace(/\s+/g, '_')}_${fb.check_out_date}.pdf`;
+    doc.save(fileName);
+    toast.success('Feedback PDF downloaded successfully');
   };
 
   useEffect(() => { fetchAnalysis(); }, []);
@@ -171,9 +346,21 @@ export default function FeedbackPage() {
                         {fb.guest_rank && <p className="text-xs text-slate-500">{fb.guest_rank}{fb.service_status ? ` (${fb.service_status})` : ""}</p>}
                         <p className="text-xs text-slate-400">{fb.check_in_date} to {fb.check_out_date}</p>
                       </div>
-                      <div className="text-right">
-                        <p className={`text-xl font-bold ${fbColors.text}`}>{avgScore}/5</p>
-                        <p className="text-xs text-slate-400">{fb.would_recommend ? "👍 Would recommend" : "No recommendation"}</p>
+                      <div className="text-right flex items-start gap-2">
+                        <div>
+                          <p className={`text-xl font-bold ${fbColors.text}`}>{avgScore}/5</p>
+                          <p className="text-xs text-slate-400">{fb.would_recommend ? "👍 Would recommend" : "No recommendation"}</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => printFeedback(fb)}
+                          className="h-8 w-8 p-0"
+                          title="Print Feedback"
+                          data-testid={`print-feedback-${fb.id}`}
+                        >
+                          <Printer size={16} />
+                        </Button>
                       </div>
                     </div>
                     <div className="grid grid-cols-4 gap-2 mb-3">

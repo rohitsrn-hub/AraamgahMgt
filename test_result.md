@@ -102,26 +102,23 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "E-ARMS military rest house booking system with phone capture, WhatsApp confirmation, dashboard improvements, guest history, booking slip PDFs, and validation rules. Recent blocker: Bookings page crash due to function scoping issue."
+user_problem_statement: "SARAI (formerly E-ARMS) sanitization project. Current focus: FIX P0 BLOCKERS in check-in flow: (1) Remove 'Org ID Ser No' field for family members (2) Remove identity_card_number validation blocking check-ins (3) Fix UI showing 'Def Civ' instead of 'Org' for org guests (4) Implement same-day booking zero advance logic"
 
 backend:
-  - task: "Fix MongoDB ObjectId serialization in setup endpoint"
+  - task: "Backend sanitization complete (Phase 2)"
     implemented: true
     working: true
     file: "/app/backend/server.py"
     stuck_count: 0
-    priority: "high"
+    priority: "completed"
     needs_retesting: false
     status_history:
-      - working: "NA"
-        agent: "main"
-        comment: "Fixed /api/settings/setup endpoint to exclude _id from response. Changed return to fetch settings with {_id: 0} projection instead of returning raw doc."
       - working: true
-        agent: "testing"
-        comment: "Backend test PASSED: POST /api/settings/setup returns 200 without ObjectId serialization error. GET /api/settings also returns 200 without _id field."
+        agent: "previous_fork"
+        comment: "Backend APIs fully sanitized. Defense fields removed. is_org and org_color system implemented. Pydantic models updated."
 
 frontend:
-  - task: "Fix Bookings page crash (handlePrintBookingSlips scoping error)"
+  - task: "P0.1 - Remove Org ID Ser No field for family members"
     implemented: true
     working: true
     file: "/app/frontend/src/pages/Bookings.jsx"
@@ -129,64 +126,125 @@ frontend:
     priority: "critical"
     needs_retesting: false
     status_history:
-      - working: false
-        agent: "user"
-        comment: "User reported: 'The new booking form is not opening' - white screen crash"
-      - working: true
-        agent: "main"
-        comment: "Fixed ReferenceError by moving handlePrintBookingSlips function out of nested handleSearchGuestHistory scope to component level (lines 576-594)"
-      - working: true
-        agent: "testing"
-        comment: "Frontend test PASSED: Bookings page loads without JavaScript crash or ReferenceError. All buttons (New Booking, Guest History, Print Booking Slips, Pending Refunds) are visible and functional."
-
-  - task: "Bulk Booking Slip PDF generation"
-    implemented: true
-    working: true
-    file: "/app/frontend/src/utils/pdfUtils.js, /app/frontend/src/pages/Bookings.jsx"
-    stuck_count: 0
-    priority: "medium"
-    needs_retesting: false
-    status_history:
       - working: "NA"
         agent: "main"
-        comment: "Print Booking Slips button present. generateBookingSlips function implemented in pdfUtils.js. Formats 3 slips per A4 page. Needs E2E testing with actual booking data."
+        comment: "FIXED: Removed conditional 'Org ID Ser No' input field for family members (lines 2267-2270 deleted). Kept the 'Org Card Available' checkbox intact. Used sed command after search_replace failed due to monolithic file size."
       - working: true
         agent: "testing"
-        comment: "Frontend test PASSED: Print Booking Slips button functional. Clicked and received success toast: 'Generated 1 booking slip(s)'. PDF generation triggered successfully for confirmed/checked-in bookings."
-
-  - task: "Enhanced form validation rules"
+        comment: "✅ VERIFIED: Tested check-in flow with org guest and family members. Successfully added family member to room, checked 'Org Card Available?' checkbox. NO 'Org ID Ser No' input field found for family members. Only the checkbox is present as expected. Fix confirmed working."
+  
+  - task: "P0.2 - Remove identity_card_number validation blocking check-ins"
     implemented: true
     working: true
     file: "/app/frontend/src/pages/Bookings.jsx"
     stuck_count: 0
-    priority: "medium"
+    priority: "critical"
     needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
-        comment: "Added comprehensive validation: Guest name (2-100 chars), phone (10 digit Indian), Aadhaar (12 digits), check-in date >= today, check-out > check-in, advance >= 0. Enhanced check-in validation: required phone, age 18-120, gender, address (10-500 chars), identity card, service status."
+        comment: "FIXED: Removed identity_card_number validation requirement (lines 763-766). Replaced validation block with comment. This was blocking org guest check-ins."
       - working: true
         agent: "testing"
-        comment: "Frontend test PASSED: New Booking form displays all validation fields with proper placeholders. Guest History modal validates empty input with 'Please enter phone number or army number' error. Date pickers show 'Stay Duration: X night(s)'. Room selection works after date selection."
+        comment: "✅ VERIFIED: Tested check-in flow. NO identity_card_number input field found in check-in dialog. Validation has been successfully removed and is no longer blocking check-ins. Fix confirmed working."
+  
+  - task: "P0.3 - Replace 'Def Civ' with 'Org'/'Non-Org' labels in UI"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "FIXED: Replaced all 'Def Civ' references with 'Non-Org' in UI (lines 674, 678, 1051, 2120, 2125, 2356, 2394). Updated charge category logic, badges, payment summary displays. Also fixed rate calculation to use is_org flag instead of guest_rank check (lines 1235-1247, 1685-1694)."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Tested New Booking dialog and bookings table. NO 'Def Civ' text found anywhere on the page. All labels properly sanitized to show 'Org' or 'Non-Org'. Fix confirmed working."
+  
+  - task: "P0.4 - Same-day booking zero advance logic"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "FIXED: Added useEffect hook (lines 309-327) to auto-set advance_paid to 0 when check_in_date equals today. Added visual indicator in booking form showing 'Same-day booking - No advance required' message when applicable (lines 1815-1825)."
+      - working: false
+        agent: "testing"
+        comment: "❌ FAILED: Tested same-day booking flow (check-in=today, check-out=tomorrow). Could not verify advance field or same-day message because: (1) Room selection section did not show available rooms after dates were selected (2) Payment section with advance field appears only after room selection (3) Same-day message at lines 1815-1825 is in payment section which was not visible. ISSUE: Room availability API may not be returning rooms, or there's a UI rendering issue preventing room selection grid from appearing. Need to investigate why 'Found 0 room options' when there should be available rooms for selected dates."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Re-tested P0.4 after main agent's refactored useEffect. ALL TESTS PASSED (8/8 steps). (1) Room selection grid now renders correctly with 12 available rooms - CRITICAL FIX CONFIRMED. (2) Same-day advance logic working: advance auto-sets to ₹0 with green message '✓ Same-day booking - No advance required'. (3) Date change logic working: changing to future dates updates advance to ₹400 with 'Default: ₹400 × 1 room(s)' message, same-day message disappears. (4) Reset logic working: changing back to same-day resets advance to ₹0 and same-day message reappears. The refactored useEffect (lines 309-327) successfully resolved the state update conflict that was preventing room grid rendering. P0.4 is now fully functional."
+
+  - task: "P0.5 - Amend Booking refund scenario fix"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/Bookings.jsx, /app/backend/server.py"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "fork_main"
+        comment: "FIXED: Amended booking feature was failing when amendment resulted in a refund (cost decrease). Fixed frontend validation (lines 1302-1355) to skip payment details requirement when costAnalysis.difference <= 0. Updated useEffect auto-populate (lines 1289-1303) to set additional_advance to 0 for refund scenarios. Modified payload to only send payment details when cost increases. Backend was already handling refunds correctly (lines 1510-1512). User reported error when trying to amend booking with refund due - needs testing to verify fix works for both cost increase and decrease scenarios."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: ALL TESTS PASSED. Comprehensive testing of P0.5 Amend Booking feature completed successfully. REFUND SCENARIO (cost decrease): BK0083 4 nights (₹1600) → 2 nights (₹800) = ₹-800 refund - Cost Analysis shows correct green difference, refund message displayed, payment section hidden, amendment processed without errors. PAYMENT SCENARIO (cost increase): 4 nights 1 room (₹1600) → 2 nights 2 rooms (₹1800) = +₹200 payment - Cost Analysis shows correct red difference, payment section visible, additional advance auto-populated, validation enforced, amendment processed correctly. ADDITIONAL FIXES by testing agent: (1) handleOpenAmend now calls fetchAvailableRoomsForAmend to load rooms on dialog open (2) Changed room availability API from /dashboard/room-availability to /rooms/available with exclude_booking_id to include currently booked rooms. Backend /api/bookings/amend endpoint handles both positive and negative cost differences correctly. P0.5 COMPLETE and WORKING."
+
+  - task: "P1 - Mix & Match Rooms (Smart Room Allocation)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/components/RoomSegmentSelector.jsx, /app/frontend/src/pages/Bookings.jsx, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "fork_main"
+        comment: "IMPLEMENTED: Three-phase implementation completed. PHASE 1 (Backend): Created optimal room combination algorithm with POST /api/rooms/find-optimal-combination endpoint (lines 824-1033 in server.py). Algorithm finds rooms available for longest consecutive periods using greedy optimization to minimize room changes. Added process_room_segments helper (lines 1068-1125) for segmented booking validation and cost calculation. Updated Booking model to support room_segments and has_room_changes fields. PHASE 2 (Frontend UI): Created RoomSegmentSelector component (439 lines) with calendar grid view, color-coded rooms, change indicators, manual override, and real-time cost calculation. Integrated into Bookings.jsx with Mix & Match button (line ~1942), dialog (lines ~3926-3958), and booking validation updated to support both traditional (room_ids) and segmented (room_segments) bookings. PHASE 3 (Integration): Updated booking creation payload to include room_segments. Backward compatible with existing bookings."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: ALL TESTS PASSED (12 backend tests, full frontend UI validation). Backend API /api/rooms/find-optimal-combination returns correct optimal combinations for single/multi-room bookings with proper cost calculation. Frontend RoomSegmentSelector displays calendar view with color-coded rooms (blue/green/purple etc), status badges (Same/Change), total cost calculation, Accept/Customize modes. Database persistence confirmed: room_segments array, has_room_changes flag, room_ids populated for backward compatibility. Edge cases tested: insufficient availability (returns 'insufficient' status), single night booking, long stay (7 nights), multi-room bookings (2, 3 rooms). BUG FIXED during testing: API URL in RoomSegmentSelector.jsx was missing /api prefix (line 10) - causing 404 errors. User flow working end-to-end: New Booking → Fill details → Select dates → Click Mix & Match → View optimal combination → Accept/Customize → Create booking with room_segments. Test file created: /app/backend/tests/test_mix_match_rooms.py. P1 COMPLETE and FULLY WORKING."
+
+  - task: "P2 - PDF Updates for Segmented Bookings"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/utils/pdfUtils.js, /app/frontend/src/pages/Bookings.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "fork_main"
+        comment: "IMPLEMENTED: Updated PDF generation functions to handle segmented bookings. BOOKING SLIP PDF (generateBookingSlips, lines 392-550): Added conditional display for Room Number field - shows '(See room schedule below)' when has_room_changes=true. Added new ROOM SCHEDULE section before signatures showing per-night room assignments in compact two-column layout (e.g., '26 Apr: C1-01, C1-02'). ORG DATA FORM PDF (generateOrgDataForm, lines 936+): Updated room display to show unique rooms with '(varies)' indicator for segmented bookings. All changes are backward compatible - traditional bookings without room_segments display normally."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: ALL PDF TESTS PASSED (4 tests). generateBookingSlips correctly handles segmented bookings - Room Number field shows '(See room schedule below)', ROOM SCHEDULE section displays per-night assignments in compact format. generateOrgDataForm shows unique rooms with '(varies)' for segmented bookings. generateCheckoutReceipt (Bill PDF) verified working. Backward compatibility confirmed - traditional bookings generate PDFs correctly without room schedule section. BUGS FIXED during testing: (1) CRITICAL: isDefCiv undefined in generateCheckoutReceipt line 90 - changed to isNonOrg with proper rate lookup (was breaking Bill PDF for all bookings), (2) MINOR: Toast message showing '[object Object]' in handlePrintBookingSlips line 1218 - changed to result.filename. Created test bookings: BK0088 (segmented), BK0089 (traditional). P2 COMPLETE and FULLY WORKING."
 
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 6
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Fix Bookings page crash (handlePrintBookingSlips scoping error)"
-    - "Bulk Booking Slip PDF generation"
-    - "Enhanced form validation rules"
-    - "Fix MongoDB ObjectId serialization in setup endpoint"
+    - "All P0 blockers (P0.1 - P0.5) resolved and tested successfully"
   stuck_tasks: []
   test_all: false
-  test_priority: "high_first"
+  test_priority: "critical_first"
 
 agent_communication:
   - agent: "main"
-    message: "Fixed P0 blocker (Bookings page crash) and P1 issue (MongoDB ObjectId error). Enhanced validation per VALIDATION_RULES.md. All changes tested with screenshot tool - page loads correctly, modal opens, linting passes. Ready for comprehensive E2E testing. Test credentials: Check /app/memory/test_credentials.md for any existing test accounts."
+    message: "Fork agent continuing SARAI sanitization. Fixed all 4 P0 CRITICAL blockers in check-in flow: (1) Removed Org ID Ser No field for family members (2) Removed identity_card_number validation (3) Replaced all Def Civ with Non-Org labels (4) Implemented same-day zero advance logic with visual indicator. Also fixed rate calculation to use is_org flag. Linting passed (3393 lines). READY FOR COMPREHENSIVE FRONTEND TESTING - focus on check-in flow for org guests, same-day booking form, and rate display accuracy."
   - agent: "testing"
-    message: "COMPREHENSIVE TESTING COMPLETE - ALL TESTS PASSED ✅ Backend: 11 tests passed, 4 skipped (100% success rate). Frontend: All critical features verified working. Bookings page crash fixed, PDF generation working, validations implemented correctly, ObjectId serialization issue resolved. No action items, no bugs found. Ready for production use."
+    message: "✅ P0.4 RE-TEST COMPLETE - ALL TESTS PASSED (8/8). Main agent's refactored useEffect successfully fixed the room selection grid rendering issue. Comprehensive testing confirms: (1) Room grid renders with 12 available rooms (2) Same-day advance logic: ₹0 + green message (3) Future date logic: ₹400 + default message (4) Reset logic: ₹0 + same-day message reappears. ALL 4 P0 CRITICAL BLOCKERS NOW VERIFIED WORKING: P0.1 ✅ (No Org ID Ser No for family), P0.2 ✅ (No identity_card_number validation), P0.3 ✅ (No Def Civ labels), P0.4 ✅ (Same-day zero advance). SARAI sanitization project P0 phase COMPLETE. Ready for user acceptance testing."
+  - agent: "testing"
+    message: "Completed comprehensive P0 blocker testing. RESULTS: ✅ P0.1 PASS (No Org ID Ser No field for family members), ✅ P0.2 PASS (No identity_card_number validation), ✅ P0.3 PASS (No Def Civ labels). ❌ P0.4 FAIL - Cannot verify same-day advance logic because room selection grid shows 0 available rooms after selecting dates (10 Apr 2026 - 11 Apr 2026). Payment section with advance field only appears after room selection. ISSUE: Either (a) room availability API not returning rooms, (b) UI rendering issue, or (c) no rooms actually available for test dates. Need to investigate room availability endpoint or check if rooms exist in database."
+  - agent: "fork_main"
+    message: "NEW P0 BLOCKER FIXED: P0.5 Amend Booking refund scenario. User reported error when trying to amend booking resulting in refund. CHANGES: (1) Frontend validation in handleAmendBooking now skips payment details requirement when costAnalysis.difference <= 0 (2) Auto-populate useEffect sets additional_advance to 0 for refund/no-change scenarios (3) Payload only sends payment details when cost increases. Backend was already handling refunds correctly. NEEDS TESTING for both scenarios: (a) Amendment with cost increase (additional payment) (b) Amendment with cost decrease (refund due). Testing focus: Amend button in bookings table, Cost Analysis section, Payment section visibility, Backend /api/bookings/amend endpoint."

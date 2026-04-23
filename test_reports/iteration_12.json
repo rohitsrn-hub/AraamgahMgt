@@ -1,0 +1,62 @@
+{
+  "summary": "P1 Bank Details in Booking Form - All features tested and working correctly. Bank/UPI Details section visible in booking form (Section 4: Advance Payment) with correct label 'for refund if cancelled'. All 5 fields present: Bank Name, IFSC Code, Account Number, UPI ID, UPI Phone. Payment mode fields simplified: UPI shows only Transaction ID, Bank Transfer shows only Reference. Check-in form has Bank/UPI Details section for auto-fill from booking data.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_p1_bank_details.py",
+    "/app/test_reports/pytest/test_p1_bank_details.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_p1_bank_details.py"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 tests passed)",
+    "frontend": "100% (all UI features verified via Playwright)"
+  },
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "P1 Bank Details implementation fully tested. Key features verified: 1) Bank/UPI Details section in booking form (Section 4) with 5 fields: Bank Name, IFSC Code, Account Number, UPI ID, UPI Phone, 2) Section labeled 'for refund if cancelled', 3) Payment mode fields simplified - UPI shows only 'UPI Transaction ID', Bank Transfer shows only 'Bank Transfer Reference', Cash and Card unchanged, 4) Backend accepts all bank/UPI fields in POST /api/bookings, 5) Bank/UPI details passed to refund on cancellation, 6) Check-in form has Bank/UPI Details section for auto-fill from booking data (editable).",
+  "seed_data_creation": "Created test bookings with bank/UPI details for testing",
+  "feature_test_results": {
+    "bank_upi_section_visible_before_payment_mode": "PASS - Section visible in Section 4 (Advance Payment) after room selection",
+    "bank_upi_section_label": "PASS - Labeled 'Bank / UPI Details (for refund if cancelled)'",
+    "bank_name_field": "PASS - Input field with data-testid='input-booking-bank-name'",
+    "bank_ifsc_field": "PASS - Input field with data-testid='input-booking-bank-ifsc'",
+    "bank_account_field": "PASS - Input field with data-testid='input-booking-bank-account'",
+    "upi_id_field": "PASS - Input field with data-testid='input-booking-upi-id'",
+    "upi_phone_field": "PASS - Input field with data-testid='input-booking-upi-phone'",
+    "upi_payment_mode_simplified": "PASS - Shows only 'UPI Transaction ID' field (data-testid='input-upi-transaction-id')",
+    "bank_transfer_mode_simplified": "PASS - Shows only 'Bank Transfer Reference' field",
+    "cash_mode_unchanged": "PASS - Shows 'Cash Receipt Number' field",
+    "card_mode_unchanged": "PASS - Shows 'Card Transaction Reference' field",
+    "backend_accepts_bank_fields": "PASS - POST /api/bookings accepts bank_name, bank_ifsc, bank_account, upi_id, upi_phone",
+    "bank_details_in_refund": "PASS - Cancellation creates refund with bank/UPI details",
+    "checkin_bank_details_section": "PASS - Check-in form has Bank/UPI Details section",
+    "checkin_autofill_from_booking": "PASS - Bank/UPI details auto-fill from booking data (verified in code lines 820-827)"
+  },
+  "backend_test_results": {
+    "test_create_booking_with_all_bank_upi_fields": "PASSED",
+    "test_create_booking_with_partial_bank_details": "PASSED",
+    "test_cancel_booking_creates_refund_with_bank_details": "PASSED",
+    "test_booking_has_bank_details_for_checkin_autofill": "PASSED",
+    "test_upi_payment_with_transaction_id_only": "PASSED",
+    "test_bank_transfer_with_reference_only": "PASSED"
+  },
+  "code_verification": {
+    "booking_form_state_lines": "113-121 - bookingForm state includes bank_name, bank_ifsc, bank_account, upi_id, upi_phone",
+    "bank_upi_section_lines": "1435-1468 - Bank/UPI Details section ALWAYS visible in Section 4",
+    "simplified_payment_fields_lines": "1500-1531 - UPI shows Transaction ID only, Bank Transfer shows Reference only",
+    "checkin_autofill_lines": "820-827 - openCheckInDialog auto-fills bank/UPI details from booking",
+    "backend_booking_create_lines": "438-457 - handleCreateBooking sends all bank/UPI fields to backend",
+    "backend_model_lines": "281-285 - BookingCreate model accepts bank_name, bank_ifsc, bank_account, upi_id, upi_phone"
+  }
+}

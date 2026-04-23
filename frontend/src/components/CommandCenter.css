@@ -109,7 +109,7 @@
   font-weight: 600;
   font-size: 16px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   letter-spacing: 0.5px;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   z-index: 3;
@@ -121,15 +121,18 @@
 }
 
 .cc-btn:hover {
-  transform: scale(1.08) translateY(-5px);
+  transform: scale(1.15) translateY(-8px);
   box-shadow: 
-    0 12px 32px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    0 16px 40px rgba(0, 0, 0, 0.6),
+    0 0 30px rgba(255, 255, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
   z-index: 10;
+  filter: brightness(1.1);
 }
 
 .cc-btn:active {
-  transform: scale(1.02);
+  transform: scale(1.05) translateY(-2px);
+  transition: all 0.1s ease;
 }
 
 /* Solid colors matching dashboard theme */
@@ -165,10 +168,18 @@
   transform: translateX(-50%) rotate(0deg); 
 }
 
+.top:hover {
+  transform: translateX(-50%) rotate(0deg) scale(1.15) translateY(-8px);
+}
+
 .left { 
   top: 38%; 
   left: -50px; 
   transform: translateY(-50%) rotate(-72deg); 
+}
+
+.left:hover {
+  transform: translateY(-50%) rotate(-72deg) scale(1.15);
 }
 
 .left span {
@@ -182,6 +193,10 @@
   transform: translateY(-50%) rotate(72deg); 
 }
 
+.right:hover {
+  transform: translateY(-50%) rotate(72deg) scale(1.15);
+}
+
 .right span {
   transform: rotate(-72deg);
   display: block;
@@ -193,6 +208,10 @@
   transform: rotate(-144deg);
 }
 
+.bottom-left:hover {
+  transform: rotate(-144deg) scale(1.15) translateY(-8px);
+}
+
 .bottom-left span {
   transform: rotate(144deg);
   display: block;
@@ -202,6 +221,10 @@
   bottom: -20px; 
   right: 18%; 
   transform: rotate(144deg);
+}
+
+.bottom-right:hover {
+  transform: rotate(144deg) scale(1.15) translateY(-8px);
 }
 
 .bottom-right span {

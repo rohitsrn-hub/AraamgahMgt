@@ -1,0 +1,47 @@
+{
+  "test_name": "P0.4 - Same-Day Booking Zero Advance Logic",
+  "timestamp": "2026-04-10T09:49:45.669957",
+  "steps": [
+    {
+      "step": 1,
+      "status": "pass",
+      "message": "Bookings page loaded"
+    },
+    {
+      "step": 2,
+      "status": "pass",
+      "message": "Dialog opened"
+    },
+    {
+      "step": 3,
+      "status": "pass",
+      "message": "Basic details filled"
+    },
+    {
+      "step": 4,
+      "status": "pass",
+      "message": "Same-day dates selected"
+    },
+    {
+      "step": 5,
+      "status": "pass",
+      "message": "12 rooms, selected 1"
+    },
+    {
+      "step": 6,
+      "status": "pass",
+      "message": "Same-day logic: \u20b90 + message"
+    },
+    {
+      "step": 7,
+      "status": "pass",
+      "message": "Future logic: \u20b9400"
+    },
+    {
+      "step": 8,
+      "status": "pass",
+      "message": "Reset logic: \u20b90 + message"
+    }
+  ],
+  "overall_status": "PASS"
+}

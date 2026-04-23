@@ -4,6 +4,31 @@
 
 ---
 
+## 🌐 Deployment Options
+
+Choose your deployment method:
+
+### ☁️ **Cloud Deployment** (Recommended for Online Access)
+Deploy E-ARMS online with **Vercel + Render + MongoDB Atlas**:
+- ✅ Accessible from anywhere with internet
+- ✅ Free tier available (perfect for getting started)
+- ✅ Auto-scaling and managed infrastructure
+- ✅ **Setup Time:** ~30-45 minutes
+
+📖 **[Complete Cloud Deployment Guide](CLOUD_DEPLOYMENT.md)**  
+✅ **[Deployment Checklist](CLOUD_DEPLOYMENT_CHECKLIST.md)**
+
+### 💻 **Local Deployment** (For Offline/LAN Use)
+Run E-ARMS on your local network without internet:
+- ✅ Works completely offline
+- ✅ Fast performance on local network
+- ✅ Full data control on your machine
+- ✅ **Setup Time:** ~15-20 minutes
+
+📖 **Continue below for local deployment instructions**
+
+---
+
 ## 🚀 Quick Start (Local Deployment)
 
 ### For Windows Users:

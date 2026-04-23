@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API } from "@/App";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { generateCheckoutReceipt } from "@/utils/pdfUtils";
 import FeedbackForm from "@/components/FeedbackForm";
+import BookingSelectionModal from "@/components/BookingSelectionModal";
 import { 
   Bed, 
   CalendarCheck, 
@@ -28,10 +30,41 @@ import {
   SpinnerGap,
   CalendarBlank,
   Star,
-  ChartBar
+  ChartBar,
+  User,
+  Phone,
+  CheckSquare,
+  Bank,
+  ArrowCounterClockwise,
+  ArrowsClockwise,
+  Plus,
+  Trash,
+  WarningCircle
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
+
+// Validation helpers (copied from Bookings.jsx for consistency)
+const validateIndianPhone = (phone) => {
+  const cleaned = phone.replace(/\s+/g, "").replace(/^\+91/, "");
+  return /^[6-9]\d{9}$/.test(cleaned);
+};
+
+const formatIndianPhone = (value) => {
+  let digits = value.replace(/[^\d]/g, "");
+  if (digits.startsWith("91") && digits.length > 10) digits = digits.slice(2);
+  digits = digits.slice(0, 10);
+  if (digits.length <= 5) return digits;
+  return digits.slice(0, 5) + " " + digits.slice(5);
+};
+
+const validateIFSC = (ifsc) => {
+  return /^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc);
+};
+
+const toUpperCase = (value) => {
+  return value.toUpperCase();
+};
 
 // Helper to display room numbers from a booking (handles old and new format)
 const getRoomDisplay = (booking) => {
@@ -51,6 +84,10 @@ const getRoomCategories = (booking) => {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth(); // Get current user for role-based permissions
+  const isViewer = user?.role === 'viewer'; // Check if user is viewer
+  
   const [occupancy, setOccupancy] = useState(null);
   const [bookings, setBookings] = useState({ today: [], upcoming: [] });
   const [analytics, setAnalytics] = useState(null);
@@ -79,6 +116,9 @@ export default function Dashboard() {
   const [pendingRefunds, setPendingRefunds] = useState([]);
   const [pendingRefundsLoading, setPendingRefundsLoading] = useState(false);
   
+  // New: Booking selection modals (lightweight - just for selecting, then navigate to Bookings page)
+  const [showBookingSelectionAction, setShowBookingSelectionAction] = useState(null); // "checkin" | "checkout" | null
+  
   // Action form
   const [actionForm, setActionForm] = useState({
     staff_id: "",
@@ -86,8 +126,31 @@ export default function Dashboard() {
     final_payment: 0,
     payment_mode: "",
     reason: "",
-    extra_beds: 0
+    extra_beds: 0,
+    // Check-in personal details
+    guest_contact: "",
+    guest_age: "",
+    guest_sex: "",
+    guest_address: "",
+    identity_card_number: "",
+    guest_service_status: "",
+    service_type: "",
+    command_hq: "",
+    bank_name: "",
+    bank_ifsc: "",
+    bank_account: "",
+    upi_id: "",
+    upi_phone: "",
+    family_members: []
   });
+  
+  // Validation error states
+  const [phoneError, setPhoneError] = useState("");
+  const [checkinIfscError, setCheckinIfscError] = useState("");
+  const [checkinUpiPhoneError, setCheckinUpiPhoneError] = useState("");
+  
+  // Room-guest mapping for check-in pricing
+  const [roomGuestMapping, setRoomGuestMapping] = useState([]);
 
   const fetchDashboardData = async () => {
     try {
@@ -116,8 +179,29 @@ export default function Dashboard() {
     }
   };
 
+  // Handle URL query params for action triggers (from CommandCenter)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const action = params.get('action');
+    
+    if (action === 'checkin') {
+      setShowBookingSelectionAction('checkin');
+      // Clear URL param after triggering
+      window.history.replaceState({}, '', '/app/dashboard');
+    } else if (action === 'checkout') {
+      setShowBookingSelectionAction('checkout');
+      // Clear URL param after triggering
+      window.history.replaceState({}, '', '/app/dashboard');
+    } else if (action === 'cancel') {
+      setShowCancelModal(true);
+      // Clear URL param after triggering
+      window.history.replaceState({}, '', '/app/dashboard');
+    }
+  }, [location]);
+
   useEffect(() => {
     fetchDashboardData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth, selectedYear]);
 
   const formatCurrency = (amount) => {
@@ -299,26 +383,32 @@ export default function Dashboard() {
           {/* New Booking - Prominent */}
           <Button 
             onClick={() => navigate('/bookings?action=new')}
-            className="col-span-2 sm:col-span-1 h-16 px-6 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transform transition-all hover:scale-105"
+            className="col-span-2 sm:col-span-1 h-16 px-6 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transform transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             data-testid="new-booking-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot create bookings" : "Create new booking"}
           >
             <CalendarCheck size={24} weight="fill" />
             <span className="text-base">New Booking</span>
           </Button>
           
           <Button 
-            onClick={() => setShowCheckInModal(true)}
-            className="h-16 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
+            onClick={() => setShowBookingSelectionAction("checkin")}
+            className="h-16 px-5 bg-emerald-500 hover:bg-emerald-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="quick-checkin-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot check in guests" : "Check in guest"}
           >
             <SignIn size={22} />
             <span>Check In</span>
           </Button>
           
           <Button 
-            onClick={() => setShowCheckOutModal(true)}
-            className="h-16 px-5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
+            onClick={() => setShowBookingSelectionAction("checkout")}
+            className="h-16 px-5 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="quick-checkout-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot check out guests" : "Check out guest"}
           >
             <SignOut size={22} />
             <span>Check Out</span>
@@ -326,8 +416,10 @@ export default function Dashboard() {
           
           <Button 
             onClick={() => setShowCancelModal(true)}
-            className="h-16 px-5 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md"
+            className="h-16 px-5 bg-red-500 hover:bg-red-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="cancel-booking-btn"
+            disabled={isViewer}
+            title={isViewer ? "Viewers cannot cancel bookings" : "Cancel booking"}
           >
             <X size={22} />
             <span>Cancel</span>
@@ -486,20 +578,88 @@ export default function Dashboard() {
       {/* Monthly Calendar Planner Toggle */}
       <Card className="earms-card bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200 shadow-md" data-testid="calendar-planner-card">
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <CardTitle className="flex items-center gap-2">
               <CalendarBlank size={22} className="text-indigo-500" weight="fill" />
-              Room Planner - {months.find(m => m.value === selectedMonth)?.label} {selectedYear}
+              Room Planner
             </CardTitle>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => setShowCalendar(!showCalendar)}
-              className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
-              data-testid="toggle-calendar-btn"
-            >
-              {showCalendar ? "Hide Planner" : "Show Planner"}
-            </Button>
+            
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Month Navigation */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedMonth === 1) {
+                      setSelectedMonth(12);
+                      setSelectedYear(selectedYear - 1);
+                    } else {
+                      setSelectedMonth(selectedMonth - 1);
+                    }
+                  }}
+                  className="h-8 w-8 p-0 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                  title="Previous Month"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"></path></svg>
+                </Button>
+                
+                <div className="flex items-center gap-2">
+                  <Select value={selectedMonth.toString()} onValueChange={(v) => setSelectedMonth(parseInt(v))}>
+                    <SelectTrigger className="w-32 h-8 text-sm border-indigo-200" data-testid="planner-month-selector">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {months.map((m) => (
+                        <SelectItem key={m.value} value={m.value.toString()}>
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  
+                  <Select value={selectedYear.toString()} onValueChange={(v) => setSelectedYear(parseInt(v))}>
+                    <SelectTrigger className="w-24 h-8 text-sm border-indigo-200" data-testid="planner-year-selector">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[2024, 2025, 2026, 2027].map((y) => (
+                        <SelectItem key={y} value={y.toString()}>
+                          {y}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (selectedMonth === 12) {
+                      setSelectedMonth(1);
+                      setSelectedYear(selectedYear + 1);
+                    } else {
+                      setSelectedMonth(selectedMonth + 1);
+                    }
+                  }}
+                  className="h-8 w-8 p-0 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                  title="Next Month"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 256 256"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"></path></svg>
+                </Button>
+              </div>
+              
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setShowCalendar(!showCalendar)}
+                className="h-8 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                data-testid="toggle-calendar-btn"
+              >
+                {showCalendar ? "Hide" : "Show"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         {showCalendar && calendarData && (
@@ -562,17 +722,35 @@ export default function Dashboard() {
                     const dayData = room.days[dateStr];
                     const status = dayData?.status || "available";
                     const booking = dayData?.booking;
+                    const isCheckinDate = booking?.is_checkin_date || false;
+                    const isCheckoutDate = booking?.is_checkout_date || false;
 
                     let cellClass = "bg-emerald-50";
                     let dotClass = "";
+                    
                     if (status === "confirmed") {
-                      cellClass = "bg-blue-400";
+                      if (isCheckinDate || isCheckoutDate) {
+                        // Gradient from lighter blue to darker blue
+                        cellClass = "bg-gradient-to-r from-blue-300 to-blue-500";
+                      } else {
+                        cellClass = "bg-blue-400";
+                      }
                       dotClass = "text-white";
                     } else if (status === "checked_in") {
-                      cellClass = "bg-amber-400";
+                      if (isCheckinDate || isCheckoutDate) {
+                        // Gradient from lighter amber to darker amber
+                        cellClass = "bg-gradient-to-r from-amber-300 to-amber-500";
+                      } else {
+                        cellClass = "bg-amber-400";
+                      }
                       dotClass = "text-white";
                     } else if (status === "checked_out") {
-                      cellClass = "bg-slate-300";
+                      if (isCheckinDate || isCheckoutDate) {
+                        // Gradient from lighter grey to darker grey
+                        cellClass = "bg-gradient-to-r from-slate-200 to-slate-400";
+                      } else {
+                        cellClass = "bg-slate-300";
+                      }
                       dotClass = "text-slate-600";
                     }
 
@@ -851,7 +1029,7 @@ export default function Dashboard() {
               {funds.cancellations.pending_refunds > 0 && (
                 <button
                   className="mt-3 w-full p-3 bg-amber-100 hover:bg-amber-200 rounded-lg text-center transition-colors cursor-pointer border border-amber-300 group"
-                  onClick={openPendingRefundsModal}
+                  onClick={() => navigate('/app/bookings?action=pending-refunds')}
                   data-testid="pending-refunds-amount-btn"
                 >
                   <span className="text-amber-800 font-medium">
@@ -866,6 +1044,13 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      {/* ===== NEW: Booking Selection Modal (Lightweight - redirects to Bookings page) ===== */}
+      <BookingSelectionModal 
+        open={showBookingSelectionAction !== null}
+        onOpenChange={(open) => !open && setShowBookingSelectionAction(null)}
+        action={showBookingSelectionAction || "checkin"}
+      />
 
       {/* Check-In Modal */}
       <Dialog open={showCheckInModal} onOpenChange={setShowCheckInModal}>
@@ -1165,7 +1350,7 @@ export default function Dashboard() {
                 <div className="space-y-1 text-sm">
                   <div className="flex justify-between">
                     <span className="text-slate-600">Days until check-in:</span>
-                    <span className="font-medium">{refundInfo.days_until_checkin} days</span>
+                    <span className="font-medium">{Math.round(refundInfo.hours_until_checkin / 24)} days</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-600">Advance Paid:</span>

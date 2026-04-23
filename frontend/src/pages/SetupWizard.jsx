@@ -7,15 +7,14 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Buildings, CurrencyInr, Image, Rocket } from "@phosphor-icons/react";
 
-const DEFAULT_FMN_1 = "https://images.unsplash.com/photo-1765555648802-53235276a40b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwyfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85";
-const DEFAULT_FMN_2 = "https://images.unsplash.com/photo-1771456915291-58f0dee5b404?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzZ8MHwxfHNlYXJjaHwxfHxzaGllbGQlMjBlbWJsZW18ZW58MHx8fHwxNzc1MDcwOTU4fDA&ixlib=rb-4.1.0&q=85";
+const DEFAULT_FMN_1 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/7i02eeq8_Eastern_Command%2C_Indian_Army.png";
+const DEFAULT_FMN_2 = "https://customer-assets.emergentagent.com/job_repo-reconstruction/artifacts/ltoeqxal_101_Area%2C_Indian_Army.svg.png";
 
 export default function SetupWizard({ onComplete }) {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    fmn_sign_1_url: "",
-    fmn_sign_2_url: "",
+    // Formation signs are now pre-configured - removed from setup wizard
     cat_i_rooms_count: 6,
     cat_ii_rooms_count: 9,
     cat_i_rate: 500,
@@ -31,12 +30,12 @@ export default function SetupWizard({ onComplete }) {
     try {
       const payload = {
         ...formData,
-        fmn_sign_1_url: formData.fmn_sign_1_url || DEFAULT_FMN_1,
-        fmn_sign_2_url: formData.fmn_sign_2_url || DEFAULT_FMN_2,
+        fmn_sign_1_url: DEFAULT_FMN_1,  // Always use pre-configured default
+        fmn_sign_2_url: DEFAULT_FMN_2,  // Always use pre-configured default
       };
       await axios.post(`${API}/settings/setup`, payload);
       toast.success("Setup completed successfully!");
-      onComplete();
+      await onComplete();
     } catch (error) {
       console.error("Setup error:", error);
       toast.error("Setup failed. Please try again.");
@@ -45,7 +44,7 @@ export default function SetupWizard({ onComplete }) {
     }
   };
 
-  const nextStep = () => setStep((s) => Math.min(s + 1, 3));
+  const nextStep = () => setStep((s) => Math.min(s + 1, 2));  // Changed from 3 to 2
   const prevStep = () => setStep((s) => Math.max(s - 1, 1));
 
   return (
@@ -54,16 +53,16 @@ export default function SetupWizard({ onComplete }) {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl md:text-4xl font-bold text-slate-800 mb-2" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            Welcome to E-ARMS
+            Welcome to SARAI
           </h1>
           <p className="text-slate-500">
-            ECSAG Automated Room Management System
+            Shillong Aramgah Room Automation Interface
           </p>
         </div>
 
-        {/* Progress indicator */}
+        {/* Progress indicator - Now 2 steps instead of 3 */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          {[1, 2, 3].map((s) => (
+          {[1, 2].map((s) => (
             <div
               key={s}
               className={`w-3 h-3 rounded-full transition-all ${
@@ -73,73 +72,8 @@ export default function SetupWizard({ onComplete }) {
           ))}
         </div>
 
-        {/* Step 1: Formation Signs */}
+        {/* Step 1: Room Configuration (Formation Signs removed) */}
         {step === 1 && (
-          <div className="space-y-6 animate-fade-in" data-testid="setup-step-1">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 bg-blue-100 rounded-xl">
-                <Image size={24} className="text-blue-600" weight="duotone" />
-              </div>
-              <div>
-                <h2 className="text-xl font-semibold text-slate-800">Formation Signs</h2>
-                <p className="text-sm text-slate-500">Upload your formation emblems (optional)</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <Label htmlFor="fmn1" className="text-slate-600 mb-2 block">
-                  Formation Sign 1 (Left)
-                </Label>
-                <Input
-                  id="fmn1"
-                  type="url"
-                  placeholder="Image URL (optional)"
-                  value={formData.fmn_sign_1_url}
-                  onChange={(e) => handleChange("fmn_sign_1_url", e.target.value)}
-                  className="earms-input"
-                  data-testid="input-fmn-sign-1"
-                />
-                <div className="mt-3 p-4 bg-slate-50 rounded-xl flex items-center justify-center">
-                  <img
-                    src={formData.fmn_sign_1_url || DEFAULT_FMN_1}
-                    alt="Preview 1"
-                    className="h-20 w-20 object-contain"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="fmn2" className="text-slate-600 mb-2 block">
-                  Formation Sign 2 (Right)
-                </Label>
-                <Input
-                  id="fmn2"
-                  type="url"
-                  placeholder="Image URL (optional)"
-                  value={formData.fmn_sign_2_url}
-                  onChange={(e) => handleChange("fmn_sign_2_url", e.target.value)}
-                  className="earms-input"
-                  data-testid="input-fmn-sign-2"
-                />
-                <div className="mt-3 p-4 bg-slate-50 rounded-xl flex items-center justify-center">
-                  <img
-                    src={formData.fmn_sign_2_url || DEFAULT_FMN_2}
-                    alt="Preview 2"
-                    className="h-20 w-20 object-contain"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <p className="text-sm text-slate-400 text-center">
-              Leave empty to use default placeholder images
-            </p>
-          </div>
-        )}
-
-        {/* Step 2: Room Configuration */}
-        {step === 2 && (
           <div className="space-y-6 animate-fade-in" data-testid="setup-step-2">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-3 bg-emerald-100 rounded-xl">
@@ -196,8 +130,8 @@ export default function SetupWizard({ onComplete }) {
           </div>
         )}
 
-        {/* Step 3: Room Rates */}
-        {step === 3 && (
+        {/* Step 2: Room Rates */}
+        {step === 2 && (
           <div className="space-y-6 animate-fade-in" data-testid="setup-step-3">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-3 bg-amber-100 rounded-xl">
@@ -264,7 +198,7 @@ export default function SetupWizard({ onComplete }) {
             <div />
           )}
 
-          {step < 3 ? (
+          {step < 2 ? (
             <Button
               onClick={nextStep}
               className="h-12 px-8 bg-blue-500 hover:bg-blue-600 rounded-xl"

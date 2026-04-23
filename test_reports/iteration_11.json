@@ -1,0 +1,58 @@
+{
+  "summary": "Tested redesigned check-in form with inline family members. All features working correctly: standalone Family Members section removed, inline family member management per room, Self radio behavior (only one room), Dependent Card checkbox with conditional Dependent ID field, Def Civ rate calculation, and Bill Summary with per-room charges.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_checkin_redesign.py",
+    "/app/backend/tests/test_checkin_pricing_logic.py",
+    "/app/test_reports/pytest/test_checkin_redesign.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_checkin_redesign.py"
+  ],
+  "success_rate": {
+    "backend": "100% (API check-in with new structure verified)",
+    "frontend": "100% (all UI features verified via Playwright)"
+  },
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Redesigned check-in form fully tested. Key changes verified: 1) Standalone Family Members section removed, 2) Each room has 'Add Family Member' button for inline family member management, 3) Self checkbox has radio behavior (only one room at a time), 4) Family member form includes Relation, Name, Age, Sex, Mobile, 5) 'Dependent Card Available?' checkbox controls visibility of 'Dependent ID Ser No' field, 6) Room charge category updates to 'Def Civ' when any family member lacks dependent card, 7) Bill Summary shows per-room charges with correct rates. Backend correctly stores room_guest_mapping with has_self and family_members structure.",
+  "seed_data_creation": "Used existing booking BK0012 for check-in testing",
+  "feature_test_results": {
+    "standalone_family_section_removed": "PASS - No standalone Family Members section in check-in dialog",
+    "inline_add_family_member_button": "PASS - Each room has 'Add Family Member to Room X' button",
+    "self_radio_behavior": "PASS - Self can only be checked in ONE room at a time",
+    "family_member_form_fields": "PASS - Form includes Relation, Name, Age, Sex, Mobile",
+    "dependent_card_checkbox": "PASS - 'Dependent Card Available?' checkbox present for each family member",
+    "dependent_id_conditional_visibility": "PASS - 'Dependent ID Ser No' field only visible when checkbox is checked",
+    "def_civ_rate_trigger": "PASS - Room shows 'Def Civ' rate when family member lacks dependent card",
+    "cat_rate_when_card_available": "PASS - Room shows Cat I/II rate when family member has dependent card",
+    "bill_summary_per_room_charges": "PASS - Bill Summary shows per-room charges with correct rates",
+    "backend_new_structure": "PASS - Backend accepts room_guest_mapping with has_self and family_members",
+    "backend_pricing_calculation": "PASS - Backend calculates room_rent_total correctly based on charge_category"
+  },
+  "rates_verified": {
+    "cat_i_rate": 500,
+    "cat_ii_rate": 400,
+    "def_civ_cat_i_rate": 600,
+    "def_civ_cat_ii_rate": 600
+  },
+  "test_booking_used": {
+    "booking_number": "BK0012",
+    "rooms": ["C2-08", "C2-09"],
+    "room_categories": ["Cat II", "Cat II"],
+    "check_in_result": {
+      "room_rent_total": 2000,
+      "calculation": "Cat II (₹400 × 2 nights) + Def Civ (₹600 × 2 nights) = ₹2000"
+    }
+  }
+}

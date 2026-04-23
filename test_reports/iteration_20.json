@@ -1,0 +1,74 @@
+{
+  "summary": "P0.5 Amend Booking refund/payment scenarios - BOTH WORKING. Fixed 2 bugs during testing: (1) handleOpenAmend now calls fetchAvailableRoomsForAmend to load rooms on dialog open, (2) Changed room availability API from /dashboard/room-availability to /rooms/available with exclude_booking_id to include currently booked rooms.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "refund_scenario": {
+      "status": "PASS",
+      "description": "Amendment resulting in cost DECREASE (refund due)",
+      "test_case": "BK0083: 4 nights (₹1600) → 2 nights (₹800) = ₹-800 refund",
+      "verified": [
+        "Cost Analysis shows correct values: Current ₹1600, New ₹800, Difference ₹-800 (green)",
+        "Refund message 'Refund will be processed at check-in' displayed in green",
+        "Payment section correctly hidden (no payment required for refund)",
+        "Confirm Amendment button enabled without payment details",
+        "Backend processes refund correctly",
+        "Success toast shows: 'Amount: ₹1600.0 → ₹800.0 (₹800.0 to be refunded at check-in)'"
+      ]
+    },
+    "payment_scenario": {
+      "status": "PASS",
+      "description": "Amendment resulting in cost INCREASE (additional payment required)",
+      "test_case": "BK0083: 4 nights 1 room (₹1600) → 2 nights 2 rooms (₹1800) = +₹200 payment",
+      "verified": [
+        "Cost Analysis shows correct values: Current ₹1600, New ₹1800, Difference +₹200 (red)",
+        "Additional advance payment required message displayed in amber",
+        "Payment section visible with Additional Advance auto-populated to ₹200",
+        "Payment Mode dropdown shown and required",
+        "Validation: 'Please select payment mode' error when submitting without payment mode",
+        "Backend processes additional payment correctly"
+      ]
+    },
+    "backend_api": {
+      "status": "PASS",
+      "endpoint": "POST /api/bookings/amend",
+      "verified": [
+        "Handles positive cost difference (additional payment)",
+        "Handles negative cost difference (refund)",
+        "Returns correct amendment_log with changes",
+        "Updates booking total_amount, advance_paid, balance_amount correctly"
+      ]
+    }
+  },
+  "bugs_fixed_during_testing": [
+    {
+      "file": "/app/frontend/src/pages/Bookings.jsx",
+      "function": "handleOpenAmend",
+      "issue": "Rooms not loading when Amend dialog opens - availableRoomsForAmend was empty",
+      "fix": "Added call to fetchAvailableRoomsForAmend() with booking's current dates and ID"
+    },
+    {
+      "file": "/app/frontend/src/pages/Bookings.jsx",
+      "function": "fetchAvailableRoomsForAmend",
+      "issue": "Currently booked room (C2-07) not appearing in available rooms list",
+      "fix": "Changed API from /dashboard/room-availability to /rooms/available with exclude_booking_id parameter"
+    }
+  ],
+  "test_report_links": [],
+  "action_items": [],
+  "updated_files": ["/app/frontend/src/pages/Bookings.jsx"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "No authentication required - tested with existing confirmed booking BK0083",
+  "seed_data_creation": "None - used existing booking BK0083",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Amend Booking feature fully tested for both refund and payment scenarios. Two bugs were fixed during testing: (1) rooms now load automatically when dialog opens, (2) currently booked rooms now appear in available rooms list. All P0.5 requirements verified working.",
+  "overall_status": "PASS"
+}
