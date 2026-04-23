@@ -35,7 +35,7 @@ export default function SetupWizard({ onComplete }) {
       };
       await axios.post(`${API}/settings/setup`, payload);
       toast.success("Setup completed successfully!");
-      onComplete();
+      await onComplete();
     } catch (error) {
       console.error("Setup error:", error);
       toast.error("Setup failed. Please try again.");

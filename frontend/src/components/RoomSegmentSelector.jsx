@@ -133,10 +133,12 @@ const RoomSegmentSelector = ({
       segment.rooms.forEach(room => {
         const isNonOrg = !isOrg;
         let rate;
-        if (room.category === 'Cat I') {
-          rate = isNonOrg ? (settings?.def_civ_cat_i_rate ?? settings?.cat_i_rate) : settings?.cat_i_rate;
+        if (isNonOrg) {
+          rate = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
+        } else if (room.category === 'Cat I') {
+          rate = settings?.cat_i_rate;
         } else {
-          rate = isNonOrg ? (settings?.def_civ_cat_ii_rate ?? settings?.cat_ii_rate) : settings?.cat_ii_rate;
+          rate = settings?.cat_ii_rate;
         }
         total += rate || 0;
       });

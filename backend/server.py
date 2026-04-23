@@ -128,6 +128,8 @@ class AppSettings(BaseModel):
     cat_ii_license_fee: float = 15.0
     def_civ_room_rent: float = 570.0
     def_civ_license_fee: float = 30.0
+    non_org_room_rent: float = 570.0
+    non_org_license_fee: float = 30.0
     cat_i_rooms_count: int = 6
     cat_ii_rooms_count: int = 9
     default_advance_amount: float = 400.0
@@ -174,6 +176,8 @@ class AppSettingsUpdate(BaseModel):
     cat_ii_license_fee: Optional[float] = None
     def_civ_room_rent: Optional[float] = None
     def_civ_license_fee: Optional[float] = None
+    non_org_room_rent: Optional[float] = None
+    non_org_license_fee: Optional[float] = None
     cat_i_rooms_count: Optional[int] = None
     cat_ii_rooms_count: Optional[int] = None
     default_advance_amount: Optional[float] = None
@@ -193,6 +197,8 @@ class SetupRequest(BaseModel):
     cat_ii_license_fee: float = 15.0
     def_civ_room_rent: float = 570.0
     def_civ_license_fee: float = 30.0
+    non_org_room_rent: float = 570.0
+    non_org_license_fee: float = 30.0
     cat_i_rooms_count: int = 6
     cat_ii_rooms_count: int = 9
     default_advance_amount: float = 400.0
@@ -1573,12 +1579,8 @@ async def check_in(request: CheckInRequest):
             charge_category = room.get("charge_category", room_category)
             
             # Determine rate per night based on charge category
-            if charge_category == "Def Civ":
-                # Defense Civilian rates
-                if room_category == "Cat I":
-                    rate_per_night = settings.get("def_civ_cat_i_rate", 600.0)
-                else:
-                    rate_per_night = settings.get("def_civ_cat_ii_rate", 600.0)
+            if charge_category == "Non-Org":
+                rate_per_night = settings.get("non_org_room_rent", 570.0) + settings.get("non_org_license_fee", 30.0)
             else:
                 # Regular Cat I/II rates
                 if room_category == "Cat I":
