@@ -576,12 +576,27 @@ export default function Dashboard() {
       )}
 
       {/* Monthly Calendar Planner Toggle */}
-      <Card className="earms-card bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200 shadow-md" data-testid="calendar-planner-card">
+      <Card className="earms-card bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50 border-indigo-300 shadow-lg hover:shadow-xl transition-shadow duration-200" data-testid="calendar-planner-card">
         <CardHeader className="pb-2">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <CardTitle className="flex items-center gap-2">
-              <CalendarBlank size={22} className="text-indigo-500" weight="fill" />
-              Room Planner
+            <CardTitle
+              className="flex items-center gap-2 cursor-pointer select-none group"
+              onClick={() => setShowCalendar(!showCalendar)}
+              title={showCalendar ? "Click to collapse" : "Click to expand planner"}
+            >
+              <div className="p-1.5 bg-indigo-100 rounded-lg group-hover:bg-indigo-200 transition-colors">
+                <CalendarBlank size={20} className="text-indigo-600" weight="fill" />
+              </div>
+              <span className="text-indigo-900 group-hover:text-indigo-700 transition-colors">Room Planner</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16" height="16"
+                fill="currentColor"
+                viewBox="0 0 256 256"
+                className={`text-indigo-400 transition-transform duration-200 ${showCalendar ? "rotate-180" : ""}`}
+              >
+                <path d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z"/>
+              </svg>
             </CardTitle>
             
             <div className="flex items-center gap-3 flex-wrap">
@@ -650,14 +665,14 @@ export default function Dashboard() {
                 </Button>
               </div>
               
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
                 onClick={() => setShowCalendar(!showCalendar)}
-                className="h-8 text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                className="h-8 text-indigo-600 border-indigo-300 hover:bg-indigo-100 font-medium"
                 data-testid="toggle-calendar-btn"
               >
-                {showCalendar ? "Hide" : "Show"}
+                {showCalendar ? "Collapse" : "Expand"}
               </Button>
             </div>
           </div>
