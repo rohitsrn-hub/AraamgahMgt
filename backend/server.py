@@ -3313,9 +3313,11 @@ async def get_room_occupancy_report(
     # Build a lookup: room_number -> category (from the rooms collection)
     room_category_map = {r["room_number"]: r["category"] for r in all_rooms}
 
-    # Get bookings in the date range
+    # Only count physically occupied rooms — confirmed (not yet arrived) are excluded.
+    # Use check_in_date / check_out_date for the range query (those are always set);
+    # actual checkout and early-departure dates are resolved per-booking in Python below.
     bookings = await db.bookings.find({
-        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
+        "status": {"$in": ["checked_in", "checked_out"]},
         "check_in_date": {"$lte": end_date},
         "check_out_date": {"$gt": start_date}
     }, {"_id": 0}).to_list(5000)
@@ -3324,6 +3326,7 @@ async def get_room_occupancy_report(
     start_dt = date_type.fromisoformat(start_date)
     end_dt = date_type.fromisoformat(end_date)
     total_days = (end_dt - start_dt).days + 1
+    today_dt = date_type.today()
 
     # Get settings for rates
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
@@ -3340,8 +3343,6 @@ async def get_room_occupancy_report(
         return (cat_i_rr + cat_i_lf) if category == "Cat I" else (cat_ii_rr + cat_ii_lf)
 
     # Accumulate per-room occupancy by iterating bookings
-    # (same pattern as the working room-allotment report — trusts data embedded in booking doc)
-    # Structure: room_number -> {nights_by_booking: {bk_number -> {nights, detail}}}
     room_acc = {}  # room_number -> {"occupied_days": int, "revenue": float, "bookings_detail": list}
 
     def ensure_room(rn: str):
@@ -3349,16 +3350,31 @@ async def get_room_occupancy_report(
             room_acc[rn] = {"occupied_days": 0, "revenue": 0.0, "bookings_detail": []}
 
     for bk in bookings:
+        status   = bk.get("status")
         checkin  = date_type.fromisoformat(bk["check_in_date"].split("T")[0])
-        checkout = date_type.fromisoformat(bk["check_out_date"].split("T")[0])
-        eff_in   = max(checkin,  start_dt)
-        eff_out  = min(checkout, end_dt + timedelta(days=1))
+
+        # Determine effective checkout based on actual occupancy:
+        # - checked_out: use actual_checkout_date (handles early departures); fall back to planned
+        # - checked_in:  guest is still in-house, cap at today (don't credit future unoccupied nights)
+        if status == "checked_out":
+            co_str   = bk.get("actual_checkout_date") or bk["check_out_date"].split("T")[0]
+            checkout = date_type.fromisoformat(co_str.split("T")[0])
+        else:  # checked_in
+            checkout = date_type.fromisoformat(bk["check_out_date"].split("T")[0])
+            checkout = min(checkout, today_dt)
+
+        eff_in  = max(checkin,  start_dt)
+        eff_out = min(checkout, end_dt + timedelta(days=1))
 
         is_org    = bk.get("is_org", False)
         bk_number = bk.get("booking_number", "N/A")
         bk_name   = bk.get("guest_name", "N/A")
         bk_from   = bk["check_in_date"].split("T")[0]
-        bk_to     = bk["check_out_date"].split("T")[0]
+        # Show actual departure for checked-out bookings in the detail table
+        if status == "checked_out":
+            bk_to = bk.get("actual_checkout_date") or bk["check_out_date"].split("T")[0]
+        else:
+            bk_to = bk["check_out_date"].split("T")[0]
         total_members = 1 + len(bk.get("family_members", []))
 
         final_paid = 0.0
