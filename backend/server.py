@@ -3308,147 +3308,172 @@ async def get_room_occupancy_report(
     else:
         raise HTTPException(400, "Invalid filter type")
     
-    # Get all rooms
+    # Get all rooms (to include 0-occupancy rooms in output)
     all_rooms = await db.rooms.find({}, {"_id": 0}).sort("room_number", 1).to_list(100)
-    
-    # Get bookings in the date range — include confirmed (reserved) as well as active/completed
+    # Build a lookup: room_number -> category (from the rooms collection)
+    room_category_map = {r["room_number"]: r["category"] for r in all_rooms}
+
+    # Get bookings in the date range
     bookings = await db.bookings.find({
         "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
         "check_in_date": {"$lte": end_date},
         "check_out_date": {"$gt": start_date}
     }, {"_id": 0}).to_list(5000)
-    
+
     # Calculate total days in period
     start_dt = date_type.fromisoformat(start_date)
     end_dt = date_type.fromisoformat(end_date)
     total_days = (end_dt - start_dt).days + 1
-    
+
     # Get settings for rates
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
-    cat_i_rr = settings.get("cat_i_room_rent", 470)
-    cat_ii_rr = settings.get("cat_ii_room_rent", 385)
-    non_org_rr = settings.get("non_org_room_rent", 570)
-    cat_i_lf = settings.get("cat_i_license_fee", 30)
+    cat_i_rr  = settings.get("cat_i_room_rent",   470)
+    cat_ii_rr = settings.get("cat_ii_room_rent",  385)
+    non_org_rr= settings.get("non_org_room_rent", 570)
+    cat_i_lf  = settings.get("cat_i_license_fee",  30)
     cat_ii_lf = settings.get("cat_ii_license_fee", 15)
-    non_org_lf = settings.get("non_org_license_fee", 30)
-    
-    # Calculate room-wise occupancy
+    non_org_lf= settings.get("non_org_license_fee",30)
+
+    def rate_for(is_org: bool, category: str) -> float:
+        if not is_org:
+            return non_org_rr + non_org_lf
+        return (cat_i_rr + cat_i_lf) if category == "Cat I" else (cat_ii_rr + cat_ii_lf)
+
+    # Accumulate per-room occupancy by iterating bookings
+    # (same pattern as the working room-allotment report — trusts data embedded in booking doc)
+    # Structure: room_number -> {nights_by_booking: {bk_number -> {nights, detail}}}
+    room_acc = {}  # room_number -> {"occupied_days": int, "revenue": float, "bookings_detail": list}
+
+    def ensure_room(rn: str):
+        if rn not in room_acc:
+            room_acc[rn] = {"occupied_days": 0, "revenue": 0.0, "bookings_detail": []}
+
+    for bk in bookings:
+        checkin  = date_type.fromisoformat(bk["check_in_date"].split("T")[0])
+        checkout = date_type.fromisoformat(bk["check_out_date"].split("T")[0])
+        eff_in   = max(checkin,  start_dt)
+        eff_out  = min(checkout, end_dt + timedelta(days=1))
+
+        is_org    = bk.get("is_org", False)
+        bk_number = bk.get("booking_number", "N/A")
+        bk_name   = bk.get("guest_name", "N/A")
+        bk_from   = bk["check_in_date"].split("T")[0]
+        bk_to     = bk["check_out_date"].split("T")[0]
+        total_members = 1 + len(bk.get("family_members", []))
+
+        final_paid = 0.0
+        if bk.get("status") == "checked_out":
+            total_amt = bk.get("total_amount", 0) or 0
+            advance   = bk.get("advance_paid", 0) or 0
+            final_paid = max(0.0, round(total_amt - advance, 2))
+
+        room_segs = bk.get("room_segments")
+
+        if room_segs:
+            # Segmented booking: credit each room only for its assigned nights.
+            # night_date and room_number come from the segment data written at booking creation.
+            per_room_nights = {}  # room_number -> night count in this period
+            for seg in room_segs:
+                try:
+                    night_dt = date_type.fromisoformat(seg.get("night_date", "").split("T")[0])
+                except (ValueError, TypeError):
+                    continue
+                if not (eff_in <= night_dt < eff_out):
+                    continue
+                for room_data in seg.get("rooms", []):
+                    rn  = room_data.get("room_number")
+                    cat = room_data.get("category") or room_category_map.get(rn, "Cat I")
+                    if not rn:
+                        continue
+                    per_room_nights[rn] = per_room_nights.get(rn, 0) + 1
+                    ensure_room(rn)
+                    r = rate_for(is_org, cat)
+                    room_acc[rn]["occupied_days"] += 1
+                    room_acc[rn]["revenue"]       += r
+
+            # Build one bookings_detail entry per room touched by this segmented booking
+            for rn, nights in per_room_nights.items():
+                cat = room_category_map.get(rn, "Cat I")
+                r   = rate_for(is_org, cat)
+                room_acc[rn]["bookings_detail"].append({
+                    "booking_number":    bk_number,
+                    "is_org":            is_org,
+                    "org_color":         bk.get("org_color", "N/A"),
+                    "name":              bk_name,
+                    "from_date":         bk_from,
+                    "to_date":           bk_to,
+                    "days":              nights,
+                    "total_members":     total_members,
+                    "rate_per_day":      r,
+                    "total_revenue_due": round(nights * r, 2),
+                    "bill_no":           bk_number,
+                    "advance_paid":      bk.get("advance_paid", 0) or 0,
+                    "final_amount_paid": final_paid,
+                })
+        else:
+            # Traditional booking: all effective nights credited to each room in room_numbers.
+            # room_numbers is written at booking creation from the rooms the guest selected.
+            nights = max(0, (eff_out - eff_in).days)
+            if nights == 0:
+                continue
+
+            room_nums = bk.get("room_numbers", [])
+            room_cats = bk.get("room_categories", [])
+
+            # Fallback for very old single-room bookings using room_number (singular)
+            if not room_nums and bk.get("room_number"):
+                room_nums = [bk["room_number"]]
+                room_cats = [bk.get("room_category", room_category_map.get(bk["room_number"], "Cat I"))]
+
+            for i, rn in enumerate(room_nums):
+                cat = room_cats[i] if i < len(room_cats) else room_category_map.get(rn, "Cat I")
+                r   = rate_for(is_org, cat)
+                ensure_room(rn)
+                room_acc[rn]["occupied_days"] += nights
+                room_acc[rn]["revenue"]       += nights * r
+                room_acc[rn]["bookings_detail"].append({
+                    "booking_number":    bk_number,
+                    "is_org":            is_org,
+                    "org_color":         bk.get("org_color", "N/A"),
+                    "name":              bk_name,
+                    "from_date":         bk_from,
+                    "to_date":           bk_to,
+                    "days":              nights,
+                    "total_members":     total_members,
+                    "rate_per_day":      r,
+                    "total_revenue_due": round(nights * r, 2),
+                    "bill_no":           bk_number,
+                    "advance_paid":      bk.get("advance_paid", 0) or 0,
+                    "final_amount_paid": final_paid,
+                })
+
+    # Build room_details list from rooms collection (guarantees all rooms appear, even empty ones)
     room_details = []
     total_occupied = 0
-    total_revenue = 0
-    
+    total_revenue  = 0.0
+
     for room in all_rooms:
-        room_id = room["id"]
-        room_number = room["room_number"]
+        rn       = room["room_number"]
         category = room["category"]
+        acc      = room_acc.get(rn, {"occupied_days": 0, "revenue": 0.0, "bookings_detail": []})
 
-        # Find bookings for this room.
-        # Match by room_number (stable — survives setup re-runs that regenerate UUIDs),
-        # falling back to UUID match so both old and new bookings are covered.
-        room_bookings = []
-        for bk in bookings:
-            bk_room_numbers = bk.get("room_numbers", [])
-            bk_room_ids = bk.get("room_ids", [])
-            if not bk_room_ids and bk.get("room_id"):
-                bk_room_ids = [bk["room_id"]]
-            # Also scan room_segments in case room_ids was empty (segmented bookings)
-            bk_seg_room_numbers = {
-                r.get("room_number")
-                for seg in (bk.get("room_segments") or [])
-                for r in seg.get("rooms", [])
-            }
-            if (room_number in bk_room_numbers or
-                    room_id in bk_room_ids or
-                    room_number in bk_seg_room_numbers):
-                room_bookings.append(bk)
-        
-        # Calculate occupied days and build detailed booking list
-        occupied_days = 0
-        room_revenue = 0
-        bookings_detail = []
-        
-        for bk in room_bookings:
-            checkin = date_type.fromisoformat(bk["check_in_date"].split("T")[0])
-            checkout = date_type.fromisoformat(bk["check_out_date"].split("T")[0])
-            eff_in = max(checkin, start_dt)
-            eff_out = min(checkout, end_dt + timedelta(days=1))
+        occupied_days    = min(acc["occupied_days"], total_days)  # cap at period length
+        available_days   = max(0, total_days - occupied_days)
+        occupancy_percent= round((occupied_days / total_days) * 100, 2) if total_days > 0 else 0
 
-            # If the booking has per-night room segments (guest changed rooms during stay),
-            # count only the nights where THIS specific room was actually assigned.
-            # Otherwise every room in the booking gets credited all nights — wrong.
-            room_segments = bk.get("room_segments")
-            if room_segments:
-                nights = 0
-                for seg in room_segments:
-                    try:
-                        night_dt = date_type.fromisoformat(seg.get("night_date", "").split("T")[0])
-                    except (ValueError, TypeError):
-                        continue
-                    if eff_in <= night_dt < eff_out:
-                        # Match by room_number (stable) or UUID (current)
-                        seg_room_numbers = [r.get("room_number") for r in seg.get("rooms", [])]
-                        seg_room_ids = [r.get("id") for r in seg.get("rooms", [])]
-                        if room_number in seg_room_numbers or room_id in seg_room_ids:
-                            nights += 1
-            else:
-                nights = max(0, (eff_out - eff_in).days)
-
-            occupied_days += nights
-
-            # Revenue for this booking's share of this room
-            is_org = bk.get("is_org", False)
-            if is_org:
-                rate_per_day = (cat_i_rr + cat_i_lf) if category == "Cat I" else (cat_ii_rr + cat_ii_lf)
-            else:
-                rate_per_day = non_org_rr + non_org_lf
-
-            booking_revenue = nights * rate_per_day
-            room_revenue += booking_revenue
-
-            total_members = 1 + len(bk.get("family_members", []))
-
-            # final_amount_paid = what the guest still owed at checkout (total minus advance)
-            # balance_amount is the remaining unpaid balance — 0 when fully settled
-            final_paid = 0.0
-            if bk.get("status") == "checked_out":
-                total_amt = bk.get("total_amount", 0) or 0
-                advance = bk.get("advance_paid", 0) or 0
-                final_paid = max(0.0, round(total_amt - advance, 2))
-
-            bookings_detail.append({
-                "booking_number": bk.get("booking_number", "N/A"),
-                "is_org": is_org,
-                "org_color": bk.get("org_color", "N/A"),
-                "name": bk.get("guest_name", "N/A"),
-                "from_date": bk["check_in_date"].split("T")[0],
-                "to_date": bk["check_out_date"].split("T")[0],
-                "days": nights,
-                "total_members": total_members,
-                "rate_per_day": rate_per_day,
-                "total_revenue_due": round(booking_revenue, 2),
-                "bill_no": bk.get("booking_number", "N/A"),
-                "advance_paid": bk.get("advance_paid", 0) or 0,
-                "final_amount_paid": final_paid
-            })
-        
-        available_days = max(0, total_days - occupied_days)
-        occupancy_percent = round((min(occupied_days, total_days) / total_days) * 100, 2) if total_days > 0 else 0
-        
         room_details.append({
-            "room_number": room_number,
-            "category": category,
-            "occupied_days": occupied_days,
-            "available_days": available_days,
-            "occupancy_percent": occupancy_percent,
-            "revenue": round(room_revenue, 2),
-            "bookings_detail": bookings_detail  # NEW: Expandable booking details
+            "room_number":      rn,
+            "category":         category,
+            "occupied_days":    occupied_days,
+            "available_days":   available_days,
+            "occupancy_percent":occupancy_percent,
+            "revenue":          round(acc["revenue"], 2),
+            "bookings_detail":  acc["bookings_detail"],
         })
-        
+
         total_occupied += occupied_days
-        total_revenue += room_revenue
-    
-    total_available = (len(all_rooms) * total_days) - total_occupied
-    avg_occupancy = round((total_occupied / (len(all_rooms) * total_days)) * 100, 2) if len(all_rooms) * total_days > 0 else 0
+        total_revenue  += acc["revenue"]
+
     
     return {
         "period_label": period_label,
