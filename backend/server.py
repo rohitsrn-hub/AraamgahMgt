@@ -3341,14 +3341,25 @@ async def get_room_occupancy_report(
         room_id = room["id"]
         room_number = room["room_number"]
         category = room["category"]
-        
-        # Find bookings for this room
+
+        # Find bookings for this room.
+        # Match by room_number (stable — survives setup re-runs that regenerate UUIDs),
+        # falling back to UUID match so both old and new bookings are covered.
         room_bookings = []
         for bk in bookings:
-            room_ids = bk.get("room_ids", [])
-            if not room_ids and bk.get("room_id"):
-                room_ids = [bk["room_id"]]
-            if room_id in room_ids:
+            bk_room_numbers = bk.get("room_numbers", [])
+            bk_room_ids = bk.get("room_ids", [])
+            if not bk_room_ids and bk.get("room_id"):
+                bk_room_ids = [bk["room_id"]]
+            # Also scan room_segments in case room_ids was empty (segmented bookings)
+            bk_seg_room_numbers = {
+                r.get("room_number")
+                for seg in (bk.get("room_segments") or [])
+                for r in seg.get("rooms", [])
+            }
+            if (room_number in bk_room_numbers or
+                    room_id in bk_room_ids or
+                    room_number in bk_seg_room_numbers):
                 room_bookings.append(bk)
         
         # Calculate occupied days and build detailed booking list
@@ -3374,8 +3385,10 @@ async def get_room_occupancy_report(
                     except (ValueError, TypeError):
                         continue
                     if eff_in <= night_dt < eff_out:
+                        # Match by room_number (stable) or UUID (current)
+                        seg_room_numbers = [r.get("room_number") for r in seg.get("rooms", [])]
                         seg_room_ids = [r.get("id") for r in seg.get("rooms", [])]
-                        if room_id in seg_room_ids:
+                        if room_number in seg_room_numbers or room_id in seg_room_ids:
                             nights += 1
             else:
                 nights = max(0, (eff_out - eff_in).days)
