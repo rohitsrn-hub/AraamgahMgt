@@ -3311,9 +3311,9 @@ async def get_room_occupancy_report(
     # Get all rooms
     all_rooms = await db.rooms.find({}, {"_id": 0}).sort("room_number", 1).to_list(100)
     
-    # Get bookings in the date range (checked_in or checked_out)
+    # Get bookings in the date range — include confirmed (reserved) as well as active/completed
     bookings = await db.bookings.find({
-        "status": {"$in": ["checked_in", "checked_out"]},
+        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
         "check_in_date": {"$lte": end_date},
         "check_out_date": {"$gt": start_date}
     }, {"_id": 0}).to_list(5000)
@@ -3357,51 +3357,69 @@ async def get_room_occupancy_report(
         bookings_detail = []
         
         for bk in room_bookings:
-            checkin = date_type.fromisoformat(bk["check_in_date"])
-            checkout = date_type.fromisoformat(bk["check_out_date"])
+            checkin = date_type.fromisoformat(bk["check_in_date"].split("T")[0])
+            checkout = date_type.fromisoformat(bk["check_out_date"].split("T")[0])
             eff_in = max(checkin, start_dt)
             eff_out = min(checkout, end_dt + timedelta(days=1))
-            nights = max(0, (eff_out - eff_in).days)
-            occupied_days += nights
-            
-            # Calculate revenue for this booking
-            is_org = bk.get("is_org", False)
-            
-            if is_org:
-                # Organization rates based on category
-                if category == "Cat I":
-                    rate_per_day = cat_i_rr + cat_i_lf
-                else:
-                    rate_per_day = cat_ii_rr + cat_ii_lf
+
+            # If the booking has per-night room segments (guest changed rooms during stay),
+            # count only the nights where THIS specific room was actually assigned.
+            # Otherwise every room in the booking gets credited all nights — wrong.
+            room_segments = bk.get("room_segments")
+            if room_segments:
+                nights = 0
+                for seg in room_segments:
+                    try:
+                        night_dt = date_type.fromisoformat(seg.get("night_date", "").split("T")[0])
+                    except (ValueError, TypeError):
+                        continue
+                    if eff_in <= night_dt < eff_out:
+                        seg_room_ids = [r.get("id") for r in seg.get("rooms", [])]
+                        if room_id in seg_room_ids:
+                            nights += 1
             else:
-                # Non-Org flat rate
+                nights = max(0, (eff_out - eff_in).days)
+
+            occupied_days += nights
+
+            # Revenue for this booking's share of this room
+            is_org = bk.get("is_org", False)
+            if is_org:
+                rate_per_day = (cat_i_rr + cat_i_lf) if category == "Cat I" else (cat_ii_rr + cat_ii_lf)
+            else:
                 rate_per_day = non_org_rr + non_org_lf
-            
+
             booking_revenue = nights * rate_per_day
             room_revenue += booking_revenue
-            
-            # Count total members (main guest + family)
+
             total_members = 1 + len(bk.get("family_members", []))
-            
-            # Build detailed booking info for expandable row
+
+            # final_amount_paid = what the guest still owed at checkout (total minus advance)
+            # balance_amount is the remaining unpaid balance — 0 when fully settled
+            final_paid = 0.0
+            if bk.get("status") == "checked_out":
+                total_amt = bk.get("total_amount", 0) or 0
+                advance = bk.get("advance_paid", 0) or 0
+                final_paid = max(0.0, round(total_amt - advance, 2))
+
             bookings_detail.append({
                 "booking_number": bk.get("booking_number", "N/A"),
                 "is_org": is_org,
                 "org_color": bk.get("org_color", "N/A"),
                 "name": bk.get("guest_name", "N/A"),
-                "from_date": bk["check_in_date"],
-                "to_date": bk["check_out_date"],
+                "from_date": bk["check_in_date"].split("T")[0],
+                "to_date": bk["check_out_date"].split("T")[0],
                 "days": nights,
                 "total_members": total_members,
                 "rate_per_day": rate_per_day,
                 "total_revenue_due": round(booking_revenue, 2),
-                "bill_no": bk.get("booking_number", "N/A"),  # Using booking number as bill number
-                "advance_paid": bk.get("advance_paid", 0),
-                "final_amount_paid": bk.get("balance_amount", 0) if bk.get("status") == "checked_out" else 0
+                "bill_no": bk.get("booking_number", "N/A"),
+                "advance_paid": bk.get("advance_paid", 0) or 0,
+                "final_amount_paid": final_paid
             })
         
-        available_days = total_days - occupied_days
-        occupancy_percent = round((occupied_days / total_days) * 100, 2) if total_days > 0 else 0
+        available_days = max(0, total_days - occupied_days)
+        occupancy_percent = round((min(occupied_days, total_days) / total_days) * 100, 2) if total_days > 0 else 0
         
         room_details.append({
             "room_number": room_number,
