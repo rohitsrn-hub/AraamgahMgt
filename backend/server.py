@@ -3507,7 +3507,10 @@ async def get_room_occupancy_report(
         total_occupied += occupied_days
         total_revenue  += acc["revenue"]
 
-    
+    total_room_days  = total_days * len(all_rooms)
+    total_available  = max(0, total_room_days - total_occupied)
+    avg_occupancy    = round((total_occupied / total_room_days * 100), 2) if total_room_days > 0 else 0
+
     return {
         "period_label": period_label,
         "start_date": start_date,
