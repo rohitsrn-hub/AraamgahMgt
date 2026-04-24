@@ -24,8 +24,8 @@ export const AuthProvider = ({ children }) => {
 
   // Initialize auth state from localStorage
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
+    const storedToken = sessionStorage.getItem('token');
+    const storedUser = sessionStorage.getItem('user');
 
     if (storedToken && storedUser) {
       try {
@@ -38,13 +38,13 @@ export const AuthProvider = ({ children }) => {
           setUser(JSON.parse(storedUser));
         } else {
           // Token expired, clear storage
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('user');
         }
       } catch (error) {
         console.error('Error parsing stored auth:', error);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('user');
       }
     }
 
@@ -65,9 +65,9 @@ export const AuthProvider = ({ children }) => {
       setToken(access_token);
       setUser(userData);
 
-      // Store in localStorage
-      localStorage.setItem('token', access_token);
-      localStorage.setItem('user', JSON.stringify(userData));
+      // Store in sessionStorage (cleared on tab/window close)
+      sessionStorage.setItem('token', access_token);
+      sessionStorage.setItem('user', JSON.stringify(userData));
 
       return { success: true, user: userData };
     } catch (error) {
@@ -82,9 +82,9 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
     setUser(null);
 
-    // Clear localStorage
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    // Clear sessionStorage
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
 
     // Redirect to login
     window.location.href = '/login';

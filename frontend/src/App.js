@@ -7,7 +7,6 @@ import { AuthProvider } from "@/contexts/AuthContext";
 
 // Pages
 import Login from "@/pages/Login";
-import SetupWizard from "@/pages/SetupWizard";
 import CommandCenter from "@/components/CommandCenter";
 import Dashboard from "@/pages/Dashboard";
 import Bookings from "@/pages/Bookings";
@@ -29,7 +28,7 @@ export const API = `${BACKEND_URL}/api`;
 // Configure axios interceptors for authentication
 axios.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -43,8 +42,8 @@ axios.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 && window.location.pathname !== '/login') {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('user');
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -175,16 +174,6 @@ function AppContent() {
         <Routes>
           <Route path="*" element={<Login />} />
         </Routes>
-        <Toaster position="top-right" richColors />
-      </>
-    );
-  }
-
-  // User is authenticated - now check setup
-  if (!settings?.is_setup_complete) {
-    return (
-      <>
-        <SetupWizard onComplete={fetchSettings} />
         <Toaster position="top-right" richColors />
       </>
     );

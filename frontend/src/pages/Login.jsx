@@ -18,7 +18,7 @@ const Login = () => {
   // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated()) {
-      const storedUser = localStorage.getItem('user');
+      const storedUser = sessionStorage.getItem('user');
       if (storedUser) {
         const user = JSON.parse(storedUser);
         if (user.role === 'staff') {
