@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { generateCheckoutReceipt } from "@/utils/pdfUtils";
+import { fmtINR } from "@/utils/formatters";
 import FeedbackForm from "@/components/FeedbackForm";
 import BookingSelectionModal from "@/components/BookingSelectionModal";
 import { 
@@ -204,13 +205,7 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMonth, selectedYear]);
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
-    }).format(amount);
-  };
+  const formatCurrency = (amount) => fmtINR(amount, 0);
 
   const months = [
     { value: 1, label: "January" },
@@ -1156,7 +1151,7 @@ export default function Dashboard() {
                 />
                 {actionForm.extra_beds > 0 && (
                   <span className="text-sm font-medium text-amber-700">
-                    Extra charge: ₹{actionForm.extra_beds * 75}/night
+                    Extra charge: {fmtINR(actionForm.extra_beds * 75, 0)}/night
                   </span>
                 )}
               </div>
@@ -1220,7 +1215,7 @@ export default function Dashboard() {
                 <p className="font-medium text-amber-800">{selectedBooking.guest_name}</p>
                 <p className="text-sm text-amber-600">Room {getRoomDisplay(selectedBooking)}</p>
                 {selectedBooking.extra_beds > 0 && (
-                  <p className="text-xs text-amber-600">Extra Beds: {selectedBooking.extra_beds} × ₹75 = ₹{selectedBooking.extra_bed_charge}</p>
+                  <p className="text-xs text-amber-600">Extra Beds: {selectedBooking.extra_beds} × ₹75 = {fmtINR(selectedBooking.extra_bed_charge, 2)}</p>
                 )}
                 <p className="text-sm font-medium text-amber-800 mt-1">
                   Balance Due: {formatCurrency(selectedBooking.balance_amount)}

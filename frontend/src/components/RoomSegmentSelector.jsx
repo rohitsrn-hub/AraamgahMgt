@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { CalendarBlank, CheckCircle, ArrowRight, Pencil } from '@phosphor-icons/react';
+import { fmtINR } from "@/utils/formatters";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -321,7 +322,7 @@ const RoomSegmentSelector = ({
             </p>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-bold text-slate-900">₹{totalCost.toFixed(0)}</p>
+            <p className="text-2xl font-bold text-slate-900">{fmtINR(totalCost, 0)}</p>
             <p className="text-xs text-slate-500">
               {isOrg ? 'Organization Rate' : 'Non-Organization Rate'}
             </p>

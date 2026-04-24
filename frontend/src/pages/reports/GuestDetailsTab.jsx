@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { FilePdf, Users } from "@phosphor-icons/react";
 import { generateGuestDetailsPDF } from "@/utils/pdfUtils";
+import { fmtINR } from "@/utils/formatters";
 
 const MONTHS = [
   "January","February","March","April","May","June",
@@ -199,7 +200,7 @@ export default function GuestDetailsTab({ settings }) {
                 <CardTitle className="text-sm font-medium text-slate-600">Revenue (₹)</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold text-emerald-600">₹{report.total_revenue?.toFixed(2) || '0.00'}</div>
+                <div className="text-3xl font-bold text-emerald-600">{fmtINR(report.total_revenue || 0, 2)}</div>
               </CardContent>
             </Card>
           </div>
@@ -270,7 +271,7 @@ export default function GuestDetailsTab({ settings }) {
                         <td>{guest.check_out_date}</td>
                         <td className="text-center">{guest.nights}</td>
                         <td className="text-right font-semibold">
-                          {typeof guest.total_amount === 'number' ? `₹${guest.total_amount.toFixed(2)}` : guest.total_amount}
+                          {typeof guest.total_amount === 'number' ? fmtINR(guest.total_amount, 2) : guest.total_amount}
                         </td>
                       </tr>
                     ))}

@@ -2,6 +2,15 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
 
+// Indian number system formatter: 1,23,45,678.00
+export function fmtINR(amount, decimals = 2) {
+  const num = typeof amount === "number" ? amount : parseFloat(amount) || 0;
+  return "₹" + new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }).format(num);
+}
+
 const REST_HOUSE_NAME = "ARAAMGAH MANAGEMENT SYSTEM";
 const PRIMARY_COLOR = [31, 78, 121];   // dark blue
 const ACCENT_COLOR = [70, 130, 180];   // steel blue
@@ -169,28 +178,28 @@ export function generateCheckoutReceipt(booking, settings) {
   
   // Build table rows
   const tableRows = [
-    ["Room Charges", `₹${(totalRoomCharges / nights).toFixed(0)} × ${nights} night(s) × ${numRooms} room(s)`, totalRoomCharges.toFixed(2)]
+    ["Room Charges", `${fmtINR(totalRoomCharges / nights, 0)} × ${nights} night(s) × ${numRooms} room(s)`, fmtINR(totalRoomCharges, 2)]
   ];
   
   // Add extra beds if any (actual usage at checkout)
   if (extraBedActual > 0) {
     const numBedsCheckout = booking.extra_beds_checkout || 0;
     const daysCheckout = booking.extra_bed_days || 0;
-    tableRows.push(["Extra Beds (actual usage)", `${numBedsCheckout} bed(s) × ${daysCheckout} day(s) × ₹75`, extraBedActual.toFixed(2)]);
+    tableRows.push(["Extra Beds (actual usage)", `${numBedsCheckout} bed(s) × ${daysCheckout} day(s) × ₹75`, fmtINR(extraBedActual, 2)]);
   }
-  
+
   // Add advance deduction
   if (advancePaid > 0) {
-    tableRows.push(["Less: Advance Paid", "", `(${advancePaid.toFixed(2)})`]);
+    tableRows.push(["Less: Advance Paid", "", `(${fmtINR(advancePaid, 2)})`]);
   }
-  
+
   // Add additional charges if any
   if (additionalCharges > 0) {
-    tableRows.push(["Additional Charges at Checkout", "", additionalCharges.toFixed(2)]);
+    tableRows.push(["Additional Charges at Checkout", "", fmtINR(additionalCharges, 2)]);
   }
   
   // Add final total
-  tableRows.push(["Amount Collected at Checkout", "", finalPayment.toFixed(2)]);
+  tableRows.push(["Amount Collected at Checkout", "", fmtINR(finalPayment, 2)]);
 
   autoTable(doc, {
     startY: y,
@@ -289,7 +298,7 @@ export function generateRefundsPDF(refunds) {
         i + 1,
         r.booking_number || r.id || "—",
         r.guest_name || "—",
-        r.amount ? `₹${r.amount.toFixed(0)}` : "₹0",
+        r.amount ? fmtINR(r.amount, 0) : "₹0",
         r.payment_mode || "—",
         r.payment_id || r.transaction_id || "—",
         paymentDetails
@@ -327,7 +336,7 @@ export function generateRefundsPDF(refunds) {
     head: [["Description", "Value"]],
     body: [
       ["Total Bookings Cancelled", totalBookings.toString()],
-      ["Total Amount to be Refunded", `₹${totalAmount.toFixed(2)}`]
+      ["Total Amount to be Refunded", fmtINR(totalAmount, 2)]
     ],
     styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak', cellWidth: 'wrap' },
     headStyles: { fillColor: [51, 51, 51], textColor: 255, fontSize: 8, fontStyle: 'bold' },
@@ -421,10 +430,10 @@ export function generateMonthlyReportPDF(data, settings) {
 
   const lf = data.license_fees || {};
   const lfRows = [
-    ["Org (Cat I)", `${lf.org_cat_i?.days || 0} days × ₹${lf.org_cat_i?.rate || 30}`, `₹${(lf.org_cat_i?.total || 0).toFixed(2)}`],
-    ["Org (Cat II)", `${lf.org_cat_ii?.days || 0} days × ₹${lf.org_cat_ii?.rate || 15}`, `₹${(lf.org_cat_ii?.total || 0).toFixed(2)}`],
-    ["Non-Org", `${lf.non_org?.days || 0} days × ₹${lf.non_org?.rate || 30}`, `₹${(lf.non_org?.total || 0).toFixed(2)}`],
-    ["TOTAL LICENSE FEE", "", `₹${(data.total_license_fee || 0).toFixed(2)}`],
+    ["Org (Cat I)", `${lf.org_cat_i?.days || 0} days × ₹${lf.org_cat_i?.rate || 30}`, fmtINR((lf.org_cat_i?.total || 0), 2)],
+    ["Org (Cat II)", `${lf.org_cat_ii?.days || 0} days × ₹${lf.org_cat_ii?.rate || 15}`, fmtINR((lf.org_cat_ii?.total || 0), 2)],
+    ["Non-Org", `${lf.non_org?.days || 0} days × ₹${lf.non_org?.rate || 30}`, fmtINR((lf.non_org?.total || 0), 2)],
+    ["TOTAL LICENSE FEE", "", fmtINR((data.total_license_fee || 0), 2)],
   ];
 
   autoTable(doc, {
@@ -448,13 +457,13 @@ export function generateMonthlyReportPDF(data, settings) {
 
   const r = data.rates || {};
   const summaryRows = [
-    ["Org (Cat I)", `${data.org_cat_i_days || 0} days × ₹${r.cat_i_room_rent || 470} (room rent)`, `₹${((data.org_cat_i_days || 0) * (r.cat_i_room_rent || 470)).toFixed(2)}`],
-    ["Org (Cat II)", `${data.org_cat_ii_days || 0} days × ₹${r.cat_ii_room_rent || 385} (room rent)`, `₹${((data.org_cat_ii_days || 0) * (r.cat_ii_room_rent || 385)).toFixed(2)}`],
-    ["Non-Org", `${data.non_org_days || 0} days × ₹${r.non_org_room_rent || 570} (room rent)`, `₹${((data.non_org_days || 0) * (r.non_org_room_rent || 570)).toFixed(2)}`],
-    ["Room Rent Sub-Total", "", `₹${(data.room_rent_total || 0).toFixed(2)}`],
-    ["License Fee Total", "", `₹${(data.total_license_fee || 0).toFixed(2)}`],
-    ["Extra Beds", `${data.extra_beds_total || 0} bed-nights × ₹75`, `₹${(data.extra_bed_amount || 0).toFixed(2)}`],
-    ["GRAND TOTAL", "", `₹${(data.grand_total || 0).toFixed(2)}`],
+    ["Org (Cat I)", `${data.org_cat_i_days || 0} days × ₹${r.cat_i_room_rent || 470} (room rent)`, fmtINR(((data.org_cat_i_days || 0) * (r.cat_i_room_rent || 470)), 2)],
+    ["Org (Cat II)", `${data.org_cat_ii_days || 0} days × ₹${r.cat_ii_room_rent || 385} (room rent)`, fmtINR(((data.org_cat_ii_days || 0) * (r.cat_ii_room_rent || 385)), 2)],
+    ["Non-Org", `${data.non_org_days || 0} days × ₹${r.non_org_room_rent || 570} (room rent)`, fmtINR(((data.non_org_days || 0) * (r.non_org_room_rent || 570)), 2)],
+    ["Room Rent Sub-Total", "", fmtINR((data.room_rent_total || 0), 2)],
+    ["License Fee Total", "", fmtINR((data.total_license_fee || 0), 2)],
+    ["Extra Beds", `${data.extra_beds_total || 0} bed-nights × ₹75`, fmtINR((data.extra_bed_amount || 0), 2)],
+    ["GRAND TOTAL", "", fmtINR((data.grand_total || 0), 2)],
   ];
 
   autoTable(doc, {
@@ -482,9 +491,9 @@ export function generateMonthlyReportPDF(data, settings) {
     ["Total Days in Month", data.days_in_month],
     ["Total Booked Room-Days", data.total_booked_days || 0],
     ["Average Occupancy", `${data.avg_occupancy || 0}%`],
-    ["Advance Received", `₹${(data.advance_received || 0).toFixed(2)}`],
-    ["Advance Adjusted in Bills", `₹${(data.advance_adjusted || 0).toFixed(2)}`],
-    ["Balance Advance", `₹${(data.balance_advance || 0).toFixed(2)}`],
+    ["Advance Received", fmtINR((data.advance_received || 0), 2)],
+    ["Advance Adjusted in Bills", fmtINR((data.advance_adjusted || 0), 2)],
+    ["Balance Advance", fmtINR((data.balance_advance || 0), 2)],
     ["No-shows (advance paid, cancelled)", data.no_shows || 0],
   ];
 
@@ -775,7 +784,7 @@ export function generateRoomOccupancyPDF(data, settings) {
     ["Total Occupied Room-Days", data.total_occupied_days || 0],
     ["Average Occupancy", `${data.avg_occupancy || 0}%`],
     ["Total Bookings", data.total_bookings || 0],
-    ["Total Revenue", `₹${(data.total_revenue || 0).toFixed(2)}`],
+    ["Total Revenue", fmtINR((data.total_revenue || 0), 2)],
   ];
 
   autoTable(doc, {
@@ -812,7 +821,7 @@ export function generateRoomOccupancyPDF(data, settings) {
       room.occupied_days,
       room.available_days,
       `${room.occupancy_percent}%`,
-      `₹${room.revenue.toFixed(2)}`
+      fmtINR(room.revenue, 2)
     ]];
 
     autoTable(doc, {
@@ -845,11 +854,11 @@ export function generateRoomOccupancyPDF(data, settings) {
         b.to_date,
         b.days,
         b.total_members,
-        `₹${b.rate_per_day}`,
-        `₹${b.total_revenue_due.toFixed(2)}`,
+        fmtINR(b.rate_per_day, 0),
+        fmtINR(b.total_revenue_due, 2),
         b.bill_no,
-        `₹${b.advance_paid.toFixed(2)}`,
-        `₹${b.final_amount_paid.toFixed(2)}`
+        fmtINR(b.advance_paid, 2),
+        fmtINR(b.final_amount_paid, 2)
       ]);
 
       autoTable(doc, {
@@ -940,7 +949,7 @@ export function generateRoomAllotmentPDF(data, settings) {
     a.non_dependents,
     (a.room_numbers || []).join(", "),
     a.mobile_no,
-    `₹${a.total_amount.toFixed(2)}`
+    fmtINR(a.total_amount, 2)
   ]);
 
   autoTable(doc, {
@@ -1013,7 +1022,7 @@ export function generateGuestDetailsPDF(data, settings) {
   // Summary
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text(`Total Party Members: ${data.total_party_members || 0}  |  Total Bookings: ${data.total_bookings || 0}  |  Total Nights: ${data.total_nights || 0}  |  Revenue: ₹${(data.total_revenue || 0).toFixed(2)}`, 10, y);
+  doc.text(`Total Party Members: ${data.total_party_members || 0}  |  Total Bookings: ${data.total_bookings || 0}  |  Total Nights: ${data.total_nights || 0}  |  Revenue: ${fmtINR(data.total_revenue || 0, 2)}`, 10, y);
   y += 6;
 
   const guestRows = (data.guest_party_members || []).map(g => [
@@ -1025,7 +1034,7 @@ export function generateGuestDetailsPDF(data, settings) {
     g.sex,
     g.relationship,
     g.mobile_no,
-    typeof g.total_amount === 'number' ? `₹${g.total_amount.toFixed(2)}` : g.total_amount
+    typeof g.total_amount === 'number' ? fmtINR(g.total_amount, 2) : g.total_amount
   ]);
 
   autoTable(doc, {

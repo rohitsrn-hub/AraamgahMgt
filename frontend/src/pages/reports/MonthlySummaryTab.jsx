@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { FilePdf, ChartBar, CurrencyInr, Buildings } from "@phosphor-icons/react";
 import { generateMonthlyReportPDF } from "@/utils/pdfUtils";
+import { fmtINR } from "@/utils/formatters";
 
 const MONTHS = [
   "January","February","March","April","May","June",
@@ -144,14 +145,14 @@ export default function MonthlySummaryTab({ settings }) {
                   return (
                     <div key={key} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                       <span className={`font-medium ${color}`}>{label}</span>
-                      <span className="text-slate-600 text-sm">{lf.days || 0} days × ₹{lf.rate || 0}</span>
-                      <span className="font-bold text-slate-800">₹{(lf.total || 0).toFixed(2)}</span>
+                      <span className="text-slate-600 text-sm">{lf.days || 0} days × {fmtINR(lf.rate || 0, 0)}</span>
+                      <span className="font-bold text-slate-800">{fmtINR((lf.total || 0), 2)}</span>
                     </div>
                   );
                 })}
                 <div className="flex justify-between items-center p-3 bg-amber-50 border border-amber-200 rounded-lg font-bold">
                   <span>Total License Fee</span>
-                  <span>₹{(report.total_license_fee || 0).toFixed(2)}</span>
+                  <span>{fmtINR((report.total_license_fee || 0), 2)}</span>
                 </div>
               </div>
             </CardContent>
@@ -168,22 +169,22 @@ export default function MonthlySummaryTab({ settings }) {
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Row label="Org (Cat I) Room Rent" value={`${report.org_cat_i_days || 0} × ₹${report.rates?.cat_i_room_rent || 470} = ₹${((report.org_cat_i_days || 0) * (report.rates?.cat_i_room_rent || 470)).toFixed(2)}`} />
-                  <Row label="Org (Cat II) Room Rent" value={`${report.org_cat_ii_days || 0} × ₹${report.rates?.cat_ii_room_rent || 385} = ₹${((report.org_cat_ii_days || 0) * (report.rates?.cat_ii_room_rent || 385)).toFixed(2)}`} />
-                  <Row label="Non-Org Room Rent" value={`${report.non_org_days || 0} × ₹${report.rates?.non_org_room_rent || 570} = ₹${((report.non_org_days || 0) * (report.rates?.non_org_room_rent || 570)).toFixed(2)}`} />
-                  <Row label="Room Rent Sub-Total" value={`₹${(report.room_rent_total || 0).toFixed(2)}`} bold />
-                  <Row label="License Fee Total" value={`₹${(report.total_license_fee || 0).toFixed(2)}`} bold />
-                  <Row label="Extra Beds" value={`${report.extra_beds_total || 0} × ₹75 = ₹${(report.extra_bed_amount || 0).toFixed(2)}`} />
-                  <Row label="GRAND TOTAL" value={`₹${(report.grand_total || 0).toFixed(2)}`} bold highlight />
+                  <Row label="Org (Cat I) Room Rent" value={`${report.org_cat_i_days || 0} × ₹${report.rates?.cat_i_room_rent || 470} = ${fmtINR((report.org_cat_i_days || 0) * (report.rates?.cat_i_room_rent || 470), 2)}`} />
+                  <Row label="Org (Cat II) Room Rent" value={`${report.org_cat_ii_days || 0} × ₹${report.rates?.cat_ii_room_rent || 385} = ${fmtINR((report.org_cat_ii_days || 0) * (report.rates?.cat_ii_room_rent || 385), 2)}`} />
+                  <Row label="Non-Org Room Rent" value={`${report.non_org_days || 0} × ₹${report.rates?.non_org_room_rent || 570} = ${fmtINR((report.non_org_days || 0) * (report.rates?.non_org_room_rent || 570), 2)}`} />
+                  <Row label="Room Rent Sub-Total" value={fmtINR((report.room_rent_total || 0), 2)} bold />
+                  <Row label="License Fee Total" value={fmtINR((report.total_license_fee || 0), 2)} bold />
+                  <Row label="Extra Beds" value={`${report.extra_beds_total || 0} × ₹75 = ${fmtINR(report.extra_bed_amount || 0, 2)}`} />
+                  <Row label="GRAND TOTAL" value={fmtINR((report.grand_total || 0), 2)} bold highlight />
                 </div>
                 <div className="space-y-2">
                   <Row label="Total Rooms" value={report.total_rooms} />
                   <Row label="Days in Month" value={report.days_in_month} />
                   <Row label="Total Booked Room-Days" value={report.total_booked_days || 0} />
                   <Row label="Average Occupancy" value={`${report.avg_occupancy || 0}%`} bold />
-                  <Row label="Advance Received" value={`₹${(report.advance_received || 0).toFixed(2)}`} />
-                  <Row label="Advance Adjusted" value={`₹${(report.advance_adjusted || 0).toFixed(2)}`} />
-                  <Row label="Balance Advance" value={`₹${(report.balance_advance || 0).toFixed(2)}`} bold />
+                  <Row label="Advance Received" value={fmtINR((report.advance_received || 0), 2)} />
+                  <Row label="Advance Adjusted" value={fmtINR((report.advance_adjusted || 0), 2)} />
+                  <Row label="Balance Advance" value={fmtINR((report.balance_advance || 0), 2)} bold />
                   <Row label="No-shows (after advance)" value={report.no_shows || 0} />
                 </div>
               </div>

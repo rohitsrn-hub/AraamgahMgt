@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { FilePdf, Bed, CaretDown, CaretRight } from "@phosphor-icons/react";
 import { generateRoomOccupancyPDF } from "@/utils/pdfUtils";
+import { fmtINR } from "@/utils/formatters";
 
 const MONTHS = [
   "January","February","March","April","May","June",
@@ -257,7 +258,7 @@ export default function RoomOccupancyTab({ settings }) {
                               {room.occupancy_percent}%
                             </span>
                           </td>
-                          <td className="text-right font-semibold">₹{room.revenue?.toFixed(2) || '0.00'}</td>
+                          <td className="text-right font-semibold">{fmtINR(room.revenue || 0, 2)}</td>
                         </tr>
                         
                         {/* Expandable Booking Details */}
@@ -304,11 +305,11 @@ export default function RoomOccupancyTab({ settings }) {
                                           <td className="p-2 text-center">{booking.to_date}</td>
                                           <td className="p-2 text-center font-semibold">{booking.days}</td>
                                           <td className="p-2 text-center font-semibold text-blue-600">{booking.total_members}</td>
-                                          <td className="p-2 text-right">₹{booking.rate_per_day}</td>
-                                          <td className="p-2 text-right font-bold text-emerald-700">₹{booking.total_revenue_due.toFixed(2)}</td>
+                                          <td className="p-2 text-right">{fmtINR(booking.rate_per_day, 0)}</td>
+                                          <td className="p-2 text-right font-bold text-emerald-700">{fmtINR(booking.total_revenue_due, 2)}</td>
                                           <td className="p-2">{booking.bill_no}</td>
-                                          <td className="p-2 text-right">₹{booking.advance_paid.toFixed(2)}</td>
-                                          <td className="p-2 text-right">₹{booking.final_amount_paid.toFixed(2)}</td>
+                                          <td className="p-2 text-right">{fmtINR(booking.advance_paid, 2)}</td>
+                                          <td className="p-2 text-right">{fmtINR(booking.final_amount_paid, 2)}</td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -326,7 +327,7 @@ export default function RoomOccupancyTab({ settings }) {
                       <td className="text-center">{report.total_occupied_days || 0}</td>
                       <td className="text-center">{report.total_available_days || 0}</td>
                       <td className="text-center">{report.avg_occupancy || 0}%</td>
-                      <td className="text-right">₹{report.total_revenue?.toFixed(2) || '0.00'}</td>
+                      <td className="text-right">{fmtINR(report.total_revenue || 0, 2)}</td>
                     </tr>
                   </tbody>
                 </table>

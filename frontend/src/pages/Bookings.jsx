@@ -45,6 +45,7 @@ import {
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useLocation, useNavigate } from "react-router-dom";
+import { fmtINR } from "@/utils/formatters";
 
 // Indian mobile phone validation
 const validateIndianPhone = (phone) => {
@@ -1205,7 +1206,7 @@ export default function Bookings() {
         reason: actionForm.reason,
         refund_amount: refundInfo?.refund_amount ?? 0
       });
-      toast.success(`Booking cancelled. Refund: ₹${refundInfo?.refund_amount ?? 0}`);
+      toast.success(`Booking cancelled. Refund: ${fmtINR(refundInfo?.refund_amount ?? 0, 0)}`);
       setShowCancel(false);
       setSelectedBooking(null);
       setRefundInfo(null);
@@ -1357,7 +1358,7 @@ export default function Bookings() {
           ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
           : ((settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15));
       }
-      console.log(`Room ${room.room_number} (${room.category}): ₹${rate} × ${nights} nights = ₹${rate * nights}`);
+      console.log(`Room ${room.room_number} (${room.category}): ${fmtINR(rate, 0)} × ${nights} nights = ${fmtINR(rate * nights, 0)}`);
       newTotal += (rate || 0) * nights;
     });
 
@@ -1399,7 +1400,7 @@ export default function Bookings() {
       if (costAnalysis.difference > 0) {
         // Validate additional advance if cost increased
         if (amendForm.additional_advance < costAnalysis.difference) {
-          toast.error(`Additional advance required: ₹${costAnalysis.difference}`);
+          toast.error(`Additional advance required: ${fmtINR(costAnalysis.difference, 0)}`);
           return;
         }
 
@@ -1705,9 +1706,9 @@ export default function Bookings() {
                       <td>{format(parseISO(booking.check_in_date), "dd MMM yyyy")}</td>
                       <td>{format(parseISO(booking.check_out_date), "dd MMM yyyy")}</td>
                       <td>
-                        <span className="font-medium">₹{booking.total_amount}</span>
+                        <span className="font-medium">{fmtINR(booking.total_amount, 0)}</span>
                         {booking.balance_amount > 0 && (
-                          <span className="text-xs text-amber-600 block">Due: ₹{booking.balance_amount}</span>
+                          <span className="text-xs text-amber-600 block">Due: {fmtINR(booking.balance_amount, 0)}</span>
                         )}
                       </td>
                       <td>{getStatusBadge(booking.status)}</td>
@@ -2052,7 +2053,7 @@ export default function Bookings() {
                             {isSelected && <CheckSquare size={20} className="text-blue-500" weight="fill" />}
                           </div>
                           <div className="text-xs text-slate-500">{room.category}</div>
-                          <div className="text-sm font-medium text-emerald-600">₹{rate}/night</div>
+                          <div className="text-sm font-medium text-emerald-600">{fmtINR(rate, 0)}/night</div>
                         </div>
                       );
                     })}
@@ -2160,7 +2161,7 @@ export default function Bookings() {
                       return isSameDay ? (
                         <p className="text-xs text-green-600 font-semibold mt-1">✓ Same-day booking - No advance required</p>
                       ) : (
-                        <p className="text-xs text-slate-500 mt-1">Default: ₹{settings?.default_advance_amount || 400} × {bookingForm.num_rooms} room(s)</p>
+                        <p className="text-xs text-slate-500 mt-1">Default: {fmtINR(settings?.default_advance_amount || 400, 0)} × {bookingForm.num_rooms} room(s)</p>
                       );
                     })()}
                   </div>
@@ -2218,11 +2219,11 @@ export default function Bookings() {
                   <div className="mt-4 p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-sm">
                     <div className="flex justify-between mb-1">
                       <span className="text-slate-600">Rooms: {selectedRooms.map(r => r.room_number).join(", ")}</span>
-                      <span className="font-medium">₹{totalRoomRate}/night × {nights} nights</span>
+                      <span className="font-medium">{fmtINR(totalRoomRate, 0)}/night × {nights} nights</span>
                     </div>
                     <div className="flex justify-between font-semibold text-amber-700 border-t border-emerald-200 pt-1 mt-1">
                       <span>Balance at Checkout:</span>
-                      <span>₹{(totalRoomRate * nights) - bookingForm.advance_paid}</span>
+                      <span>{fmtINR((totalRoomRate * nights) - bookingForm.advance_paid, 0)}</span>
                     </div>
                   </div>
                 )}
@@ -2317,7 +2318,7 @@ export default function Bookings() {
                   <Input type="number" min="0" max="5" value={actionForm.extra_beds}
                     onChange={(e) => setActionForm({...actionForm, extra_beds: parseInt(e.target.value) || 0})}
                     onFocus={(e) => e.target.select()} className="earms-input w-24" data-testid="input-extra-beds-checkin" />
-                  {actionForm.extra_beds > 0 && <span className="text-sm font-medium text-amber-700">Charge: ₹{actionForm.extra_beds * 75}</span>}
+                  {actionForm.extra_beds > 0 && <span className="text-sm font-medium text-amber-700">Charge: {fmtINR(actionForm.extra_beds * 75, 0)}</span>}
                 </div>
               </div>
 
@@ -2741,9 +2742,9 @@ export default function Bookings() {
                                 <span className="text-slate-600">
                                   Room {rc.room_number} ({rc.room_category})
                                   {rc.charge_category === "Non-Org" && <span className="text-red-600 font-bold ml-1">→ Non-Org</span>}
-                                  : ₹{rc.rate_per_night} × {nights}
+                                  : {fmtINR(rc.rate_per_night, 0)} × {nights}
                                 </span>
-                                <span className="font-medium">₹{rc.total.toFixed(2)}</span>
+                                <span className="font-medium">{fmtINR(rc.total, 2)}</span>
                               </div>
                             ))}
                           </div>
@@ -2751,22 +2752,22 @@ export default function Bookings() {
                         
                         <div className="flex justify-between font-semibold">
                           <span className="text-slate-700">Total Room Charges:</span>
-                          <span className="font-bold">₹{roomChargesTotal.toFixed(2)}</span>
+                          <span className="font-bold">{fmtINR(roomChargesTotal, 2)}</span>
                         </div>
                         
                         {actionForm.extra_beds > 0 && (
                           <div className="flex justify-between text-amber-700">
                             <span>Extra Beds ({actionForm.extra_beds} × ₹75):</span>
-                            <span className="font-medium">+ ₹{extraBedCharge.toFixed(2)}</span>
+                            <span className="font-medium">+ {fmtINR(extraBedCharge, 2)}</span>
                           </div>
                         )}
                         <div className="flex justify-between text-blue-700 border-t border-slate-200 pt-1 mt-1">
                           <span>Advance Already Paid:</span>
-                          <span className="font-medium">- ₹{(selectedBooking.advance_paid || 0).toFixed(2)}</span>
+                          <span className="font-medium">- {fmtINR((selectedBooking.advance_paid || 0), 2)}</span>
                         </div>
                         <div className="flex justify-between font-bold text-emerald-700 border-t-2 border-emerald-300 pt-1 mt-1">
                           <span>Balance Due at Checkout:</span>
-                          <span className="text-base">₹{balance.toFixed(2)}</span>
+                          <span className="text-base">{fmtINR(balance, 2)}</span>
                         </div>
                       </div>
                     );
@@ -2830,9 +2831,9 @@ export default function Bookings() {
                 <p className="font-medium">{selectedBooking.guest_name}</p>
                 <p className="text-sm text-slate-500">Room {getRoomDisplay(selectedBooking)}</p>
                 {selectedBooking.extra_beds > 0 && (
-                  <p className="text-xs text-amber-600">Extra Beds (at check-in): {selectedBooking.extra_beds} × ₹75 = ₹{selectedBooking.extra_bed_charge}</p>
+                  <p className="text-xs text-amber-600">Extra Beds (at check-in): {selectedBooking.extra_beds} × ₹75 = {fmtINR(selectedBooking.extra_bed_charge, 0)}</p>
                 )}
-                <p className="text-sm font-medium text-amber-600 mt-2">Balance Due: ₹{selectedBooking.balance_amount}</p>
+                <p className="text-sm font-medium text-amber-600 mt-2">Balance Due: {fmtINR(selectedBooking.balance_amount, 0)}</p>
                 
                 {/* Stay Duration Info */}
                 <div className="mt-3 pt-3 border-t border-slate-200">
@@ -2935,7 +2936,7 @@ export default function Bookings() {
                     <div className="flex justify-between items-center">
                       <span className="text-sm text-slate-600">Extra Bed Charges:</span>
                       <span className="font-semibold text-blue-700">
-                        {actionForm.extra_beds_checkout} beds × {actionForm.extra_bed_days} days × ₹75 = ₹{actionForm.extra_beds_checkout * actionForm.extra_bed_days * 75}
+                        {actionForm.extra_beds_checkout} beds × {actionForm.extra_bed_days} days × ₹75 = {fmtINR(actionForm.extra_beds_checkout * actionForm.extra_bed_days * 75, 0)}
                       </span>
                     </div>
                   </div>
@@ -3051,24 +3052,24 @@ export default function Bookings() {
                         <>
                           <div className="flex justify-between text-sm">
                             <span className="text-slate-600">Room Charges ({actualNights} night{actualNights !== 1 ? 's' : ''} × {numRooms} room{numRooms > 1 ? 's' : ''}):</span>
-                            <span className="font-medium">₹{totalRoomCharges.toFixed(0)}</span>
+                            <span className="font-medium">{fmtINR(totalRoomCharges, 0)}</span>
                           </div>
                           {advancePaid > 0 && (
                             <div className="flex justify-between text-sm text-orange-600">
                               <span>Less: Advance Paid:</span>
-                              <span className="font-medium">-₹{advancePaid.toFixed(0)}</span>
+                              <span className="font-medium">-{fmtINR(advancePaid, 0)}</span>
                             </div>
                           )}
                           {refundDue > 0 && (
                             <div className="flex justify-between text-sm text-green-600">
                               <span>Less: Refund Due (from amendment):</span>
-                              <span className="font-medium">-₹{refundDue.toFixed(0)}</span>
+                              <span className="font-medium">-{fmtINR(refundDue, 0)}</span>
                             </div>
                           )}
                           {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
                             <div className="flex justify-between text-sm">
                               <span className="text-slate-600">Extra Beds (actual usage):</span>
-                              <span className="font-medium">₹{extraBedActual} ({actionForm.extra_beds_checkout} bed{actionForm.extra_beds_checkout > 1 ? 's' : ''} × {actionForm.extra_bed_days} day{actionForm.extra_bed_days > 1 ? 's' : ''})</span>
+                              <span className="font-medium">{fmtINR(extraBedActual, 0)} ({actionForm.extra_beds_checkout} bed{actionForm.extra_beds_checkout > 1 ? 's' : ''} × {actionForm.extra_bed_days} day{actionForm.extra_bed_days > 1 ? 's' : ''})</span>
                             </div>
                           )}
                           <div className="border-t border-green-300 pt-2 mt-2">
@@ -3077,12 +3078,12 @@ export default function Bookings() {
                                 {amountDue >= 0 ? 'Amount Due at Checkout:' : 'Refund to Customer:'}
                               </span>
                               <span className={`text-xl font-bold ${amountDue >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                                {amountDue >= 0 ? '₹' : '-₹'}{Math.abs(amountDue).toFixed(0)}
+                                {amountDue >= 0 ? fmtINR(amountDue, 0) : '-' + fmtINR(Math.abs(amountDue), 0)}
                               </span>
                               <input type="hidden" id="calculated-total" value={amountDue.toFixed(0)} />
                             </div>
                             {amountDue < 0 && (
-                              <p className="text-xs text-red-600 mt-2">⚠️ Customer has overpaid. Please process refund of ₹{Math.abs(amountDue).toFixed(0)}</p>
+                              <p className="text-xs text-red-600 mt-2">⚠️ Customer has overpaid. Please process refund of {fmtINR(Math.abs(amountDue), 0)}</p>
                             )}
                           </div>
                         </>
@@ -3121,11 +3122,11 @@ export default function Bookings() {
                           if (totalDue === 0) {
                             toast.success(`Amount confirmed: ₹0 - No payment required`);
                           } else {
-                            toast.success(`Amount confirmed: Refund of ₹${Math.abs(totalDue)} due to guest`);
+                            toast.success(`Amount confirmed: Refund of ${fmtINR(Math.abs(totalDue), 0)} due to guest`);
                           }
                         } else {
                           setActionForm({...actionForm, final_payment: totalDue});
-                          toast.success(`Amount confirmed: ₹${totalDue}`);
+                          toast.success(`Amount confirmed: ${fmtINR(totalDue, 0)}`);
                         }
                       }}
                       className="flex items-center gap-1 bg-green-600 hover:bg-green-700"
@@ -3171,7 +3172,7 @@ export default function Bookings() {
                   )}
                   {actionForm.final_payment < 0 && (
                     <p className="text-xs text-blue-600 font-medium mt-1">
-                      ℹ️ Refund of ₹{Math.abs(actionForm.final_payment)} due to guest - "Proceed to Feedback" enabled
+                      ℹ️ Refund of {fmtINR(Math.abs(actionForm.final_payment), 0)} due to guest - "Proceed to Feedback" enabled
                     </p>
                   )}
                 </div>
@@ -3437,7 +3438,7 @@ export default function Bookings() {
               <div className="p-4 bg-red-50 rounded-xl">
                 <p className="font-medium text-red-800">{selectedBooking.guest_name}</p>
                 <p className="text-sm text-red-600">Booking #{selectedBooking.booking_number}</p>
-                <p className="text-sm text-red-600">Advance Paid: ₹{selectedBooking.advance_paid}</p>
+                <p className="text-sm text-red-600">Advance Paid: {fmtINR(selectedBooking.advance_paid, 0)}</p>
               </div>
 
               {/* Refund Calculation */}
@@ -3451,15 +3452,15 @@ export default function Bookings() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-600">Advance Paid:</span>
-                      <span>₹{refundInfo.advance_paid}</span>
+                      <span>{fmtINR(refundInfo.advance_paid, 0)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-600">Cancellation Charge ({refundInfo.charge_percent}%):</span>
-                      <span className="text-red-600">- ₹{refundInfo.cancellation_charge}</span>
+                      <span className="text-red-600">- {fmtINR(refundInfo.cancellation_charge, 0)}</span>
                     </div>
                     <div className="flex justify-between pt-2 border-t border-amber-200 mt-2">
                       <span className="font-semibold text-amber-800">Refund Amount:</span>
-                      <span className="font-bold text-lg text-emerald-700">₹{refundInfo.refund_amount}</span>
+                      <span className="font-bold text-lg text-emerald-700">{fmtINR(refundInfo.refund_amount, 0)}</span>
                     </div>
                   </div>
                 </div>
@@ -3528,7 +3529,7 @@ export default function Bookings() {
                       <div>
                         <p className="font-semibold text-slate-800">{refund.guest_name}</p>
                         <p className="text-sm text-slate-500">Booking #{refund.booking_number}</p>
-                        <p className="text-lg font-bold text-amber-700 mt-1">₹{refund.amount}</p>
+                        <p className="text-lg font-bold text-amber-700 mt-1">{fmtINR(refund.amount, 0)}</p>
                       </div>
                       <Button
                         size="sm"
@@ -3577,7 +3578,7 @@ export default function Bookings() {
               <div className="p-4 bg-emerald-50 rounded-xl">
                 <p className="font-medium">{refundAction.guest_name}</p>
                 <p className="text-sm text-slate-500">Booking #{refundAction.booking_number}</p>
-                <p className="text-lg font-bold text-emerald-700">Refund Amount: ₹{refundAction.amount}</p>
+                <p className="text-lg font-bold text-emerald-700">Refund Amount: {fmtINR(refundAction.amount, 0)}</p>
               </div>
               <div>
                 <Label>Transaction Reference *</Label>
@@ -3758,7 +3759,7 @@ export default function Bookings() {
                     <div className="text-xs text-purple-600 mt-1">Total Nights</div>
                   </div>
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
-                    <div className="text-2xl font-bold text-amber-800">₹{guestHistoryData.statistics.total_spent}</div>
+                    <div className="text-2xl font-bold text-amber-800">{fmtINR(guestHistoryData.statistics.total_spent, 0)}</div>
                     <div className="text-xs text-amber-600 mt-1">Total Spent</div>
                   </div>
                 </div>
@@ -3806,7 +3807,7 @@ export default function Bookings() {
                           </div>
                           <div>
                             <p className="text-slate-500 text-xs">Total Amount</p>
-                            <p className="font-medium text-slate-700">₹{booking.total_amount}</p>
+                            <p className="font-medium text-slate-700">{fmtINR(booking.total_amount, 0)}</p>
                           </div>
                           <div>
                             <p className="text-slate-500 text-xs">Payment</p>
@@ -3925,9 +3926,9 @@ ${createdBookingData.is_org !== undefined ? `• Type: ${createdBookingData.is_o
 • Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")} - 0800h
 
 💰 *Payment:*
-• Total Amount: ₹${createdBookingData.total_amount}
-• Advance Paid: ₹${createdBookingData.advance_paid}
-• Balance Due: ₹${createdBookingData.balance_amount}
+• Total Amount: ${fmtINR(createdBookingData.total_amount, 0)}
+• Advance Paid: ${fmtINR(createdBookingData.advance_paid, 0)}
+• Balance Due: ${fmtINR(createdBookingData.balance_amount, 0)}
 
 *Guidelines for guests pl*
 1. Pl carry aadhar card as ID proof for smooth check in. *Non-Org guests and unaccompanied guests* are not allowed without organization member. Org Card & Aadhar card required for verification.
@@ -3965,9 +3966,9 @@ ${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}\n`
 • Check-out: ${format(parseISO(createdBookingData.check_out_date), "dd MMM yyyy")} - 0800h
 
 💰 *Payment:*
-• Total Amount: ₹${createdBookingData.total_amount}
-• Advance Paid: ₹${createdBookingData.advance_paid}
-• Balance Due: ₹${createdBookingData.balance_amount}
+• Total Amount: ${fmtINR(createdBookingData.total_amount, 0)}
+• Advance Paid: ${fmtINR(createdBookingData.advance_paid, 0)}
+• Balance Due: ${fmtINR(createdBookingData.balance_amount, 0)}
 
 *Guidelines for guests pl*
 1. Pl carry aadhar card as ID proof for smooth check in. *Non-Org guests and unaccompanied guests* are not allowed without organization member. Org Card & Aadhar card required for verification.
@@ -4101,7 +4102,7 @@ ECSAG Shillong`;
                   <div><span className="text-slate-600">Check-in:</span> {format(parseISO(amendBooking.check_in_date), "dd MMM yyyy")}</div>
                   <div><span className="text-slate-600">Check-out:</span> {format(parseISO(amendBooking.check_out_date), "dd MMM yyyy")}</div>
                   <div><span className="text-slate-600">Rooms:</span> {amendBooking.room_numbers?.join(", ")}</div>
-                  <div><span className="text-slate-600">Amount:</span> <span className="font-medium">₹{amendBooking.total_amount}</span></div>
+                  <div><span className="text-slate-600">Amount:</span> <span className="font-medium">{fmtINR(amendBooking.total_amount, 0)}</span></div>
                 </div>
               </div>
 
@@ -4240,24 +4241,24 @@ ECSAG Shillong`;
                         <div className="space-y-1 text-sm">
                           <div className="flex justify-between">
                             <span>Current Amount:</span>
-                            <span className="font-medium">₹{cost.oldTotal}</span>
+                            <span className="font-medium">{fmtINR(cost.oldTotal, 0)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span>New Amount ({cost.nights} nights):</span>
-                            <span className="font-medium">₹{cost.newTotal}</span>
+                            <span className="font-medium">{fmtINR(cost.newTotal, 0)}</span>
                           </div>
                           <div className={`flex justify-between pt-2 border-t font-semibold ${
                             cost.difference > 0 ? 'text-red-600' : cost.difference < 0 ? 'text-green-600' : ''
                           }`}>
                             <span>Difference:</span>
-                            <span>{cost.difference > 0 ? '+' : ''}₹{cost.difference}</span>
+                            <span>{cost.difference > 0 ? '+' : ''}{fmtINR(cost.difference, 0)}</span>
                           </div>
                           {cost.difference > 0 && (
                             <p className="text-xs text-amber-600 mt-2">⚠️ Additional advance payment required</p>
                           )}
                           {cost.difference < 0 && (
                             <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
-                              <p className="text-xs text-green-700 font-medium">✓ Amount reduced by ₹{Math.abs(cost.difference)}</p>
+                              <p className="text-xs text-green-700 font-medium">✓ Amount reduced by {fmtINR(Math.abs(cost.difference), 0)}</p>
                               <p className="text-xs text-green-600 mt-1">This refund will be deducted from the final checkout bill</p>
                             </div>
                           )}
@@ -4283,7 +4284,7 @@ ECSAG Shillong`;
                         onChange={(e) => setAmendForm({...amendForm, additional_advance: parseFloat(e.target.value) || 0})}
                         className="mt-1"
                       />
-                      <p className="text-xs text-slate-500 mt-1">Required: ₹{calculateAmendmentCost().difference}</p>
+                      <p className="text-xs text-slate-500 mt-1">Required: {fmtINR(calculateAmendmentCost().difference, 0)}</p>
                     </div>
                     
                     <div>

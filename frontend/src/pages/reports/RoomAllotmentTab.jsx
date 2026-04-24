@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { FilePdf, FileText } from "@phosphor-icons/react";
 import { generateRoomAllotmentPDF } from "@/utils/pdfUtils";
+import { fmtINR } from "@/utils/formatters";
 
 const MONTHS = [
   "January","February","March","April","May","June",
@@ -226,7 +227,7 @@ export default function RoomAllotmentTab({ settings }) {
                       <td>{allot.room_numbers?.join(", ") || "N/A"}</td>
                       <td className="text-sm">{allot.aadhaar_no || "—"}</td>
                       <td className="text-sm">{allot.mobile_no}</td>
-                      <td className="text-right font-semibold">₹{allot.total_amount?.toFixed(2) || '0.00'}</td>
+                      <td className="text-right font-semibold">{fmtINR(allot.total_amount || 0, 2)}</td>
                     </tr>
                   ))}
                   {report.allotments?.length === 0 && (
