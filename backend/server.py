@@ -3127,18 +3127,60 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     ).to_list(2000)
 
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
-    
+
+    # Build room lookups — same resolution chain used by the room occupancy report
+    # so that room-night counts are consistent across both reports.
+    all_rooms_list = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    room_category_map_m  = {r["room_number"]: r["category"]    for r in all_rooms_list}
+    room_id_to_number_m  = {r["id"]:          r["room_number"] for r in all_rooms_list}
+    room_id_to_category_m= {r["id"]:          r["category"]    for r in all_rooms_list}
+
+    def resolve_rooms(bk: dict):
+        """Return list of (room_number, category) for every room in this booking."""
+        room_nums = list(bk.get("room_numbers", []))
+        room_cats = list(bk.get("room_categories", []))
+
+        # Fallback 1: singular room_number field (very old bookings)
+        if not room_nums and bk.get("room_number"):
+            room_nums = [bk["room_number"]]
+            room_cats = [bk.get("room_category",
+                                room_category_map_m.get(bk["room_number"], "Cat I"))]
+
+        # Fallback 2: resolve room_ids against current rooms collection
+        if not room_nums:
+            ids = bk.get("room_ids", [])
+            if not ids and bk.get("room_id"):
+                ids = [bk["room_id"]]
+            for rid in ids:
+                rn = room_id_to_number_m.get(rid)
+                if rn:
+                    room_nums.append(rn)
+                    room_cats.append(room_id_to_category_m.get(rid,
+                                     room_category_map_m.get(rn, "Cat I")))
+
+        # Still empty — use room_categories length or fall back to 1 room
+        if not room_nums:
+            n = len(bk.get("room_categories", [])) or len(bk.get("room_ids", [])) or 1
+            room_cats = bk.get("room_categories", []) or ["Cat I"] * n
+            room_nums = ["unknown"] * len(room_cats)
+
+        # Ensure room_cats is same length as room_nums
+        while len(room_cats) < len(room_nums):
+            room_cats.append(room_category_map_m.get(room_nums[len(room_cats)], "Cat I"))
+
+        return list(zip(room_nums, room_cats[:len(room_nums)]))
+
     # Color-based grouping for Org guests + Non-Org category
     colors_list = settings.get("colors", COLOR_OPTIONS)
     color_stats = {color: {"guests": 0, "days": 0} for color in colors_list}
-    color_stats["Non-Org"] = {"guests": 0, "days": 0}  # For non-organization guests
-    color_stats["Unassigned"] = {"guests": 0, "days": 0}  # For Org guests without color yet
-    
-    org_cat_i_days = 0  # Organization Cat I
-    org_cat_ii_days = 0  # Organization Cat II
-    non_org_days = 0  # Non-Org (all categories)
+    color_stats["Non-Org"] = {"guests": 0, "days": 0}
+    color_stats["Unassigned"] = {"guests": 0, "days": 0}
+
+    org_cat_i_days = 0
+    org_cat_ii_days = 0
+    non_org_days = 0
     extra_beds_total = 0
-    
+
     for bk in bookings:
         checkin = date_type.fromisoformat(bk.get("check_in_date", month_start_str))
         checkout = date_type.fromisoformat(bk.get("check_out_date", month_end_str))
@@ -3147,43 +3189,28 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         nights = max(0, (eff_out - eff_in).days)
         if nights == 0:
             continue
-        
+
         is_org = bk.get("is_org", False)
         org_color = bk.get("org_color")
-        
-        # Categorize by Org/Non-Org and color
-        if is_org:
-            if org_color and org_color in color_stats:
-                color_key = org_color
-            else:
-                color_key = "Unassigned"  # Org guest but no color assigned yet
-        else:
-            color_key = "Non-Org"
-        
+
+        # Colour-group summary (1 entry per booking, not per room)
+        color_key = (org_color if (is_org and org_color and org_color in color_stats)
+                     else ("Unassigned" if is_org else "Non-Org"))
         if color_key in color_stats:
             color_stats[color_key]["guests"] += 1
             color_stats[color_key]["days"] += nights
-        
-        # Calculate room-days by category for revenue
-        # Each room contributes 1 night per night stayed
-        num_rooms = len(bk.get("room_ids", []))
-        if num_rooms == 0:
-            num_rooms = 1  # Fallback for old bookings
-        
-        cats = bk.get("room_categories", [])
+
+        # Room-night counts for revenue/license-fee — count each physical room separately
+        rooms = resolve_rooms(bk)
         if is_org:
-            # Organization rates - Cat I or Cat II
-            # Count each category once (not per night)
-            cat_i_count = cats.count("Cat I")
-            cat_ii_count = cats.count("Cat II")
-            
-            org_cat_i_days += cat_i_count * nights
-            org_cat_ii_days += cat_ii_count * nights
+            for _rn, cat in rooms:
+                if cat == "Cat I":
+                    org_cat_i_days += nights
+                else:
+                    org_cat_ii_days += nights
         else:
-            # Non-Org rates (flat rate regardless of category)
-            # All rooms get same rate, so just count total room-nights
-            non_org_days += num_rooms * nights
-        
+            non_org_days += len(rooms) * nights
+
         extra_beds_total += bk.get("extra_beds", 0) * nights
     
     s = settings
