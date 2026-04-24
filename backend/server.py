@@ -3310,8 +3310,12 @@ async def get_room_occupancy_report(
     
     # Get all rooms (to include 0-occupancy rooms in output)
     all_rooms = await db.rooms.find({}, {"_id": 0}).sort("room_number", 1).to_list(100)
-    # Build a lookup: room_number -> category (from the rooms collection)
-    room_category_map = {r["room_number"]: r["category"] for r in all_rooms}
+    # Build lookups keyed by room_number (stable) and by room UUID (for older bookings
+    # that stored room_ids but not room_numbers — UUIDs are only valid for the current
+    # setup run, but they're the best we can do for unmigratable old documents).
+    room_category_map   = {r["room_number"]: r["category"]    for r in all_rooms}
+    room_id_to_number   = {r["id"]:          r["room_number"] for r in all_rooms}
+    room_id_to_category = {r["id"]:          r["category"]    for r in all_rooms}
 
     # Only count physically occupied rooms — confirmed (not yet arrived) are excluded.
     # Use check_in_date / check_out_date for the range query (those are always set);
@@ -3436,10 +3440,23 @@ async def get_room_occupancy_report(
             room_nums = bk.get("room_numbers", [])
             room_cats = bk.get("room_categories", [])
 
-            # Fallback for very old single-room bookings using room_number (singular)
+            # Fallback 1: very old single-room bookings (room_number singular)
             if not room_nums and bk.get("room_number"):
                 room_nums = [bk["room_number"]]
                 room_cats = [bk.get("room_category", room_category_map.get(bk["room_number"], "Cat I"))]
+
+            # Fallback 2: bookings that stored room_ids but not room_numbers.
+            # Look up via the current rooms collection (valid for same setup run;
+            # stale UUIDs from a re-run setup simply won't resolve and are skipped).
+            if not room_nums:
+                ids = bk.get("room_ids", [])
+                if not ids and bk.get("room_id"):
+                    ids = [bk["room_id"]]
+                for rid in ids:
+                    rn = room_id_to_number.get(rid)
+                    if rn:
+                        room_nums.append(rn)
+                        room_cats.append(room_id_to_category.get(rid, room_category_map.get(rn, "Cat I")))
 
             for i, rn in enumerate(room_nums):
                 cat = room_cats[i] if i < len(room_cats) else room_category_map.get(rn, "Cat I")
