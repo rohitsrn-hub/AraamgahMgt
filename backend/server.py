@@ -3181,8 +3181,19 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     extra_beds_total = 0
 
     for bk in bookings:
-        checkin = date_type.fromisoformat(bk.get("check_in_date", month_start_str))
-        checkout = date_type.fromisoformat(bk.get("check_out_date", month_end_str))
+        status = bk.get("status")
+        checkin = date_type.fromisoformat(bk.get("check_in_date", month_start_str).split("T")[0])
+
+        # Mirror the room occupancy report's date logic exactly:
+        # - checked_out → use actual_checkout_date (captures early departures)
+        # - checked_in  → cap at today so future unoccupied nights aren't pre-credited
+        if status == "checked_out":
+            co_str = bk.get("actual_checkout_date") or bk.get("check_out_date", month_end_str)
+            checkout = date_type.fromisoformat(co_str.split("T")[0])
+        else:
+            checkout = date_type.fromisoformat(bk.get("check_out_date", month_end_str).split("T")[0])
+            checkout = min(checkout, date_type.today())
+
         eff_in = max(checkin, month_start)
         eff_out = min(checkout, month_end + timedelta(days=1))
         nights = max(0, (eff_out - eff_in).days)
