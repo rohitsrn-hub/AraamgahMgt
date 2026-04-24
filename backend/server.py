@@ -3158,11 +3158,10 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
                     room_cats.append(room_id_to_category_m.get(rid,
                                      room_category_map_m.get(rn, "Cat I")))
 
-        # Still empty — use room_categories length or fall back to 1 room
+        # If rooms still can't be resolved (stale IDs, missing data) return empty —
+        # matching the room occupancy report which also skips unresolvable rooms.
         if not room_nums:
-            n = len(bk.get("room_categories", [])) or len(bk.get("room_ids", [])) or 1
-            room_cats = bk.get("room_categories", []) or ["Cat I"] * n
-            room_nums = ["unknown"] * len(room_cats)
+            return []
 
         # Ensure room_cats is same length as room_nums
         while len(room_cats) < len(room_nums):
