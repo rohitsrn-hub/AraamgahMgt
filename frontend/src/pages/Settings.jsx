@@ -16,8 +16,7 @@ import {
   Trash,
   Plus,
   User,
-  Star,
-  Rocket
+  Star
 } from "@phosphor-icons/react";
 
 const DEFAULT_COLORS = [
@@ -170,39 +169,7 @@ export default function Settings({ settings, onUpdate }) {
       </div>
 
       {/* P3: System Actions */}
-      <div className="grid grid-cols-2 gap-4">
-        {/* Run Setup */}
-        <Card className="earms-card border-2 border-blue-300">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Rocket size={20} className="text-blue-600" weight="fill" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-800">Run Setup</h3>
-                <p className="text-xs text-slate-500">Reconfigure rooms and rates</p>
-              </div>
-            </div>
-            <Button
-              onClick={async () => {
-                if (window.confirm("This will reset your configuration and show the setup wizard. Continue?")) {
-                  try {
-                    await axios.post(`${API}/settings/reset-setup`);
-                    toast.success("Setup reset. Redirecting to setup wizard...");
-                    setTimeout(() => window.location.reload(), 1000);
-                  } catch (error) {
-                    toast.error("Failed to reset setup");
-                  }
-                }
-              }}
-              className="w-full bg-blue-500 hover:bg-blue-600"
-              size="sm"
-            >
-              Launch Setup Wizard
-            </Button>
-          </CardContent>
-        </Card>
-
+      <div className="grid grid-cols-1 gap-4">
         {/* Migration Mode */}
         <Card className="earms-card border-2 border-amber-300">
           <CardContent className="p-4">
@@ -684,7 +651,7 @@ export default function Settings({ settings, onUpdate }) {
                   Total Rooms: {(settings?.cat_i_rooms_count || 6) + (settings?.cat_ii_rooms_count || 9)}
                 </p>
                 <p className="text-sm text-slate-500 mt-2">
-                  To modify room counts, please run the setup wizard again or contact system administrator.
+                  To modify room counts, please contact the system administrator.
                 </p>
               </div>
             </div>
