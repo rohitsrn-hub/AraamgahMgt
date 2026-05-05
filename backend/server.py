@@ -362,6 +362,8 @@ class CheckInRequest(BaseModel):
     room_guest_mapping: List[dict] = Field(default_factory=list)  # NEW: Room-wise guest assignments
     # Early checkout notification (if guest informs at check-in)
     planned_early_checkout_date: Optional[str] = None  # YYYY-MM-DD format
+    # Alternate contacts (optional, captured at check-in)
+    alt_contacts: List[dict] = Field(default_factory=list)
 
 class CheckOutRequest(BaseModel):
     booking_id: str
@@ -1553,6 +1555,16 @@ async def check_in(request: CheckInRequest):
         for member in request.family_members:
             if member.get("mobile") and not validate_indian_mobile(member["mobile"]):
                 raise HTTPException(status_code=400, detail=f"Invalid mobile number for family member {member.get('name', 'Unknown')}")
+
+    # Validate alternate contact mobiles
+    if request.alt_contacts:
+        for i, contact in enumerate(request.alt_contacts):
+            if not contact.get("name", "").strip():
+                raise HTTPException(status_code=400, detail=f"Name is required for alternate contact {i + 1}")
+            if not contact.get("mobile"):
+                raise HTTPException(status_code=400, detail=f"Mobile number is required for alternate contact {i + 1}")
+            if not validate_indian_mobile(contact["mobile"]):
+                raise HTTPException(status_code=400, detail=f"Invalid mobile number for alternate contact {contact.get('name', i + 1)}")
     
     booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     if not booking:
@@ -1630,6 +1642,8 @@ async def check_in(request: CheckInRequest):
             update_fields[k] = v
     if request.family_members:
         update_fields["family_members"] = request.family_members
+    if request.alt_contacts:
+        update_fields["alt_contacts"] = request.alt_contacts
     if request.room_guest_mapping:
         update_fields["room_guest_mapping"] = request.room_guest_mapping  # Store the mapping (NEW STRUCTURE)
     if request.notes:

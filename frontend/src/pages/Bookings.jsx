@@ -206,7 +206,8 @@ export default function Bookings() {
     bank_account: "",
     upi_id: "",
     upi_phone: "",
-    family_members: []
+    family_members: [],
+    alt_contacts: []
   });
 
   const [phoneError, setPhoneError] = useState("");
@@ -215,6 +216,7 @@ export default function Bookings() {
   const [checkinIfscError, setCheckinIfscError] = useState("");
   const [upiPhoneError, setUpiPhoneError] = useState("");
   const [checkinUpiPhoneError, setCheckinUpiPhoneError] = useState("");
+  const [altContactErrors, setAltContactErrors] = useState([]);
   
   // Room-Guest Mapping for new pricing logic
   const [roomGuestMapping, setRoomGuestMapping] = useState([]);
@@ -647,11 +649,14 @@ export default function Bookings() {
     }
   };
 
-  const resetActionForm = () => setActionForm({
-    staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
-    guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", org_color: "",
-    bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: []
-  });
+  const resetActionForm = () => {
+    setActionForm({
+      staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
+      guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", org_color: "",
+      bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: [], alt_contacts: []
+    });
+    setAltContactErrors([]);
+  };
 
   const handleCheckinPhoneChange = (value) => {
     const formatted = formatIndianPhone(value);
@@ -854,9 +859,18 @@ export default function Bookings() {
     }
     
     // Identity card validation removed - no longer required for sanitized system
-    
+
     // Service status validation removed - no longer required for sanitized system
-    
+
+    // Alternate contacts validation
+    for (const contact of actionForm.alt_contacts) {
+      if (!contact.name.trim() && !contact.mobile) continue; // skip fully empty rows
+      if (!contact.name.trim()) { toast.error("Enter name for all alternate contacts"); return; }
+      if (!contact.mobile) { toast.error("Enter mobile number for all alternate contacts"); return; }
+      const cleanAlt = contact.mobile.replace(/\s/g, "");
+      if (!validateIndianPhone(cleanAlt)) { toast.error(`Invalid mobile for alternate contact: ${contact.name}`); return; }
+    }
+
     // Room-guest assignment validation
     const totalGuestsAssigned = roomGuestMapping.reduce((sum, room) => {
       return sum + (room.has_self ? 1 : 0) + room.family_members.length;
@@ -902,7 +916,11 @@ export default function Bookings() {
         upi_phone: actionForm.upi_phone || undefined,
         planned_early_checkout_date: actionForm.planned_early_checkout_date || undefined,  // Early checkout notification
         family_members: allFamilyMembers.length > 0 ? allFamilyMembers : undefined,
-        room_guest_mapping: roomGuestMapping  // Send room-guest mapping with inline family members
+        room_guest_mapping: roomGuestMapping,  // Send room-guest mapping with inline family members
+        alt_contacts: actionForm.alt_contacts.filter(c => c.name.trim() && c.mobile).map(c => ({
+          name: c.name.trim(),
+          mobile: "+91 " + c.mobile.replace(/\s/g, "").replace(/^\+91/, "")
+        }))
       });
       toast.success("Check-in successful!");
       
@@ -2375,6 +2393,89 @@ export default function Bookings() {
                       onFocus={(e) => e.target.select()} placeholder="Permanent/Contact address" className="earms-input mt-1" data-testid="input-checkin-address" />
                   </div>
                 </div>
+              </div>
+
+              {/* Alternate Contacts (Optional) */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-semibold text-slate-700 flex items-center gap-2">
+                    <Phone size={16} className="text-slate-500" /> Alternate Contacts
+                    <span className="text-xs font-normal text-slate-400">(Optional)</span>
+                  </h4>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setActionForm(prev => ({
+                        ...prev,
+                        alt_contacts: [...prev.alt_contacts, { name: "", mobile: "" }]
+                      }));
+                      setAltContactErrors(prev => [...prev, ""]);
+                    }}
+                    className="text-xs h-8"
+                    data-testid="add-alt-contact-btn"
+                  >
+                    + Add Contact
+                  </Button>
+                </div>
+                {actionForm.alt_contacts.length === 0 && (
+                  <p className="text-xs text-slate-400 text-center py-2">No alternate contacts added</p>
+                )}
+                {actionForm.alt_contacts.map((contact, idx) => (
+                  <div key={idx} className="flex gap-2 items-start mb-3">
+                    <div className="flex-1">
+                      <Input
+                        placeholder="Contact name"
+                        value={contact.name}
+                        onChange={(e) => {
+                          const updated = [...actionForm.alt_contacts];
+                          updated[idx] = { ...updated[idx], name: e.target.value };
+                          setActionForm(prev => ({ ...prev, alt_contacts: updated }));
+                        }}
+                        className="earms-input mb-1"
+                        data-testid={`input-alt-contact-name-${idx}`}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2 py-2 rounded-md whitespace-nowrap">+91</span>
+                        <Input
+                          placeholder="XXXXX XXXXX"
+                          maxLength={11}
+                          value={contact.mobile}
+                          onChange={(e) => {
+                            const formatted = formatIndianPhone(e.target.value);
+                            const updated = [...actionForm.alt_contacts];
+                            updated[idx] = { ...updated[idx], mobile: formatted };
+                            setActionForm(prev => ({ ...prev, alt_contacts: updated }));
+                            const errs = [...altContactErrors];
+                            const clean = formatted.replace(/\s/g, "");
+                            errs[idx] = clean && !validateIndianPhone(clean) ? "Invalid number" : "";
+                            setAltContactErrors(errs);
+                          }}
+                          className={`earms-input flex-1 ${altContactErrors[idx] ? "border-red-400" : ""}`}
+                          data-testid={`input-alt-contact-mobile-${idx}`}
+                        />
+                      </div>
+                      {altContactErrors[idx] && <p className="text-xs text-red-500 mt-1">{altContactErrors[idx]}</p>}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActionForm(prev => ({
+                          ...prev,
+                          alt_contacts: prev.alt_contacts.filter((_, i) => i !== idx)
+                        }));
+                        setAltContactErrors(prev => prev.filter((_, i) => i !== idx));
+                      }}
+                      className="text-slate-400 hover:text-red-500 transition-colors mt-2"
+                      data-testid={`remove-alt-contact-${idx}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
               </div>
 
               {/* Service Details section removed - no longer capturing defense information */}
