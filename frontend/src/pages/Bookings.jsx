@@ -1318,7 +1318,7 @@ export default function Bookings() {
     if (!extendNewCheckOut) { toast.error("Select new checkout date"); return; }
     setExtensionPlanLoading(true);
     try {
-      const res = await fetch(`/api/bookings/${selectedBooking.id}/plan-extension?new_check_out_date=${extendNewCheckOut}`, {
+      const res = await fetch(`${API}/bookings/${selectedBooking.id}/plan-extension?new_check_out_date=${extendNewCheckOut}`, {
         method: "POST",
       });
       if (!res.ok) {
@@ -1343,7 +1343,7 @@ export default function Bookings() {
     if (!extensionPlan) return;
     setExtensionConfirmLoading(true);
     try {
-      const res = await fetch(`/api/bookings/${selectedBooking.id}/confirm-extension`, {
+      const res = await fetch(`${API}/bookings/${selectedBooking.id}/confirm-extension`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ new_check_out_date: extendNewCheckOut, amendments: extensionPlan.proposed_amendments }),
