@@ -1322,15 +1322,20 @@ export default function Bookings() {
         method: "POST",
       });
       if (!res.ok) {
-        let detail = "Failed to plan extension";
-        try { const e = await res.json(); detail = e.detail || detail; } catch {}
+        let detail = `HTTP ${res.status}`;
+        try {
+          const e = await res.json();
+          if (typeof e.detail === "string") detail = `${res.status}: ${e.detail}`;
+          else if (Array.isArray(e.detail)) detail = `${res.status}: ${e.detail.map(d => d.msg).join("; ")}`;
+          else detail = `${res.status}: ${JSON.stringify(e)}`;
+        } catch {}
         toast.error(detail);
         return;
       }
       const data = await res.json();
       setExtensionPlan(data);
       if (data.status !== "impossible") setShowExtensionConfirm(true);
-    } catch (err) { toast.error("Network error — check backend is running"); }
+    } catch (err) { toast.error(`Network error: ${err.message}`); }
     finally { setExtensionPlanLoading(false); }
   };
 
