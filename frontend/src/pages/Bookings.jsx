@@ -1318,12 +1318,19 @@ export default function Bookings() {
     if (!extendNewCheckOut) { toast.error("Select new checkout date"); return; }
     setExtensionPlanLoading(true);
     try {
-      const res = await fetch(`/api/bookings/${selectedBooking.id}/plan-extension?new_check_out_date=${extendNewCheckOut}`);
+      const res = await fetch(`/api/bookings/${selectedBooking.id}/plan-extension?new_check_out_date=${extendNewCheckOut}`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        let detail = "Failed to plan extension";
+        try { const e = await res.json(); detail = e.detail || detail; } catch {}
+        toast.error(detail);
+        return;
+      }
       const data = await res.json();
-      if (!res.ok) { toast.error(data.detail || "Failed to plan extension"); return; }
       setExtensionPlan(data);
       if (data.status !== "impossible") setShowExtensionConfirm(true);
-    } catch { toast.error("Network error"); }
+    } catch (err) { toast.error("Network error — check backend is running"); }
     finally { setExtensionPlanLoading(false); }
   };
 
