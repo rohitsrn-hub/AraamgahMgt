@@ -1379,83 +1379,98 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
             "proposed_amendments": [main_amendment],
         }
 
-    # PHASE 2 — shift conflicting bookings to other rooms
+    # PHASE 2 / 2.5 — backtracking CSP to find valid room reassignments for ALL conflicting bookings
+    # Pre-compute: for each conflicting booking, rooms that are free from non-conflicting bookings
     conflicting_ids = [c["id"] for c in conflicts]
-    proposed_shifts = []
-    shift_possible = True
-    already_assigned: dict = {}  # booking_id -> new_room_ids (date range tracked by booking)
+    all_rooms_p2 = await db.rooms.find({"status": {"$ne": RoomStatus.MAINTENANCE.value}}, {"_id": 0}).to_list(200)
+    target_room_id_set = set(current_room_ids)
 
-    for cb in sorted(conflicts, key=lambda b: b.get("check_in_date", "")):
-        cb_id = cb["id"]
-        cb_num_rooms = cb.get("num_rooms", len(cb.get("room_ids", [])))
-        cb_check_in = cb["check_in_date"]
-        cb_check_out = cb["check_out_date"]
-        cb_is_org = cb.get("is_org", False)
-        cb_room_cats = cb.get("room_categories", [])
-
-        # Rooms blocked by unrelated bookings during this booking's dates
-        # (exclude ALL conflicting bookings — we assume they all move)
+    candidates_per_booking: dict = {}  # cb_id -> list of room objects
+    for cb in conflicts:
         blocking_query = {
             "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
-            "check_in_date": {"$lt": cb_check_out},
-            "check_out_date": {"$gt": cb_check_in},
+            "check_in_date": {"$lt": cb["check_out_date"]},
+            "check_out_date": {"$gt": cb["check_in_date"]},
             "id": {"$nin": conflicting_ids + [booking_id]},
         }
         blocking = await db.bookings.find(blocking_query, {"_id": 0}).to_list(200)
-        blocked_ids_set = set()
+        blocked_by_others: set = set()
         for bb in blocking:
-            blocked_ids_set.update(bb.get("room_ids", []))
+            blocked_by_others.update(bb.get("room_ids", []))
 
-        # Rooms taken by previously assigned shifts (date overlap check)
-        for prev_bid, prev_info in already_assigned.items():
-            prev_ci = prev_info["check_in"]
-            prev_co = prev_info["check_out"]
-            if prev_ci < cb_check_out and prev_co > cb_check_in:
-                blocked_ids_set.update(prev_info["room_ids"])
-
-        all_rooms = await db.rooms.find({"status": {"$ne": RoomStatus.MAINTENANCE.value}}, {"_id": 0}).to_list(200)
-        candidates = [
-            r for r in all_rooms
-            if r["id"] not in blocked_ids_set
-            and r["id"] not in set(current_room_ids)
+        candidates_per_booking[cb["id"]] = [
+            r for r in all_rooms_p2
+            if r["id"] not in blocked_by_others and r["id"] not in target_room_id_set
         ]
 
-        if len(candidates) < cb_num_rooms:
-            shift_possible = False
-            break
+    # MRV ordering: try bookings with fewest candidates first → prune early
+    sorted_conflicts = sorted(conflicts, key=lambda cb: len(candidates_per_booking[cb["id"]]))
 
-        # Prefer matching original category
-        orig_cats = set(cb_room_cats)
-        candidates.sort(key=lambda r: (0 if r["category"] in orig_cats else 1))
-        chosen = candidates[:cb_num_rooms]
-        chosen_ids = [r["id"] for r in chosen]
-        chosen_nums = [r["room_number"] for r in chosen]
-        chosen_cats = [r["category"] for r in chosen]
+    def dates_overlap(cb1: dict, cb2: dict) -> bool:
+        return cb1["check_in_date"] < cb2["check_out_date"] and cb1["check_out_date"] > cb2["check_in_date"]
 
-        new_cost_cb = round(calc_cost(chosen_cats, cb_check_in, cb_check_out, cb_is_org), 2)
+    csp_assignment: dict = {}  # cb_id -> [room objects]
 
-        already_assigned[cb_id] = {"room_ids": chosen_ids, "check_in": cb_check_in, "check_out": cb_check_out}
-        proposed_shifts.append({
-            "booking_id": cb_id,
-            "booking_number": cb["booking_number"],
-            "guest_name": cb["guest_name"],
-            "change_type": "room_reassignment",
-            "check_in_date": cb_check_in,
-            "check_out_date": cb_check_out,
-            "old_room_ids": cb.get("room_ids", []),
-            "new_room_ids": chosen_ids,
-            "old_room_numbers": cb.get("room_numbers", []),
-            "new_room_numbers": chosen_nums,
-            "old_room_categories": cb_room_cats,
-            "new_room_categories": chosen_cats,
-            "old_total": cb.get("total_amount", 0.0),
-            "new_total": new_cost_cb,
-        })
+    from itertools import combinations as _combinations
 
-    if shift_possible and proposed_shifts:
+    def try_assign(idx: int) -> bool:
+        if idx == len(sorted_conflicts):
+            return True
+        cb = sorted_conflicts[idx]
+        cb_id = cb["id"]
+        n = cb.get("num_rooms", len(cb.get("room_ids", []))) or 1
+        candidates = candidates_per_booking[cb_id]
+
+        # Rooms already committed to overlapping bookings in current assignment
+        taken: set = set()
+        for prev_id, prev_rooms in csp_assignment.items():
+            prev_cb = next(c for c in sorted_conflicts if c["id"] == prev_id)
+            if dates_overlap(cb, prev_cb):
+                taken.update(r["id"] for r in prev_rooms)
+
+        free = [r for r in candidates if r["id"] not in taken]
+        if len(free) < n:
+            return False
+
+        # Prefer category-matching rooms (reduces cost changes for reassigned guest)
+        orig_cats = set(cb.get("room_categories", []))
+        free.sort(key=lambda r: (0 if r["category"] in orig_cats else 1, r["room_number"]))
+
+        for combo in _combinations(free, n):
+            csp_assignment[cb_id] = list(combo)
+            if try_assign(idx + 1):
+                return True
+            del csp_assignment[cb_id]
+
+        return False
+
+    if try_assign(0):
+        proposed_shifts = []
+        for cb in conflicts:
+            chosen = csp_assignment[cb["id"]]
+            chosen_ids = [r["id"] for r in chosen]
+            chosen_nums = [r["room_number"] for r in chosen]
+            chosen_cats = [r["category"] for r in chosen]
+            new_cost_cb = round(calc_cost(chosen_cats, cb["check_in_date"], cb["check_out_date"], cb.get("is_org", False)), 2)
+            proposed_shifts.append({
+                "booking_id": cb["id"],
+                "booking_number": cb["booking_number"],
+                "guest_name": cb["guest_name"],
+                "change_type": "room_reassignment",
+                "check_in_date": cb["check_in_date"],
+                "check_out_date": cb["check_out_date"],
+                "old_room_ids": cb.get("room_ids", []),
+                "new_room_ids": chosen_ids,
+                "old_room_numbers": cb.get("room_numbers", []),
+                "new_room_numbers": chosen_nums,
+                "old_room_categories": cb.get("room_categories", []),
+                "new_room_categories": chosen_cats,
+                "old_total": cb.get("total_amount", 0.0),
+                "new_total": new_cost_cb,
+            })
         return {
             "status": "shifted",
-            "message": f"Extension possible — {len(proposed_shifts)} conflicting booking(s) will be reassigned",
+            "message": f"Extension possible — {len(proposed_shifts)} conflicting booking(s) will be reassigned to free up the room",
             "proposed_amendments": [main_amendment] + proposed_shifts,
         }
 
