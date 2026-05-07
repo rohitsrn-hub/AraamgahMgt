@@ -41,7 +41,11 @@ import {
   WarningCircle,
   NotePencil,
   Pencil,
-  CheckCircle
+  CheckCircle,
+  ArrowsOut,
+  ArrowRight,
+  Warning,
+  ClockCounterClockwise,
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -225,6 +229,14 @@ export default function Bookings() {
   const [showRoomModification, setShowRoomModification] = useState(false);
   const [availableRoomsForCheckIn, setAvailableRoomsForCheckIn] = useState([]);
   const [modifiedRoomIds, setModifiedRoomIds] = useState([]);
+
+  // Stay Extension
+  const [showExtendDialog, setShowExtendDialog] = useState(false);
+  const [extendNewCheckOut, setExtendNewCheckOut] = useState("");
+  const [extensionPlan, setExtensionPlan] = useState(null);
+  const [extensionPlanLoading, setExtensionPlanLoading] = useState(false);
+  const [showExtensionConfirm, setShowExtensionConfirm] = useState(false);
+  const [extensionConfirmLoading, setExtensionConfirmLoading] = useState(false);
 
   // URL-based action handler (from Dashboard quick actions)
   useEffect(() => {
@@ -1293,6 +1305,48 @@ export default function Bookings() {
     });
   };
 
+  // Stay Extension handlers
+  const openExtendDialog = (booking) => {
+    setSelectedBooking(booking);
+    setExtendNewCheckOut("");
+    setExtensionPlan(null);
+    setShowExtensionConfirm(false);
+    setShowExtendDialog(true);
+  };
+
+  const handlePlanExtension = async () => {
+    if (!extendNewCheckOut) { toast.error("Select new checkout date"); return; }
+    setExtensionPlanLoading(true);
+    try {
+      const res = await fetch(`/api/bookings/${selectedBooking.id}/plan-extension?new_check_out_date=${extendNewCheckOut}`);
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.detail || "Failed to plan extension"); return; }
+      setExtensionPlan(data);
+      if (data.status !== "impossible") setShowExtensionConfirm(true);
+    } catch { toast.error("Network error"); }
+    finally { setExtensionPlanLoading(false); }
+  };
+
+  const handleConfirmExtension = async () => {
+    if (!extensionPlan) return;
+    setExtensionConfirmLoading(true);
+    try {
+      const res = await fetch(`/api/bookings/${selectedBooking.id}/confirm-extension`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_check_out_date: extendNewCheckOut, amendments: extensionPlan.proposed_amendments }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.detail || "Failed to confirm extension"); return; }
+      toast.success("Stay extended successfully!");
+      setShowExtendDialog(false);
+      setShowExtensionConfirm(false);
+      setExtensionPlan(null);
+      await fetchBookings();
+    } catch { toast.error("Network error"); }
+    finally { setExtensionConfirmLoading(false); }
+  };
+
   // Amendment handlers
   const handleOpenAmend = (booking) => {
     console.log("Opening amend dialog for booking:", booking);
@@ -1729,7 +1783,14 @@ export default function Bookings() {
                           <span className="text-xs text-amber-600 block">Due: {fmtINR(booking.balance_amount, 0)}</span>
                         )}
                       </td>
-                      <td>{getStatusBadge(booking.status)}</td>
+                      <td>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {getStatusBadge(booking.status)}
+                          {booking.is_amended && (
+                            <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-300 uppercase tracking-wide">Amended</span>
+                          )}
+                        </div>
+                      </td>
                       <td>
                         <div className="flex gap-2 flex-wrap">
                           {booking.status === "confirmed" && (
@@ -1769,6 +1830,14 @@ export default function Bookings() {
                                 title={isViewer ? "Viewers cannot check out guests" : "Check out"}
                                 data-testid={`checkout-btn-${booking.id}`}>
                                 <SignOut size={16} className="mr-1" />Check Out
+                              </Button>
+                              <Button size="sm" variant="outline"
+                                onClick={() => openExtendDialog(booking)}
+                                className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                disabled={isViewer}
+                                title={isViewer ? "Viewers cannot extend stays" : "Extend stay"}
+                                data-testid={`extend-btn-${booking.id}`}>
+                                <ArrowsOut size={16} className="mr-1" />Extend
                               </Button>
                               <Button size="sm" variant="outline"
                                 onClick={() => {
@@ -4492,6 +4561,155 @@ ECSAG Shillong`;
         </DialogContent>
       </Dialog>
 
+      {/* ===== STAY EXTENSION DIALOG ===== */}
+      <Dialog open={showExtendDialog} onOpenChange={(open) => { if (!open) { setShowExtendDialog(false); setExtensionPlan(null); setShowExtensionConfirm(false); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowsOut size={20} className="text-emerald-600" />
+              Extend Stay — {selectedBooking?.guest_name}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="p-3 bg-slate-50 rounded-lg text-sm space-y-1">
+              <div className="flex justify-between"><span className="text-slate-500">Current room(s):</span><span className="font-medium">{selectedBooking?.room_numbers?.join(", ")}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Current checkout:</span><span className="font-medium">{selectedBooking?.check_out_date && format(parseISO(selectedBooking.check_out_date), "dd MMM yyyy")}</span></div>
+            </div>
+
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-1">New Checkout Date</label>
+              <input type="date"
+                min={selectedBooking?.check_out_date ? (() => { const d = new Date(selectedBooking.check_out_date); d.setDate(d.getDate() + 1); return d.toISOString().split("T")[0]; })() : ""}
+                value={extendNewCheckOut}
+                onChange={e => { setExtendNewCheckOut(e.target.value); setExtensionPlan(null); setShowExtensionConfirm(false); }}
+                className="earms-input w-full" />
+            </div>
+
+            {extensionPlan && (
+              <div className={`p-3 rounded-lg border text-sm ${
+                extensionPlan.status === "impossible" ? "bg-red-50 border-red-200 text-red-700" :
+                extensionPlan.status === "other_room" ? "bg-amber-50 border-amber-200 text-amber-800" :
+                "bg-emerald-50 border-emerald-200 text-emerald-800"
+              }`}>
+                <div className="flex items-start gap-2">
+                  {extensionPlan.status === "impossible" ? <Warning size={16} className="mt-0.5 shrink-0" /> :
+                   extensionPlan.status === "other_room" ? <Warning size={16} className="mt-0.5 shrink-0" /> :
+                   <CheckCircle size={16} className="mt-0.5 shrink-0" />}
+                  <span>{extensionPlan.message}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowExtendDialog(false)}>Cancel</Button>
+              <Button onClick={handlePlanExtension} disabled={!extendNewCheckOut || extensionPlanLoading}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                {extensionPlanLoading ? <><SpinnerGap size={16} className="animate-spin mr-1" />Checking...</> : "Check Availability"}
+              </Button>
+              {extensionPlan && extensionPlan.status !== "impossible" && (
+                <Button onClick={() => setShowExtensionConfirm(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white">
+                  Review & Confirm
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== EXTENSION CONFIRMATION DIALOG ===== */}
+      <Dialog open={showExtensionConfirm} onOpenChange={setShowExtensionConfirm}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClockCounterClockwise size={20} className="text-blue-600" />
+              Confirm Extension Amendments
+            </DialogTitle>
+          </DialogHeader>
+
+          {extensionPlan && (
+            <div className="space-y-4">
+              {extensionPlan.status === "shifted" && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  <Warning size={14} className="inline mr-1" />
+                  {extensionPlan.proposed_amendments.length - 1} other booking(s) will be reassigned to different rooms to accommodate this extension.
+                </div>
+              )}
+              {extensionPlan.status === "other_room" && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  <Warning size={14} className="inline mr-1" />
+                  Guest must move to a different room for the extension period. Room segments will be created.
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {extensionPlan.proposed_amendments.map((amend, idx) => (
+                  <div key={idx} className={`p-4 rounded-xl border ${amend.change_type === "extension" || amend.change_type === "extension_room_change" ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <span className="font-semibold text-slate-800">{amend.guest_name}</span>
+                        <span className="text-xs text-slate-500 ml-2">#{amend.booking_number}</span>
+                      </div>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded uppercase ${amend.change_type === "extension" || amend.change_type === "extension_room_change" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                        {amend.change_type === "extension" ? "Extension" : amend.change_type === "extension_room_change" ? "Extension (Room Move)" : "Room Reassignment"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      {(amend.change_type === "extension" || amend.change_type === "extension_room_change") && (
+                        <>
+                          <div className="text-slate-500">Checkout</div>
+                          <div className="flex items-center gap-1 font-medium">
+                            {format(parseISO(amend.old_check_out), "dd MMM yyyy")}
+                            <ArrowRight size={12} className="text-slate-400" />
+                            <span className="text-emerald-700">{format(parseISO(amend.new_check_out), "dd MMM yyyy")}</span>
+                          </div>
+                        </>
+                      )}
+                      {amend.change_type === "extension_room_change" && (
+                        <>
+                          <div className="text-slate-500">Extension Room(s)</div>
+                          <div className="font-medium text-blue-700">{amend.extension_room_numbers?.join(", ")}</div>
+                        </>
+                      )}
+                      {amend.change_type === "room_reassignment" && (
+                        <>
+                          <div className="text-slate-500">Room</div>
+                          <div className="flex items-center gap-1 font-medium">
+                            {amend.old_room_numbers?.join(", ")}
+                            <ArrowRight size={12} className="text-slate-400" />
+                            <span className="text-amber-700">{amend.new_room_numbers?.join(", ")}</span>
+                          </div>
+                          <div className="text-slate-500">Dates</div>
+                          <div className="text-slate-700">{format(parseISO(amend.check_in_date), "dd MMM")} – {format(parseISO(amend.check_out_date), "dd MMM yyyy")}</div>
+                        </>
+                      )}
+                      <div className="text-slate-500">Amount</div>
+                      <div className="flex items-center gap-1 font-medium">
+                        {fmtINR(amend.old_total, 0)}
+                        <ArrowRight size={12} className="text-slate-400" />
+                        <span className={amend.new_total > amend.old_total ? "text-red-600" : amend.new_total < amend.old_total ? "text-green-600" : "text-slate-700"}>
+                          {fmtINR(amend.new_total, 0)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs text-slate-500">All amended bookings will receive an AMENDED tag. Changes are recorded in the amendment log.</p>
+
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="outline" onClick={() => setShowExtensionConfirm(false)}>Go Back</Button>
+                <Button onClick={handleConfirmExtension} disabled={extensionConfirmLoading}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  {extensionConfirmLoading ? <><SpinnerGap size={16} className="animate-spin mr-1" />Applying...</> : "Confirm All Amendments"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

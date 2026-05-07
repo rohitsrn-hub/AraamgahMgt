@@ -300,6 +300,7 @@ class Booking(BaseModel):
     license_fee_total: float = 0.0
     notes: Optional[str] = None
     amendment_log: List[dict] = Field(default_factory=list)  # Track amendments
+    is_amended: bool = False  # True when booking was modified by a stay extension
     checked_in_by: Optional[str] = None
     checked_out_by: Optional[str] = None
     total_members: Optional[int] = None  # NEW: For party composition
@@ -415,6 +416,10 @@ class AmendBookingRequest(BaseModel):
     amendment_reason: Optional[str] = None
 
     refund_amount: float = 0.0
+
+class ConfirmExtensionRequest(BaseModel):
+    new_check_out_date: str
+    amendments: List[dict]  # proposed_amendments list returned by plan-extension
 
 # Staff
 class Staff(BaseModel):
@@ -1296,6 +1301,319 @@ async def find_optimal_room_combination(
             "total_room_changes": total_changes
         }
     }
+
+
+# ============= STAY EXTENSION =============
+
+@api_router.post("/bookings/{booking_id}/plan-extension")
+async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., description="New checkout date YYYY-MM-DD")):
+    from datetime import date as date_type, timedelta
+
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking["status"] != BookingStatus.CHECKED_IN.value:
+        raise HTTPException(status_code=400, detail="Can only extend checked-in bookings")
+
+    extension_start = booking["check_out_date"]
+    extension_end = new_check_out_date
+
+    if extension_end <= extension_start:
+        raise HTTPException(status_code=400, detail="New checkout date must be after current checkout date")
+
+    current_room_ids = booking.get("room_ids", [])
+    current_room_numbers = booking.get("room_numbers", [])
+    current_room_categories = booking.get("room_categories", [])
+    num_rooms = booking.get("num_rooms", len(current_room_ids))
+    is_org = booking.get("is_org", False)
+
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+
+    def calc_cost(room_cats, check_in_s, check_out_s, is_org_flag):
+        nights = (date_type.fromisoformat(check_out_s) - date_type.fromisoformat(check_in_s)).days
+        if nights <= 0:
+            return 0.0
+        total = 0.0
+        for cat in room_cats:
+            if is_org_flag:
+                if cat == "Cat I":
+                    total += float(settings.get("cat_i_rate", 500)) * nights
+                else:
+                    total += float(settings.get("cat_ii_rate", 400)) * nights
+            else:
+                non_org = float(settings.get("non_org_room_rent", 570)) + float(settings.get("non_org_license_fee", 30))
+                total += non_org * nights
+        return total
+
+    old_total = booking.get("total_amount", 0.0)
+    ext_cost = calc_cost(current_room_categories, extension_start, extension_end, is_org)
+    new_total_main = round(old_total + ext_cost, 2)
+
+    main_amendment = {
+        "booking_id": booking_id,
+        "booking_number": booking["booking_number"],
+        "guest_name": booking["guest_name"],
+        "change_type": "extension",
+        "old_check_out": extension_start,
+        "new_check_out": extension_end,
+        "old_total": old_total,
+        "new_total": new_total_main,
+        "room_ids": current_room_ids,
+        "room_numbers": current_room_numbers,
+        "room_categories": current_room_categories,
+    }
+
+    # PHASE 1 — current rooms free during extension?
+    conflicts = await db.bookings.find({
+        "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+        "room_ids": {"$in": current_room_ids},
+        "check_in_date": {"$lt": extension_end},
+        "check_out_date": {"$gt": extension_start},
+        "id": {"$ne": booking_id},
+    }, {"_id": 0}).to_list(200)
+
+    if not conflicts:
+        return {
+            "status": "same_room",
+            "message": f"Room(s) {', '.join(current_room_numbers)} free — extension available",
+            "proposed_amendments": [main_amendment],
+        }
+
+    # PHASE 2 — shift conflicting bookings to other rooms
+    conflicting_ids = [c["id"] for c in conflicts]
+    proposed_shifts = []
+    shift_possible = True
+    already_assigned: dict = {}  # booking_id -> new_room_ids (date range tracked by booking)
+
+    for cb in sorted(conflicts, key=lambda b: b.get("check_in_date", "")):
+        cb_id = cb["id"]
+        cb_num_rooms = cb.get("num_rooms", len(cb.get("room_ids", [])))
+        cb_check_in = cb["check_in_date"]
+        cb_check_out = cb["check_out_date"]
+        cb_is_org = cb.get("is_org", False)
+        cb_room_cats = cb.get("room_categories", [])
+
+        # Rooms blocked by unrelated bookings during this booking's dates
+        # (exclude ALL conflicting bookings — we assume they all move)
+        blocking_query = {
+            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+            "check_in_date": {"$lt": cb_check_out},
+            "check_out_date": {"$gt": cb_check_in},
+            "id": {"$nin": conflicting_ids + [booking_id]},
+        }
+        blocking = await db.bookings.find(blocking_query, {"_id": 0}).to_list(200)
+        blocked_ids_set = set()
+        for bb in blocking:
+            blocked_ids_set.update(bb.get("room_ids", []))
+
+        # Rooms taken by previously assigned shifts (date overlap check)
+        for prev_bid, prev_info in already_assigned.items():
+            prev_ci = prev_info["check_in"]
+            prev_co = prev_info["check_out"]
+            if prev_ci < cb_check_out and prev_co > cb_check_in:
+                blocked_ids_set.update(prev_info["room_ids"])
+
+        all_rooms = await db.rooms.find({"status": {"$ne": RoomStatus.MAINTENANCE.value}}, {"_id": 0}).to_list(200)
+        candidates = [
+            r for r in all_rooms
+            if r["id"] not in blocked_ids_set
+            and r["id"] not in set(current_room_ids)
+        ]
+
+        if len(candidates) < cb_num_rooms:
+            shift_possible = False
+            break
+
+        # Prefer matching original category
+        orig_cats = set(cb_room_cats)
+        candidates.sort(key=lambda r: (0 if r["category"] in orig_cats else 1))
+        chosen = candidates[:cb_num_rooms]
+        chosen_ids = [r["id"] for r in chosen]
+        chosen_nums = [r["room_number"] for r in chosen]
+        chosen_cats = [r["category"] for r in chosen]
+
+        new_cost_cb = round(calc_cost(chosen_cats, cb_check_in, cb_check_out, cb_is_org), 2)
+
+        already_assigned[cb_id] = {"room_ids": chosen_ids, "check_in": cb_check_in, "check_out": cb_check_out}
+        proposed_shifts.append({
+            "booking_id": cb_id,
+            "booking_number": cb["booking_number"],
+            "guest_name": cb["guest_name"],
+            "change_type": "room_reassignment",
+            "check_in_date": cb_check_in,
+            "check_out_date": cb_check_out,
+            "old_room_ids": cb.get("room_ids", []),
+            "new_room_ids": chosen_ids,
+            "old_room_numbers": cb.get("room_numbers", []),
+            "new_room_numbers": chosen_nums,
+            "old_room_categories": cb_room_cats,
+            "new_room_categories": chosen_cats,
+            "old_total": cb.get("total_amount", 0.0),
+            "new_total": new_cost_cb,
+        })
+
+    if shift_possible and proposed_shifts:
+        return {
+            "status": "shifted",
+            "message": f"Extension possible — {len(proposed_shifts)} conflicting booking(s) will be reassigned",
+            "proposed_amendments": [main_amendment] + proposed_shifts,
+        }
+
+    # PHASE 3 — guest moves to a different room for extension (room segments)
+    blocking_ext = await db.bookings.find({
+        "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+        "check_in_date": {"$lt": extension_end},
+        "check_out_date": {"$gt": extension_start},
+        "id": {"$ne": booking_id},
+    }, {"_id": 0}).to_list(200)
+
+    blocked_ext_ids = set()
+    for bb in blocking_ext:
+        blocked_ext_ids.update(bb.get("room_ids", []))
+
+    all_rooms_p3 = await db.rooms.find({"status": {"$ne": RoomStatus.MAINTENANCE.value}}, {"_id": 0}).to_list(200)
+    alt_candidates = [
+        r for r in all_rooms_p3
+        if r["id"] not in blocked_ext_ids and r["id"] not in set(current_room_ids)
+    ]
+
+    if len(alt_candidates) >= num_rooms:
+        orig_cats_set = set(current_room_categories)
+        alt_candidates.sort(key=lambda r: (0 if r["category"] in orig_cats_set else 1))
+        alt_rooms = alt_candidates[:num_rooms]
+        alt_room_ids = [r["id"] for r in alt_rooms]
+        alt_room_numbers = [r["room_number"] for r in alt_rooms]
+        alt_room_cats = [r["category"] for r in alt_rooms]
+
+        ext_cost_alt = round(calc_cost(alt_room_cats, extension_start, extension_end, is_org), 2)
+        new_total_alt = round(old_total + ext_cost_alt, 2)
+
+        p3_amendment = {
+            **main_amendment,
+            "change_type": "extension_room_change",
+            "new_total": new_total_alt,
+            "extension_room_ids": alt_room_ids,
+            "extension_room_numbers": alt_room_numbers,
+            "extension_room_categories": alt_room_cats,
+        }
+        return {
+            "status": "other_room",
+            "message": f"Same-room extension not possible. Extension available by moving to room(s): {', '.join(alt_room_numbers)}",
+            "proposed_amendments": [p3_amendment],
+        }
+
+    # PHASE 4 — impossible
+    return {
+        "status": "impossible",
+        "message": "Extension not possible — no rooms available for the requested period",
+        "proposed_amendments": [],
+    }
+
+
+@api_router.post("/bookings/{booking_id}/confirm-extension")
+async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest):
+    from datetime import datetime, timezone, timedelta, date as date_type
+
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking["status"] != BookingStatus.CHECKED_IN.value:
+        raise HTTPException(status_code=400, detail="Can only confirm extension for checked-in bookings")
+
+    now = datetime.now(timezone.utc)
+
+    for amendment in request.amendments:
+        bid = amendment.get("booking_id")
+        if not bid:
+            continue
+        b = await db.bookings.find_one({"id": bid}, {"_id": 0})
+        if not b:
+            continue
+
+        change_type = amendment.get("change_type", "")
+        update: dict = {"updated_at": now, "is_amended": True}
+        changes = []
+
+        if change_type == "extension":
+            update["check_out_date"] = amendment["new_check_out"]
+            update["total_amount"] = amendment["new_total"]
+            update["balance_amount"] = round(amendment["new_total"] - b.get("advance_paid", 0), 2)
+            changes = [
+                f"Stay extended: checkout {amendment['old_check_out']} → {amendment['new_check_out']}",
+                f"Amount: ₹{amendment['old_total']:.0f} → ₹{amendment['new_total']:.0f}",
+            ]
+
+        elif change_type == "room_reassignment":
+            update["room_ids"] = amendment["new_room_ids"]
+            update["room_numbers"] = amendment["new_room_numbers"]
+            update["room_categories"] = amendment["new_room_categories"]
+            update["total_amount"] = amendment["new_total"]
+            update["balance_amount"] = round(amendment["new_total"] - b.get("advance_paid", 0), 2)
+            changes = [
+                f"Room reassigned: {', '.join(amendment['old_room_numbers'])} → {', '.join(amendment['new_room_numbers'])}",
+                f"Amount: ₹{amendment['old_total']:.0f} → ₹{amendment['new_total']:.0f}",
+            ]
+
+        elif change_type == "extension_room_change":
+            # Build room_segments: original period in current rooms, extension in new rooms
+            orig_check_in = date_type.fromisoformat(b["check_in_date"])
+            orig_check_out = date_type.fromisoformat(amendment["old_check_out"])
+            ext_start = orig_check_out
+            ext_end = date_type.fromisoformat(amendment["new_check_out"])
+
+            orig_rooms_seg = [
+                {"id": rid, "room_number": rnum, "category": rcat}
+                for rid, rnum, rcat in zip(
+                    b.get("room_ids", []), b.get("room_numbers", []), b.get("room_categories", [])
+                )
+            ]
+            ext_rooms_seg = [
+                {"id": rid, "room_number": rnum, "category": rcat}
+                for rid, rnum, rcat in zip(
+                    amendment["extension_room_ids"], amendment["extension_room_numbers"], amendment["extension_room_categories"]
+                )
+            ]
+
+            segments = []
+            for i in range((orig_check_out - orig_check_in).days):
+                night = (orig_check_in + timedelta(days=i)).strftime("%Y-%m-%d")
+                segments.append({"night_date": night, "rooms": orig_rooms_seg})
+            for i in range((ext_end - ext_start).days):
+                night = (ext_start + timedelta(days=i)).strftime("%Y-%m-%d")
+                segments.append({"night_date": night, "rooms": ext_rooms_seg})
+
+            all_room_ids = list(set(b.get("room_ids", []) + amendment["extension_room_ids"]))
+            all_room_numbers = list({r["room_number"] for r in orig_rooms_seg + ext_rooms_seg})
+            all_room_cats = list({r["category"] for r in orig_rooms_seg + ext_rooms_seg})
+
+            update["check_out_date"] = amendment["new_check_out"]
+            update["room_segments"] = segments
+            update["has_room_changes"] = True
+            update["room_ids"] = all_room_ids
+            update["room_numbers"] = all_room_numbers
+            update["room_categories"] = all_room_cats
+            update["total_amount"] = amendment["new_total"]
+            update["balance_amount"] = round(amendment["new_total"] - b.get("advance_paid", 0), 2)
+            changes = [
+                f"Stay extended: checkout {amendment['old_check_out']} → {amendment['new_check_out']}",
+                f"Extension rooms: {', '.join(amendment['extension_room_numbers'])} (different from original {', '.join(b.get('room_numbers', []))})",
+                f"Amount: ₹{amendment['old_total']:.0f} → ₹{amendment['new_total']:.0f}",
+            ]
+        else:
+            continue
+
+        amendment_log = b.get("amendment_log", [])
+        amendment_log.append({
+            "amended_at": now.isoformat(),
+            "changes": changes,
+            "reason": f"Stay extension to {request.new_check_out_date}",
+            "source": "extension",
+        })
+        update["amendment_log"] = amendment_log
+
+        await db.bookings.update_one({"id": bid}, {"$set": update})
+
+    return {"success": True, "message": f"Extension confirmed — all bookings updated"}
 
 
 # ============= BOOKINGS =============
