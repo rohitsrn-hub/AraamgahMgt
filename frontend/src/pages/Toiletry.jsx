@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 import { API } from "@/App";
+import { generateToiletryReportPDF } from "@/utils/pdfUtils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,15 +12,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { 
-  Plus, 
-  Package, 
-  ArrowUp, 
-  ArrowDown, 
+import {
+  Plus,
+  Package,
+  ArrowUp,
+  ArrowDown,
   Warning,
   Pencil,
   Trash,
-  ClipboardText
+  ClipboardText,
+  FilePdf,
+  CalendarBlank,
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 
@@ -50,6 +53,11 @@ export default function Toiletry() {
     room_number: ""
   });
 
+  // Report date range
+  const [reportFromDate, setReportFromDate] = useState("");
+  const [reportToDate, setReportToDate] = useState("");
+  const [reportLoading, setReportLoading] = useState(false);
+
   const fetchData = async () => {
     try {
       const [itemsRes, transactionsRes] = await Promise.all([
@@ -63,6 +71,23 @@ export default function Toiletry() {
       toast.error("Failed to load toiletry data");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFetchReport = async () => {
+    setReportLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (reportFromDate) params.append("from_date", reportFromDate);
+      if (reportToDate) params.append("to_date", reportToDate + "T23:59:59");
+      const res = await axios.get(`${API}/toiletry/transactions?${params}`);
+      const result = generateToiletryReportPDF(res.data, reportFromDate, reportToDate);
+      window.open(result.blobUrl, "_blank");
+      toast.success(`PDF report generated — ${res.data.length} transaction(s)`);
+    } catch {
+      toast.error("Failed to generate report");
+    } finally {
+      setReportLoading(false);
     }
   };
 
@@ -336,6 +361,39 @@ export default function Toiletry() {
 
         {/* Transactions Tab */}
         <TabsContent value="transactions" className="mt-6">
+          {/* Date Range Report */}
+          <Card className="earms-card mb-4">
+            <CardContent className="p-4">
+              <h4 className="font-semibold text-slate-700 flex items-center gap-2 mb-3">
+                <FilePdf size={16} className="text-blue-600" /> Generate Report
+              </h4>
+              <div className="flex flex-wrap gap-3 items-end">
+                <div>
+                  <Label className="text-xs text-slate-600">From Date</Label>
+                  <input type="date" value={reportFromDate} onChange={e => setReportFromDate(e.target.value)}
+                    className="earms-input block mt-1 text-sm" />
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-600">To Date</Label>
+                  <input type="date" value={reportToDate} onChange={e => setReportToDate(e.target.value)}
+                    className="earms-input block mt-1 text-sm" />
+                </div>
+                <Button onClick={handleFetchReport} disabled={reportLoading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2">
+                  <FilePdf size={16} />
+                  {reportLoading ? "Generating..." : "PDF Report"}
+                </Button>
+                {(reportFromDate || reportToDate) && (
+                  <Button variant="outline" onClick={() => { setReportFromDate(""); setReportToDate(""); }}
+                    className="text-slate-600 text-sm">
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-2">Leave dates blank to include all transactions</p>
+            </CardContent>
+          </Card>
+
           <Card className="earms-card">
             <CardContent className="p-0">
               {transactions.length === 0 ? (

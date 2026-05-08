@@ -46,6 +46,7 @@ import {
   ArrowRight,
   Warning,
   ClockCounterClockwise,
+  Package,
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -211,7 +212,9 @@ export default function Bookings() {
     upi_id: "",
     upi_phone: "",
     family_members: [],
-    alt_contacts: []
+    alt_contacts: [],
+    toiletry_kits_qty: 0,
+    toiletry_kits_item_id: "",
   });
 
   const [phoneError, setPhoneError] = useState("");
@@ -229,6 +232,9 @@ export default function Bookings() {
   const [showRoomModification, setShowRoomModification] = useState(false);
   const [availableRoomsForCheckIn, setAvailableRoomsForCheckIn] = useState([]);
   const [modifiedRoomIds, setModifiedRoomIds] = useState([]);
+
+  // Toiletry kits at check-in
+  const [toiletryItems, setToiletryItems] = useState([]);
 
   // Stay Extension
   const [showExtendDialog, setShowExtendDialog] = useState(false);
@@ -665,7 +671,8 @@ export default function Bookings() {
     setActionForm({
       staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
       guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", org_color: "",
-      bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: [], alt_contacts: []
+      bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: [], alt_contacts: [],
+      toiletry_kits_qty: 0, toiletry_kits_item_id: "",
     });
     setAltContactErrors([]);
   };
@@ -954,6 +961,18 @@ export default function Bookings() {
         }, 500);
       }
       
+      // Record toiletry kits consumption if qty > 0
+      if (actionForm.toiletry_kits_qty > 0 && actionForm.toiletry_kits_item_id) {
+        const bookedRooms = selectedBooking?.room_numbers || [];
+        axios.post(`${API}/toiletry/consumption`, {
+          item_id: actionForm.toiletry_kits_item_id,
+          quantity: actionForm.toiletry_kits_qty,
+          booking_id: selectedBooking?.id,
+          room_number: bookedRooms.join(", "),
+          notes: `Issued at check-in — Booking ${selectedBooking?.booking_number}`,
+        }).catch(() => toast.error("Kits recorded in check-in but toiletry stock update failed"));
+      }
+
       setShowCheckIn(false);
       setRoomGuestMapping([]); // Reset room-guest mapping first
       setSelectedBooking(null); // Clear selected booking
@@ -967,11 +986,19 @@ export default function Bookings() {
 
   const handleProceedToFeedback = () => {
     if (!actionForm.staff_id) { toast.error("Please select staff member"); return; }
-    
+
+    // Zero or negative payment — skip all payment detail validation
+    if (actionForm.final_payment <= 0) {
+      setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm } });
+      setShowCheckOut(false);
+      setShowFeedback(true);
+      return;
+    }
+
     // Validate payment details based on payment mode
     if (actionForm.payment_mode) {
       if (!actionForm.payment_id) {
-        const modeLabel = actionForm.payment_mode === "cash" ? "Receipt Number" : 
+        const modeLabel = actionForm.payment_mode === "cash" ? "Receipt Number" :
                          actionForm.payment_mode === "card" ? "Card Transaction Reference" :
                          actionForm.payment_mode === "upi" ? "UPI Transaction ID" :
                          "Bank Transfer Reference";
@@ -979,7 +1006,7 @@ export default function Bookings() {
         return;
       }
     }
-    
+
     setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm } });
     setShowCheckOut(false);
     setShowFeedback(true);
@@ -1133,7 +1160,10 @@ export default function Bookings() {
     
     // Fetch available rooms for potential room change
     fetchAvailableRoomsForCheckIn(booking);
-    
+
+    // Fetch toiletry items for kits-issued field
+    axios.get(`${API}/toiletry/items`).then(r => setToiletryItems(r.data)).catch(() => {});
+
     setShowCheckIn(true);
   };
 
@@ -2559,6 +2589,45 @@ export default function Bookings() {
                 ))}
               </div>
 
+              {/* Toiletry Kits Issued */}
+              {toiletryItems.length > 0 && (
+                <div className="p-4 bg-teal-50 rounded-xl border border-teal-200">
+                  <h4 className="font-semibold text-teal-700 flex items-center gap-2 mb-3">
+                    <Package size={16} className="text-teal-500" /> Toiletry Kits Issued
+                    <span className="text-xs font-normal text-slate-400">(Optional)</span>
+                  </h4>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <Label className="text-xs text-slate-600">Item</Label>
+                      <Select value={actionForm.toiletry_kits_item_id} onValueChange={v => setActionForm(prev => ({ ...prev, toiletry_kits_item_id: v }))}>
+                        <SelectTrigger className="earms-input mt-1">
+                          <SelectValue placeholder="Select item" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {toiletryItems.map(item => (
+                            <SelectItem key={item.id} value={item.id}>{item.name} (Stock: {item.quantity})</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-28">
+                      <Label className="text-xs text-slate-600">Qty Issued</Label>
+                      <Input
+                        type="number" min="0"
+                        value={actionForm.toiletry_kits_qty || ""}
+                        onChange={e => setActionForm(prev => ({ ...prev, toiletry_kits_qty: parseInt(e.target.value) || 0 }))}
+                        className="earms-input mt-1"
+                        placeholder="0"
+                        data-testid="input-toiletry-kits-qty"
+                      />
+                    </div>
+                  </div>
+                  {actionForm.toiletry_kits_qty > 0 && !actionForm.toiletry_kits_item_id && (
+                    <p className="text-xs text-amber-600 mt-2">Select item to record consumption</p>
+                  )}
+                </div>
+              )}
+
               {/* Service Details section removed - no longer capturing defense information */}
 
               {/* P2: Room Assignment Modification */}
@@ -3130,15 +3199,18 @@ export default function Bookings() {
                 <h4 className="font-semibold text-amber-800 mb-2">Actual Checkout Date</h4>
                 <div>
                   <Label htmlFor="actual_checkout_date">Checkout Date</Label>
-                  <Input 
+                  <Input
                     id="actual_checkout_date"
-                    type="date" 
+                    type="date"
                     value={actionForm.actual_checkout_date || new Date().toISOString().split('T')[0]}
                     onChange={(e) => setActionForm({...actionForm, actual_checkout_date: e.target.value})}
                     className="mt-1"
                     min={selectedBooking?.check_in_date}
                     max={new Date().toISOString().split('T')[0]}
                   />
+                  <p className="text-xs text-slate-500 mt-1">
+                    {format(parseISO(actionForm.actual_checkout_date || new Date().toISOString().split('T')[0]), "dd/MM/yyyy")}
+                  </p>
                   {selectedBooking?.planned_early_checkout_date && (
                     <div className="mt-2 text-xs p-2 bg-green-50 border border-green-200 rounded">
                       <p className="text-green-700">

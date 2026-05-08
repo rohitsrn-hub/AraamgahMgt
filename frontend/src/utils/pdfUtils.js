@@ -240,12 +240,6 @@ export function generateCheckoutReceipt(booking, settings) {
   const filename = `receipt_${booking.booking_number}.pdf`;
   const pdfBlob = doc.output('blob');
   const blobUrl = URL.createObjectURL(pdfBlob);
-  
-  const link = document.createElement('a');
-  link.href = blobUrl;
-  link.download = filename;
-  link.click();
-  
   return { blobUrl, filename };
 }
 
@@ -1280,4 +1274,67 @@ export function generateOrgDataForm(booking) {
   doc.save(filename);
   
   return filename;
+}
+
+// ===== TOILETRY TRANSACTIONS REPORT PDF =====
+export function generateToiletryReportPDF(transactions, fromDate, toDate) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const W = doc.internal.pageSize.width;
+
+  const dateRange = fromDate && toDate
+    ? `${format(new Date(fromDate), "dd MMM yyyy")} – ${format(new Date(toDate), "dd MMM yyyy")}`
+    : fromDate ? `From ${format(new Date(fromDate), "dd MMM yyyy")}`
+    : toDate ? `Up to ${format(new Date(toDate), "dd MMM yyyy")}`
+    : "All Transactions";
+
+  let y = addHeader(doc, "TOILETRY TRANSACTIONS REPORT", dateRange);
+  y += 4;
+
+  // Summary counts
+  const stockIn = transactions.filter(t => t.transaction_type === "stock_in");
+  const consumed = transactions.filter(t => t.transaction_type === "consumption");
+  const totalIn = stockIn.reduce((s, t) => s + t.quantity, 0);
+  const totalOut = consumed.reduce((s, t) => s + t.quantity, 0);
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "bold");
+  doc.setFillColor(240, 248, 255);
+  doc.rect(10, y, W - 20, 12, "F");
+  doc.text(`Total Stock-In: ${totalIn}`, 14, y + 5);
+  doc.text(`Total Consumed: ${totalOut}`, 80, y + 5);
+  doc.text(`Transactions: ${transactions.length}`, 155, y + 5);
+  doc.setFont("helvetica", "normal");
+  y += 16;
+
+  autoTable(doc, {
+    startY: y,
+    head: [["Date", "Item", "Type", "Qty", "Room / Booking", "Notes"]],
+    body: transactions.map(t => [
+      format(new Date(t.created_at), "dd/MM/yyyy HH:mm"),
+      t.item_name,
+      t.transaction_type === "stock_in" ? "Stock In" : "Consumed",
+      t.quantity,
+      [t.room_number, t.booking_id ? `BK#${t.booking_id.slice(0, 8)}` : ""].filter(Boolean).join(" / ") || "—",
+      t.notes || "—",
+    ]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: PRIMARY_COLOR, textColor: 255, fontStyle: "bold" },
+    alternateRowStyles: { fillColor: [248, 249, 250] },
+    columnStyles: {
+      0: { cellWidth: 32 },
+      1: { cellWidth: 35 },
+      2: { cellWidth: 22 },
+      3: { cellWidth: 12, halign: "center" },
+      4: { cellWidth: 40 },
+      5: { cellWidth: "auto" },
+    },
+    margin: { left: 10, right: 10 },
+  });
+
+  addFooter(doc);
+
+  const filename = `toiletry_report_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`;
+  const pdfBlob = doc.output("blob");
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  return { blobUrl, filename };
 }
