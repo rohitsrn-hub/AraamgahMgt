@@ -57,6 +57,20 @@ export default function Toiletry() {
   const [reportFromDate, setReportFromDate] = useState("");
   const [reportToDate, setReportToDate] = useState("");
   const [reportLoading, setReportLoading] = useState(false);
+  const [reportData, setReportData] = useState(null); // { transactions, items }
+  const [showReportTransactions, setShowReportTransactions] = useState(false);
+
+  // Compute per-item summary from reportData
+  const computeItemSummary = (txns, itemList) => {
+    return itemList.map(item => {
+      const itemTxns = txns.filter(t => t.item_id === item.id);
+      const stockIn = itemTxns.filter(t => t.transaction_type === "stock_in").reduce((s, t) => s + t.quantity, 0);
+      const consumed = itemTxns.filter(t => t.transaction_type === "consumption").reduce((s, t) => s + t.quantity, 0);
+      const netChange = stockIn - consumed;
+      const initialStock = item.quantity - netChange;
+      return { ...item, stockIn, consumed, initialStock, finalBalance: item.quantity, txnCount: itemTxns.length };
+    });
+  };
 
   const fetchData = async () => {
     try {
@@ -80,15 +94,25 @@ export default function Toiletry() {
       const params = new URLSearchParams();
       if (reportFromDate) params.append("from_date", reportFromDate);
       if (reportToDate) params.append("to_date", reportToDate + "T23:59:59");
-      const res = await axios.get(`${API}/toiletry/transactions?${params}`);
-      const result = generateToiletryReportPDF(res.data, reportFromDate, reportToDate);
-      window.open(result.blobUrl, "_blank");
-      toast.success(`PDF report generated — ${res.data.length} transaction(s)`);
+      const [txRes, itemsRes] = await Promise.all([
+        axios.get(`${API}/toiletry/transactions?${params}`),
+        axios.get(`${API}/toiletry/items`),
+      ]);
+      setReportData({ transactions: txRes.data, items: itemsRes.data });
+      setShowReportTransactions(false);
     } catch {
       toast.error("Failed to generate report");
     } finally {
       setReportLoading(false);
     }
+  };
+
+  const handlePrintReport = (summaryOnly) => {
+    if (!reportData) return;
+    const result = generateToiletryReportPDF(
+      reportData.transactions, reportData.items, reportFromDate, reportToDate, summaryOnly
+    );
+    window.open(result.blobUrl, "_blank");
   };
 
   useEffect(() => {
@@ -361,38 +385,169 @@ export default function Toiletry() {
 
         {/* Transactions Tab */}
         <TabsContent value="transactions" className="mt-6">
-          {/* Date Range Report */}
+          {/* Date Range Report Generator */}
           <Card className="earms-card mb-4">
             <CardContent className="p-4">
               <h4 className="font-semibold text-slate-700 flex items-center gap-2 mb-3">
-                <FilePdf size={16} className="text-blue-600" /> Generate Report
+                <CalendarBlank size={16} className="text-blue-600" /> Generate Usage Report
               </h4>
               <div className="flex flex-wrap gap-3 items-end">
                 <div>
                   <Label className="text-xs text-slate-600">From Date</Label>
-                  <input type="date" value={reportFromDate} onChange={e => setReportFromDate(e.target.value)}
+                  <input type="date" value={reportFromDate} onChange={e => { setReportFromDate(e.target.value); setReportData(null); }}
                     className="earms-input block mt-1 text-sm" />
                 </div>
                 <div>
                   <Label className="text-xs text-slate-600">To Date</Label>
-                  <input type="date" value={reportToDate} onChange={e => setReportToDate(e.target.value)}
+                  <input type="date" value={reportToDate} onChange={e => { setReportToDate(e.target.value); setReportData(null); }}
                     className="earms-input block mt-1 text-sm" />
                 </div>
                 <Button onClick={handleFetchReport} disabled={reportLoading}
                   className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2">
-                  <FilePdf size={16} />
-                  {reportLoading ? "Generating..." : "PDF Report"}
+                  {reportLoading ? "Loading..." : "Generate Report"}
                 </Button>
-                {(reportFromDate || reportToDate) && (
-                  <Button variant="outline" onClick={() => { setReportFromDate(""); setReportToDate(""); }}
+                {reportData && (
+                  <Button variant="outline" onClick={() => { setReportData(null); setReportFromDate(""); setReportToDate(""); }}
                     className="text-slate-600 text-sm">
                     Clear
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-slate-400 mt-2">Leave dates blank to include all transactions</p>
+              <p className="text-xs text-slate-400 mt-2">Leave dates blank to include all time</p>
             </CardContent>
           </Card>
+
+          {/* On-Screen Report */}
+          {reportData && (() => {
+            const summary = computeItemSummary(reportData.transactions, reportData.items);
+            const totalConsumed = summary.reduce((s, i) => s + i.consumed, 0);
+            const totalStockIn = summary.reduce((s, i) => s + i.stockIn, 0);
+            return (
+              <Card className="earms-card mb-4 border-blue-200">
+                <CardContent className="p-5">
+                  {/* Report Header */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-lg">Toiletry Usage Report</h3>
+                      <p className="text-sm text-slate-500 mt-0.5">
+                        {reportFromDate && reportToDate
+                          ? `${format(new Date(reportFromDate), "dd MMM yyyy")} – ${format(new Date(reportToDate), "dd MMM yyyy")}`
+                          : reportFromDate ? `From ${format(new Date(reportFromDate), "dd MMM yyyy")}`
+                          : reportToDate ? `Up to ${format(new Date(reportToDate), "dd MMM yyyy")}`
+                          : "All Time"}
+                        {" "}&bull; {reportData.transactions.length} transaction(s)
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => handlePrintReport(true)}
+                        className="text-blue-700 border-blue-300 hover:bg-blue-50 flex items-center gap-1">
+                        <FilePdf size={14} /> Summary Only
+                      </Button>
+                      <Button size="sm" onClick={() => handlePrintReport(false)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1">
+                        <FilePdf size={14} /> Full Report
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Overall Totals Strip */}
+                  <div className="grid grid-cols-3 gap-3 mb-5">
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
+                      <div className="text-2xl font-bold text-amber-700">{totalStockIn}</div>
+                      <div className="text-xs text-amber-600 mt-1">Total Stock Added</div>
+                    </div>
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-center">
+                      <div className="text-2xl font-bold text-red-700">{totalConsumed}</div>
+                      <div className="text-xs text-red-600 mt-1">Total Kits Issued</div>
+                    </div>
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+                      <div className="text-2xl font-bold text-emerald-700">
+                        {summary.reduce((s, i) => s + i.finalBalance, 0)}
+                      </div>
+                      <div className="text-xs text-emerald-600 mt-1">Current Balance</div>
+                    </div>
+                  </div>
+
+                  {/* Per-Item Summary Table */}
+                  <div className="overflow-x-auto">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th className="text-center">Opening Stock</th>
+                          <th className="text-center">Stock Added</th>
+                          <th className="text-center">Kits Issued</th>
+                          <th className="text-center">Closing Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {summary.map(row => (
+                          <tr key={row.id}>
+                            <td className="font-medium">{row.name}</td>
+                            <td className="text-center">{row.initialStock} {row.unit}</td>
+                            <td className="text-center text-emerald-700 font-medium">
+                              {row.stockIn > 0 ? `+${row.stockIn}` : "—"}
+                            </td>
+                            <td className="text-center text-red-700 font-medium">
+                              {row.consumed > 0 ? row.consumed : "—"}
+                            </td>
+                            <td className="text-center font-bold">{row.finalBalance} {row.unit}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">
+                    Opening stock = current live stock adjusted for changes in this period.
+                    Closing balance reflects current live inventory.
+                  </p>
+
+                  {/* Toggle Transactions */}
+                  <div className="mt-4 border-t border-slate-100 pt-3">
+                    <button
+                      onClick={() => setShowReportTransactions(v => !v)}
+                      className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                      <ClipboardText size={15} />
+                      {showReportTransactions ? "Hide Transaction Details" : `Show Transaction Details (${reportData.transactions.length})`}
+                    </button>
+                  </div>
+
+                  {showReportTransactions && (
+                    <div className="overflow-x-auto mt-3">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Item</th>
+                            <th>Type</th>
+                            <th>Qty</th>
+                            <th>Room</th>
+                            <th>Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {reportData.transactions.map(t => (
+                            <tr key={t.id}>
+                              <td className="text-xs">{format(parseISO(t.created_at), "dd MMM yyyy HH:mm")}</td>
+                              <td className="font-medium">{t.item_name}</td>
+                              <td>
+                                <Badge className={t.transaction_type === "stock_in" ? "badge-success" : "badge-info"}>
+                                  {t.transaction_type === "stock_in" ? <><ArrowUp size={13} className="mr-1" />Stock In</> : <><ArrowDown size={13} className="mr-1" />Used</>}
+                                </Badge>
+                              </td>
+                              <td>{t.quantity}</td>
+                              <td>{t.room_number || "—"}</td>
+                              <td className="text-slate-500 text-xs">{t.notes || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           <Card className="earms-card">
             <CardContent className="p-0">

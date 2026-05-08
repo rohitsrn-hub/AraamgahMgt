@@ -1277,7 +1277,7 @@ export function generateOrgDataForm(booking) {
 }
 
 // ===== TOILETRY TRANSACTIONS REPORT PDF =====
-export function generateToiletryReportPDF(transactions, fromDate, toDate) {
+export function generateToiletryReportPDF(transactions, items, fromDate, toDate, summaryOnly = false) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const W = doc.internal.pageSize.width;
 
@@ -1287,49 +1287,110 @@ export function generateToiletryReportPDF(transactions, fromDate, toDate) {
     : toDate ? `Up to ${format(new Date(toDate), "dd MMM yyyy")}`
     : "All Transactions";
 
-  let y = addHeader(doc, "TOILETRY TRANSACTIONS REPORT", dateRange);
+  let y = addHeader(doc, "TOILETRY STOCK REPORT", dateRange);
   y += 4;
 
-  // Summary counts
-  const stockIn = transactions.filter(t => t.transaction_type === "stock_in");
-  const consumed = transactions.filter(t => t.transaction_type === "consumption");
-  const totalIn = stockIn.reduce((s, t) => s + t.quantity, 0);
-  const totalOut = consumed.reduce((s, t) => s + t.quantity, 0);
+  // Per-item summary (same logic as computeItemSummary in Toiletry.jsx)
+  const itemSummaries = (items || []).map(item => {
+    const itemTxns = transactions.filter(t => t.item_id === item.id);
+    const stockIn = itemTxns.filter(t => t.transaction_type === "stock_in").reduce((s, t) => s + t.quantity, 0);
+    const consumed = itemTxns.filter(t => t.transaction_type === "consumption").reduce((s, t) => s + t.quantity, 0);
+    const netChange = stockIn - consumed;
+    const initialStock = item.quantity - netChange;
+    return {
+      name: item.name,
+      initialStock,
+      stockIn,
+      consumed,
+      finalBalance: item.quantity,
+    };
+  });
+
+  // Totals strip
+  const totalStockIn = itemSummaries.reduce((s, i) => s + i.stockIn, 0);
+  const totalConsumed = itemSummaries.reduce((s, i) => s + i.consumed, 0);
+  const totalBalance = itemSummaries.reduce((s, i) => s + i.finalBalance, 0);
 
   doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
   doc.setFillColor(240, 248, 255);
   doc.rect(10, y, W - 20, 12, "F");
-  doc.text(`Total Stock-In: ${totalIn}`, 14, y + 5);
-  doc.text(`Total Consumed: ${totalOut}`, 80, y + 5);
-  doc.text(`Transactions: ${transactions.length}`, 155, y + 5);
+  doc.text(`Stock Added: ${totalStockIn}`, 14, y + 5);
+  doc.text(`Kits Issued: ${totalConsumed}`, 80, y + 5);
+  doc.text(`Current Balance: ${totalBalance}`, 148, y + 5);
   doc.setFont("helvetica", "normal");
   y += 16;
 
+  // Per-item summary table
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("ITEM-WISE SUMMARY", 10, y);
+  y += 4;
+
   autoTable(doc, {
     startY: y,
-    head: [["Date", "Item", "Type", "Qty", "Room / Booking", "Notes"]],
-    body: transactions.map(t => [
-      format(new Date(t.created_at), "dd/MM/yyyy HH:mm"),
-      t.item_name,
-      t.transaction_type === "stock_in" ? "Stock In" : "Consumed",
-      t.quantity,
-      [t.room_number, t.booking_id ? `BK#${t.booking_id.slice(0, 8)}` : ""].filter(Boolean).join(" / ") || "—",
-      t.notes || "—",
+    head: [["Item", "Opening Stock", "Stock Added", "Kits Issued", "Closing Balance"]],
+    body: itemSummaries.map(i => [
+      i.name,
+      i.initialStock,
+      i.stockIn,
+      i.consumed,
+      i.finalBalance,
     ]),
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: PRIMARY_COLOR, textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [248, 249, 250] },
     columnStyles: {
-      0: { cellWidth: 32 },
-      1: { cellWidth: 35 },
-      2: { cellWidth: 22 },
-      3: { cellWidth: 12, halign: "center" },
-      4: { cellWidth: 40 },
-      5: { cellWidth: "auto" },
+      0: { cellWidth: "auto" },
+      1: { cellWidth: 30, halign: "center" },
+      2: { cellWidth: 30, halign: "center" },
+      3: { cellWidth: 28, halign: "center" },
+      4: { cellWidth: 35, halign: "center", fontStyle: "bold" },
     },
     margin: { left: 10, right: 10 },
   });
+
+  y = doc.lastAutoTable.finalY + 6;
+
+  // Note about opening stock calculation
+  doc.setFontSize(7);
+  doc.setTextColor(120, 120, 120);
+  doc.text("* Opening Stock = Current Stock − (Stock Added − Kits Issued) within the selected date range.", 10, y);
+  doc.setTextColor(0, 0, 0);
+  y += 6;
+
+  if (!summaryOnly && transactions.length > 0) {
+    // Transaction detail table
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text("TRANSACTION DETAILS", 10, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Date", "Item", "Type", "Qty", "Room / Booking", "Notes"]],
+      body: transactions.map(t => [
+        format(new Date(t.created_at), "dd/MM/yyyy HH:mm"),
+        t.item_name,
+        t.transaction_type === "stock_in" ? "Stock In" : "Consumed",
+        t.quantity,
+        [t.room_number, t.booking_id ? `BK#${t.booking_id.slice(0, 8)}` : ""].filter(Boolean).join(" / ") || "—",
+        t.notes || "—",
+      ]),
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [80, 120, 160], textColor: 255, fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [248, 249, 250] },
+      columnStyles: {
+        0: { cellWidth: 32 },
+        1: { cellWidth: 32 },
+        2: { cellWidth: 22 },
+        3: { cellWidth: 12, halign: "center" },
+        4: { cellWidth: 38 },
+        5: { cellWidth: "auto" },
+      },
+      margin: { left: 10, right: 10 },
+    });
+  }
 
   addFooter(doc);
 
