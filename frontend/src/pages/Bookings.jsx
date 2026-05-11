@@ -1050,7 +1050,7 @@ export default function Bookings() {
       
       // Generate receipt with updated booking data
       const result = generateCheckoutReceipt(updatedBooking, settings);
-      showPDFNotification(result, "Checkout Receipt Generated");
+      showPDFNotification(result, "Checkout Receipt Generated", true);
       setPendingCheckoutBooking(null);
       setSelectedBooking(null);
       setActionForm({ 
@@ -1587,15 +1587,27 @@ export default function Bookings() {
     setGuestHistoryData(null);
   };
 
+  const triggerPDFDownload = (blobUrl, filename) => {
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Helper function for PDF download notification
-  const showPDFNotification = (result, title = "PDF Generated") => {
+  const showPDFNotification = (result, title = "PDF Generated", autoDownload = false) => {
+    if (autoDownload) {
+      triggerPDFDownload(result.blobUrl, result.filename);
+    }
     toast.success(
       <div className="flex flex-col gap-2">
         <div className="font-semibold">
           ✓ {title}
         </div>
         <div className="text-sm text-gray-600">
-          Saved to Downloads: {result.filename}
+          {autoDownload ? `Downloading: ${result.filename}` : result.filename}
         </div>
         <button
           onClick={() => {
@@ -1901,9 +1913,21 @@ export default function Bookings() {
                               </Button>
                             </>
                           )}
+                          {/* Receipt download for checked-out bookings */}
+                          {booking.status === "checked_out" && (
+                            <Button size="sm" variant="outline"
+                              onClick={() => {
+                                const result = generateCheckoutReceipt(booking, settings);
+                                showPDFNotification(result, "Receipt Downloaded", true);
+                              }}
+                              className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                              title="Download checkout receipt">
+                              <FilePdf size={16} className="mr-1" />Receipt
+                            </Button>
+                          )}
                           {/* Delete button - available for all statuses */}
-                          <Button 
-                            size="sm" 
+                          <Button
+                            size="sm"
                             variant="outline"
                             onClick={() => openDeleteDialog(booking)}
                             className="text-slate-600 border-slate-300 hover:bg-slate-100"
