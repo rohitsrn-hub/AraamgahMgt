@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Security
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -35,6 +35,7 @@ from utils.report_calc import (
     build_room_maps,
     booking_financials,
 )
+from utils.manual_occupancy_excel import build_manual_occupancy_workbook
 
 # Import auth utilities
 from utils.auth import (
@@ -4094,6 +4095,29 @@ async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Qu
             },
         },
     }
+
+
+@api_router.get("/reports/manual-occupancy-excel")
+async def download_manual_occupancy_excel(
+    month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000)
+):
+    """Excel export matching the guesthouse's manual 'Summary of Room Occupancy'
+    paper ledger format for the given month (one row per room per booking).
+
+    Army No / Rank / Unit / Bill No are left blank for manual completion —
+    the app does not store those fields (removed as confidential, paper-only
+    data during sanitization). Aadhaar Number and Org/Non-Org are included
+    instead so a row can be matched to a person by name.
+    """
+    import calendar as cal_mod
+
+    buf = await build_manual_occupancy_workbook(db, month, year)
+    filename = f"Room_Occupancy_{cal_mod.month_name[month]}_{year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # Health check endpoint for Render

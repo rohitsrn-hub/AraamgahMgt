@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChartBar, Bed, Users, FileText } from "@phosphor-icons/react";
+import { ChartBar, Bed, Users, FileText, FileXls } from "@phosphor-icons/react";
 import MonthlySummaryTab from "./reports/MonthlySummaryTab";
 import RoomOccupancyTab from "./reports/RoomOccupancyTab";
 import RoomAllotmentTab from "./reports/RoomAllotmentTab";
 import GuestDetailsTab from "./reports/GuestDetailsTab";
+import ManualExcelTab from "./reports/ManualExcelTab";
 
 export default function ReportsPage({ settings }) {
   const [activeTab, setActiveTab] = useState("monthly");
@@ -22,7 +23,7 @@ export default function ReportsPage({ settings }) {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 h-auto bg-gradient-to-r from-blue-50 to-indigo-50 p-1 rounded-xl shadow-sm">
+        <TabsList className="grid w-full grid-cols-5 h-auto bg-gradient-to-r from-blue-50 to-indigo-50 p-1 rounded-xl shadow-sm">
           <TabsTrigger 
             value="monthly"
             className="data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 py-3 px-4 rounded-lg font-semibold"
@@ -50,13 +51,22 @@ export default function ReportsPage({ settings }) {
             <span className="sm:hidden">Allotment</span>
           </TabsTrigger>
           
-          <TabsTrigger 
+          <TabsTrigger
             value="guests"
             className="data-[state=active]:bg-teal-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 py-3 px-4 rounded-lg font-semibold"
           >
             <Users size={20} className="mr-2" weight="fill" />
             <span className="hidden sm:inline">Guest Details</span>
             <span className="sm:hidden">Guests</span>
+          </TabsTrigger>
+
+          <TabsTrigger
+            value="manual-excel"
+            className="data-[state=active]:bg-emerald-600 data-[state=active]:text-white data-[state=active]:shadow-lg transition-all duration-200 py-3 px-4 rounded-lg font-semibold"
+          >
+            <FileXls size={20} className="mr-2" weight="fill" />
+            <span className="hidden sm:inline">Manual Excel</span>
+            <span className="sm:hidden">Excel</span>
           </TabsTrigger>
         </TabsList>
 
@@ -78,6 +88,11 @@ export default function ReportsPage({ settings }) {
         {/* Tab Content - Guest Details */}
         <TabsContent value="guests" className="mt-6 bg-teal-50/30 p-6 rounded-xl">
           <GuestDetailsTab settings={settings} />
+        </TabsContent>
+
+        {/* Tab Content - Manual-Format Excel Export */}
+        <TabsContent value="manual-excel" className="mt-6 bg-emerald-50/30 p-6 rounded-xl">
+          <ManualExcelTab />
         </TabsContent>
       </Tabs>
     </div>
