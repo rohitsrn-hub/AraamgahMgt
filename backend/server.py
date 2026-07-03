@@ -29,6 +29,12 @@ from utils import (
     calculate_nights,
     get_room_rate
 )
+from utils.report_calc import (
+    report_booking_query,
+    effective_stay,
+    build_room_maps,
+    booking_financials,
+)
 
 # Import auth utilities
 from utils.auth import (
@@ -3466,55 +3472,15 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     month_start = date_type(year, month, 1)
     month_end = date_type(year, month, days_in_month)
 
+    # Shared inclusion rule + shared money calculation (see utils/report_calc.py)
     bookings = await db.bookings.find(
-        {"status": {"$in": ["checked_in", "checked_out"]},
-         "check_in_date": {"$lte": month_end_str},
-         "check_out_date": {"$gt": month_start_str}},
-        {"_id": 0}
+        report_booking_query(month_start_str, month_end_str), {"_id": 0}
     ).to_list(2000)
 
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
 
-    # Build room lookups — same resolution chain used by the room occupancy report
-    # so that room-night counts are consistent across both reports.
     all_rooms_list = await db.rooms.find({}, {"_id": 0}).to_list(100)
-    room_category_map_m  = {r["room_number"]: r["category"]    for r in all_rooms_list}
-    room_id_to_number_m  = {r["id"]:          r["room_number"] for r in all_rooms_list}
-    room_id_to_category_m= {r["id"]:          r["category"]    for r in all_rooms_list}
-
-    def resolve_rooms(bk: dict):
-        """Return list of (room_number, category) for every room in this booking."""
-        room_nums = list(bk.get("room_numbers", []))
-        room_cats = list(bk.get("room_categories", []))
-
-        # Fallback 1: singular room_number field (very old bookings)
-        if not room_nums and bk.get("room_number"):
-            room_nums = [bk["room_number"]]
-            room_cats = [bk.get("room_category",
-                                room_category_map_m.get(bk["room_number"], "Cat I"))]
-
-        # Fallback 2: resolve room_ids against current rooms collection
-        if not room_nums:
-            ids = bk.get("room_ids", [])
-            if not ids and bk.get("room_id"):
-                ids = [bk["room_id"]]
-            for rid in ids:
-                rn = room_id_to_number_m.get(rid)
-                if rn:
-                    room_nums.append(rn)
-                    room_cats.append(room_id_to_category_m.get(rid,
-                                     room_category_map_m.get(rn, "Cat I")))
-
-        # If rooms still can't be resolved (stale IDs, missing data) return empty —
-        # matching the room occupancy report which also skips unresolvable rooms.
-        if not room_nums:
-            return []
-
-        # Ensure room_cats is same length as room_nums
-        while len(room_cats) < len(room_nums):
-            room_cats.append(room_category_map_m.get(room_nums[len(room_cats)], "Cat I"))
-
-        return list(zip(room_nums, room_cats[:len(room_nums)]))
+    room_maps = build_room_maps(all_rooms_list)
 
     # Color-based grouping for Org guests + Non-Org category
     colors_list = settings.get("colors", COLOR_OPTIONS)
@@ -3528,47 +3494,35 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     extra_beds_total = 0
 
     for bk in bookings:
-        status = bk.get("status")
-        checkin = date_type.fromisoformat(bk.get("check_in_date", month_start_str).split("T")[0])
-
-        # Mirror the room occupancy report's date logic exactly:
-        # - checked_out → use actual_checkout_date (captures early departures)
-        # - checked_in  → cap at today so future unoccupied nights aren't pre-credited
-        if status == "checked_out":
-            co_str = bk.get("actual_checkout_date") or bk.get("check_out_date", month_end_str)
-            checkout = date_type.fromisoformat(co_str.split("T")[0])
-        else:
-            checkout = date_type.fromisoformat(bk.get("check_out_date", month_end_str).split("T")[0])
-            checkout = min(checkout, date_type.today())
-
-        eff_in = max(checkin, month_start)
-        eff_out = min(checkout, month_end + timedelta(days=1))
-        nights = max(0, (eff_out - eff_in).days)
-        if nights == 0:
+        fin = booking_financials(bk, settings, month_start, month_end, room_maps)
+        nights = fin["nights"]
+        if nights == 0 or not fin["rooms"]:
             continue
 
         is_org = bk.get("is_org", False)
         org_color = bk.get("org_color")
 
-        # Colour-group summary (1 entry per booking, not per room)
+        # Room-days for this booking (nights x rooms; segmented bookings already
+        # carry per-room night counts). Both the colour table and the license-fee
+        # table count ROOM-days so the two tables always reconcile with each other.
+        booking_room_days = sum(r["nights"] for r in fin["rooms"])
+
         color_key = (org_color if (is_org and org_color and org_color in color_stats)
                      else ("Unassigned" if is_org else "Non-Org"))
         if color_key in color_stats:
             color_stats[color_key]["guests"] += 1
-            color_stats[color_key]["days"] += nights
+            color_stats[color_key]["days"] += booking_room_days
 
-        # Room-night counts for revenue/license-fee — count each physical room separately
-        rooms = resolve_rooms(bk)
-        if is_org:
-            for _rn, cat in rooms:
-                if cat == "Cat I":
-                    org_cat_i_days += nights
+        for room in fin["rooms"]:
+            if is_org:
+                if room["category"] == "Cat I":
+                    org_cat_i_days += room["nights"]
                 else:
-                    org_cat_ii_days += nights
-        else:
-            non_org_days += len(rooms) * nights
+                    org_cat_ii_days += room["nights"]
+            else:
+                non_org_days += room["nights"]
 
-        extra_beds_total += bk.get("extra_beds", 0) * nights
+        extra_beds_total += (bk.get("extra_beds", 0) or 0) * nights
     
     s = settings
     cat_i_lf = s.get("cat_i_license_fee", 30)
@@ -3694,41 +3648,20 @@ async def get_room_occupancy_report(
     
     # Get all rooms (to include 0-occupancy rooms in output)
     all_rooms = await db.rooms.find({}, {"_id": 0}).sort("room_number", 1).to_list(100)
-    # Build lookups keyed by room_number (stable) and by room UUID (for older bookings
-    # that stored room_ids but not room_numbers — UUIDs are only valid for the current
-    # setup run, but they're the best we can do for unmigratable old documents).
-    room_category_map   = {r["room_number"]: r["category"]    for r in all_rooms}
-    room_id_to_number   = {r["id"]:          r["room_number"] for r in all_rooms}
-    room_id_to_category = {r["id"]:          r["category"]    for r in all_rooms}
+    room_maps = build_room_maps(all_rooms)
 
-    # Only count physically occupied rooms — confirmed (not yet arrived) are excluded.
-    # Use check_in_date / check_out_date for the range query (those are always set);
-    # actual checkout and early-departure dates are resolved per-booking in Python below.
-    bookings = await db.bookings.find({
-        "status": {"$in": ["checked_in", "checked_out"]},
-        "check_in_date": {"$lte": end_date},
-        "check_out_date": {"$gt": start_date}
-    }, {"_id": 0}).to_list(5000)
+    # Shared inclusion rule: any booking with >= 1 night overlapping the period,
+    # same statuses as the allotment/guest-details/monthly reports.
+    bookings = await db.bookings.find(
+        report_booking_query(start_date, end_date), {"_id": 0}
+    ).to_list(5000)
 
     # Calculate total days in period
     start_dt = date_type.fromisoformat(start_date)
     end_dt = date_type.fromisoformat(end_date)
     total_days = (end_dt - start_dt).days + 1
-    today_dt = date_type.today()
 
-    # Get settings for rates
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
-    cat_i_rr  = settings.get("cat_i_room_rent",   470)
-    cat_ii_rr = settings.get("cat_ii_room_rent",  385)
-    non_org_rr= settings.get("non_org_room_rent", 570)
-    cat_i_lf  = settings.get("cat_i_license_fee",  30)
-    cat_ii_lf = settings.get("cat_ii_license_fee", 15)
-    non_org_lf= settings.get("non_org_license_fee",30)
-
-    def rate_for(is_org: bool, category: str) -> float:
-        if not is_org:
-            return non_org_rr + non_org_lf
-        return (cat_i_rr + cat_i_lf) if category == "Cat I" else (cat_ii_rr + cat_ii_lf)
 
     # Accumulate per-room occupancy by iterating bookings
     room_acc = {}  # room_number -> {"occupied_days": int, "revenue": float, "bookings_detail": list}
@@ -3737,32 +3670,18 @@ async def get_room_occupancy_report(
         if rn not in room_acc:
             room_acc[rn] = {"occupied_days": 0, "revenue": 0.0, "bookings_detail": []}
 
+    included_bookings = 0
     for bk in bookings:
-        status   = bk.get("status")
-        checkin  = date_type.fromisoformat(bk["check_in_date"].split("T")[0])
+        fin = booking_financials(bk, settings, start_dt, end_dt, room_maps)
+        if fin["nights"] == 0 or not fin["rooms"]:
+            continue
+        included_bookings += 1
 
-        # Determine effective checkout based on actual occupancy:
-        # - checked_out: use actual_checkout_date (handles early departures); fall back to planned
-        # - checked_in:  guest is still in-house, cap at today (don't credit future unoccupied nights)
-        if status == "checked_out":
-            co_str   = bk.get("actual_checkout_date") or bk["check_out_date"].split("T")[0]
-            checkout = date_type.fromisoformat(co_str.split("T")[0])
-        else:  # checked_in
-            checkout = date_type.fromisoformat(bk["check_out_date"].split("T")[0])
-            checkout = min(checkout, today_dt)
-
-        eff_in  = max(checkin,  start_dt)
-        eff_out = min(checkout, end_dt + timedelta(days=1))
-
-        is_org    = bk.get("is_org", False)
         bk_number = bk.get("booking_number", "N/A")
         bk_name   = bk.get("guest_name", "N/A")
-        bk_from   = bk["check_in_date"].split("T")[0]
-        # Show actual departure for checked-out bookings in the detail table
-        if status == "checked_out":
-            bk_to = bk.get("actual_checkout_date") or bk["check_out_date"].split("T")[0]
-        else:
-            bk_to = bk["check_out_date"].split("T")[0]
+        stay_in, stay_out = effective_stay(bk)
+        bk_from = stay_in.isoformat() if stay_in else "N/A"
+        bk_to   = stay_out.isoformat() if stay_out else "N/A"
         total_members = 1 + len(bk.get("family_members", []))
 
         final_paid = 0.0
@@ -3771,98 +3690,29 @@ async def get_room_occupancy_report(
             advance   = bk.get("advance_paid", 0) or 0
             final_paid = max(0.0, round(total_amt - advance, 2))
 
-        room_segs = bk.get("room_segments")
-
-        if room_segs:
-            # Segmented booking: credit each room only for its assigned nights.
-            # night_date and room_number come from the segment data written at booking creation.
-            per_room_nights = {}  # room_number -> night count in this period
-            for seg in room_segs:
-                try:
-                    night_dt = date_type.fromisoformat(seg.get("night_date", "").split("T")[0])
-                except (ValueError, TypeError):
-                    continue
-                if not (eff_in <= night_dt < eff_out):
-                    continue
-                for room_data in seg.get("rooms", []):
-                    rn  = room_data.get("room_number")
-                    cat = room_data.get("category") or room_category_map.get(rn, "Cat I")
-                    if not rn:
-                        continue
-                    per_room_nights[rn] = per_room_nights.get(rn, 0) + 1
-                    ensure_room(rn)
-                    r = rate_for(is_org, cat)
-                    room_acc[rn]["occupied_days"] += 1
-                    room_acc[rn]["revenue"]       += r
-
-            # Build one bookings_detail entry per room touched by this segmented booking
-            for rn, nights in per_room_nights.items():
-                cat = room_category_map.get(rn, "Cat I")
-                r   = rate_for(is_org, cat)
-                room_acc[rn]["bookings_detail"].append({
-                    "booking_number":    bk_number,
-                    "is_org":            is_org,
-                    "org_color":         bk.get("org_color", "N/A"),
-                    "name":              bk_name,
-                    "from_date":         bk_from,
-                    "to_date":           bk_to,
-                    "days":              nights,
-                    "total_members":     total_members,
-                    "rate_per_day":      r,
-                    "total_revenue_due": round(nights * r, 2),
-                    "bill_no":           bk_number,
-                    "advance_paid":      bk.get("advance_paid", 0) or 0,
-                    "final_amount_paid": final_paid,
-                })
-        else:
-            # Traditional booking: all effective nights credited to each room in room_numbers.
-            # room_numbers is written at booking creation from the rooms the guest selected.
-            nights = max(0, (eff_out - eff_in).days)
-            if nights == 0:
-                continue
-
-            room_nums = bk.get("room_numbers", [])
-            room_cats = bk.get("room_categories", [])
-
-            # Fallback 1: very old single-room bookings (room_number singular)
-            if not room_nums and bk.get("room_number"):
-                room_nums = [bk["room_number"]]
-                room_cats = [bk.get("room_category", room_category_map.get(bk["room_number"], "Cat I"))]
-
-            # Fallback 2: bookings that stored room_ids but not room_numbers.
-            # Look up via the current rooms collection (valid for same setup run;
-            # stale UUIDs from a re-run setup simply won't resolve and are skipped).
-            if not room_nums:
-                ids = bk.get("room_ids", [])
-                if not ids and bk.get("room_id"):
-                    ids = [bk["room_id"]]
-                for rid in ids:
-                    rn = room_id_to_number.get(rid)
-                    if rn:
-                        room_nums.append(rn)
-                        room_cats.append(room_id_to_category.get(rid, room_category_map.get(rn, "Cat I")))
-
-            for i, rn in enumerate(room_nums):
-                cat = room_cats[i] if i < len(room_cats) else room_category_map.get(rn, "Cat I")
-                r   = rate_for(is_org, cat)
-                ensure_room(rn)
-                room_acc[rn]["occupied_days"] += nights
-                room_acc[rn]["revenue"]       += nights * r
-                room_acc[rn]["bookings_detail"].append({
-                    "booking_number":    bk_number,
-                    "is_org":            is_org,
-                    "org_color":         bk.get("org_color", "N/A"),
-                    "name":              bk_name,
-                    "from_date":         bk_from,
-                    "to_date":           bk_to,
-                    "days":              nights,
-                    "total_members":     total_members,
-                    "rate_per_day":      r,
-                    "total_revenue_due": round(nights * r, 2),
-                    "bill_no":           bk_number,
-                    "advance_paid":      bk.get("advance_paid", 0) or 0,
-                    "final_amount_paid": final_paid,
-                })
+        # Credit every room in the booking; room["revenue"] already carries the
+        # extra-bed charge on the first room so per-room revenues sum to the
+        # booking total used by the allotment / guest-details reports.
+        for room in fin["rooms"]:
+            rn = room["room_number"]
+            ensure_room(rn)
+            room_acc[rn]["occupied_days"] += room["nights"]
+            room_acc[rn]["revenue"]       += room["revenue"]
+            room_acc[rn]["bookings_detail"].append({
+                "booking_number":    bk_number,
+                "is_org":            bk.get("is_org", False),
+                "org_color":         bk.get("org_color", "N/A"),
+                "name":              bk_name,
+                "from_date":         bk_from,
+                "to_date":           bk_to,
+                "days":              room["nights"],
+                "total_members":     total_members,
+                "rate_per_day":      room["rate_per_night"],
+                "total_revenue_due": room["revenue"],
+                "bill_no":           bk_number,
+                "advance_paid":      bk.get("advance_paid", 0) or 0,
+                "final_amount_paid": final_paid,
+            })
 
     # Build room_details list from rooms collection (guarantees all rooms appear, even empty ones)
     room_details = []
@@ -3874,7 +3724,9 @@ async def get_room_occupancy_report(
         category = room["category"]
         acc      = room_acc.get(rn, {"occupied_days": 0, "revenue": 0.0, "bookings_detail": []})
 
-        occupied_days    = min(acc["occupied_days"], total_days)  # cap at period length
+        # Not capped at period length: overlapping bookings for the same room are
+        # a data problem the reconcile check should expose, not silently hide.
+        occupied_days    = acc["occupied_days"]
         available_days   = max(0, total_days - occupied_days)
         occupancy_percent= round((occupied_days / total_days) * 100, 2) if total_days > 0 else 0
 
@@ -3888,7 +3740,7 @@ async def get_room_occupancy_report(
             "bookings_detail":  acc["bookings_detail"],
         })
 
-        total_occupied += occupied_days
+        total_occupied += acc["occupied_days"]
         total_revenue  += acc["revenue"]
 
     total_room_days  = total_days * len(all_rooms)
@@ -3904,7 +3756,7 @@ async def get_room_occupancy_report(
         "total_occupied_days": total_occupied,
         "total_available_days": total_available,
         "avg_occupancy": avg_occupancy,
-        "total_bookings": len(bookings),
+        "total_bookings": included_bookings,
         "total_revenue": round(total_revenue, 2),
         "room_details": room_details
     }
@@ -3960,43 +3812,32 @@ async def get_room_allotment_report(
     else:
         raise HTTPException(400, "Invalid filter type")
     
-    # Get bookings in the date range
-    bookings = await db.bookings.find({
-        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
-        "check_in_date": {"$lte": end_date},
-        "check_out_date": {"$gt": start_date}
-    }, {"_id": 0}).sort("check_in_date", 1).to_list(5000)
-    
-    # Get settings for financial calculations
+    # Shared inclusion rule + shared money calculation (see utils/report_calc.py)
+    bookings = await db.bookings.find(
+        report_booking_query(start_date, end_date), {"_id": 0}
+    ).sort("check_in_date", 1).to_list(5000)
+
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
-    
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    room_maps = build_room_maps(all_rooms)
+
+    period_start = date_type.fromisoformat(start_date)
+    period_end = date_type.fromisoformat(end_date)
+
     allotments = []
+    total_revenue = 0.0
+    total_nights = 0
+    total_room_days = 0
     for bk in bookings:
-        checkin = date_type.fromisoformat(bk["check_in_date"])
-        checkout = date_type.fromisoformat(bk["check_out_date"])
-        nights = (checkout - checkin).days
-        
-        # Calculate total amount
-        is_org = bk.get("is_org", False)
-        cats = bk.get("room_categories", [])
-        num_rooms = len(bk.get("room_ids", [])) or 1
-        
-        if is_org:
-            # Organization rates based on category
-            if "Cat I" in cats:
-                room_rent = settings.get("cat_i_room_rent", 470)
-                license_fee = settings.get("cat_i_license_fee", 30)
-            else:
-                room_rent = settings.get("cat_ii_room_rent", 385)
-                license_fee = settings.get("cat_ii_license_fee", 15)
-        else:
-            # Non-Org flat rate
-            room_rent = settings.get("non_org_room_rent", 570)
-            license_fee = settings.get("non_org_license_fee", 30)
-        
-        total_amount = (room_rent + license_fee) * nights * num_rooms
-        total_amount += bk.get("extra_beds", 0) * 75 * nights
-        
+        fin = booking_financials(bk, settings, period_start, period_end, room_maps)
+        nights = fin["nights"]
+        if nights == 0 or not fin["rooms"]:
+            continue
+        total_amount = fin["total_amount"]
+        total_revenue += total_amount
+        total_nights += nights
+        total_room_days += sum(r["nights"] for r in fin["rooms"])
+
         # Calculate party composition
         self_count = 1  # Main guest
         wife_count = 0
@@ -4026,10 +3867,10 @@ async def get_room_allotment_report(
             "booking_id": bk["id"],
             "booking_number": bk.get("booking_number", "N/A"),
             "guest_name": bk.get("guest_name", "N/A"),
-            "is_org": is_org,
+            "is_org": bk.get("is_org", False),
             "org_color": bk.get("org_color", "N/A"),
-            "room_numbers": bk.get("room_numbers", []),
-            "room_categories": bk.get("room_categories", []),
+            "room_numbers": [r["room_number"] for r in fin["rooms"]],
+            "room_categories": [r["category"] for r in fin["rooms"]],
             "check_in_date": bk["check_in_date"],
             "check_out_date": bk["check_out_date"],
             "nights": nights,
@@ -4042,12 +3883,15 @@ async def get_room_allotment_report(
             "mobile_no": bk.get("guest_contact", "N/A"),
             "total_amount": round(total_amount, 2)
         })
-    
+
     return {
         "period_label": period_label,
         "start_date": start_date,
         "end_date": end_date,
         "total_allotments": len(allotments),
+        "total_nights": total_nights,
+        "total_room_days": total_room_days,
+        "total_revenue": round(total_revenue, 2),
         "allotments": allotments
     }
 
@@ -4099,49 +3943,35 @@ async def get_guest_details_report(
     else:
         raise HTTPException(400, "Invalid filter type")
     
-    # Get bookings in the date range
-    bookings = await db.bookings.find({
-        "status": {"$in": ["confirmed", "checked_in", "checked_out"]},
-        "check_in_date": {"$lte": end_date},
-        "check_out_date": {"$gt": start_date}
-    }, {"_id": 0}).sort("check_in_date", 1).to_list(5000)
-    
-    # Get settings for financial calculations
+    # Shared inclusion rule + shared money calculation (see utils/report_calc.py)
+    bookings = await db.bookings.find(
+        report_booking_query(start_date, end_date), {"_id": 0}
+    ).sort("check_in_date", 1).to_list(5000)
+
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
-    
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(100)
+    room_maps = build_room_maps(all_rooms)
+
+    period_start = date_type.fromisoformat(start_date)
+    period_end = date_type.fromisoformat(end_date)
+
     guest_party_members = []
     total_nights = 0
     total_revenue = 0
     total_party_members = 0
-    
+    total_bookings = 0
+
     for bk in bookings:
-        checkin = date_type.fromisoformat(bk["check_in_date"])
-        checkout = date_type.fromisoformat(bk["check_out_date"])
-        nights = (checkout - checkin).days
+        fin = booking_financials(bk, settings, period_start, period_end, room_maps)
+        nights = fin["nights"]
+        if nights == 0 or not fin["rooms"]:
+            continue
+        total_bookings += 1
         total_nights += nights
-        
-        # Calculate total amount
         is_org = bk.get("is_org", False)
-        cats = bk.get("room_categories", [])
-        num_rooms = len(bk.get("room_ids", [])) or 1
-        
-        if is_org:
-            # Organization rates based on category
-            if "Cat I" in cats:
-                room_rent = settings.get("cat_i_room_rent", 470)
-                license_fee = settings.get("cat_i_license_fee", 30)
-            else:
-                room_rent = settings.get("cat_ii_room_rent", 385)
-                license_fee = settings.get("cat_ii_license_fee", 15)
-        else:
-            # Non-Org flat rate
-            room_rent = settings.get("non_org_room_rent", 570)
-            license_fee = settings.get("non_org_license_fee", 30)
-        
-        total_amount = (room_rent + license_fee) * nights * num_rooms
-        total_amount += bk.get("extra_beds", 0) * 75 * nights
+        total_amount = fin["total_amount"]
         total_revenue += total_amount
-        
+
         # Add main guest (Self)
         guest_party_members.append({
             "booking_number": bk.get("booking_number", "N/A"),
@@ -4189,11 +4019,82 @@ async def get_guest_details_report(
         "start_date": start_date,
         "end_date": end_date,
         "total_party_members": total_party_members,
-        "total_bookings": len(bookings),
+        "total_bookings": total_bookings,
         "total_nights": total_nights,
         "total_revenue": round(total_revenue, 2),
         "guest_party_members": guest_party_members
     }
+
+@api_router.get("/reports/reconcile")
+async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000)):
+    """Cross-check that all four reports agree for a month.
+
+    Re-derives the headline numbers of the Room Allotment, Guest Details,
+    Room Occupancy and Monthly reports from the same source data and fails
+    loudly (consistent=false + mismatch list) if any pair diverges. Run this
+    after month-end closing; if it ever fails, a report code path has drifted
+    from utils/report_calc.py.
+    """
+    allotment = await get_room_allotment_report(filter_type="monthly", month=month, year=year)
+    guest_details = await get_guest_details_report(filter_type="monthly", month=month, year=year)
+    occupancy = await get_room_occupancy_report(filter_type="monthly", month=month, year=year)
+    monthly = await get_monthly_report(month=month, year=year)
+
+    occupancy_revenue = round(sum(r["revenue"] for r in occupancy["room_details"]), 2)
+    occupancy_room_days = sum(r["occupied_days"] for r in occupancy["room_details"])
+    monthly_room_days = (monthly["org_cat_i_days"] + monthly["org_cat_ii_days"]
+                         + monthly["non_org_days"])
+
+    mismatches = []
+
+    def check(label: str, a, b):
+        if round(a or 0, 2) != round(b or 0, 2):
+            mismatches.append({"check": label, "left": a, "right": b})
+
+    check("revenue: allotment vs guest_details",
+          allotment["total_revenue"], guest_details["total_revenue"])
+    check("revenue: allotment vs occupancy", allotment["total_revenue"], occupancy_revenue)
+    check("revenue: allotment vs monthly grand_total",
+          allotment["total_revenue"], monthly["grand_total"])
+    check("room_days: allotment vs occupancy",
+          allotment["total_room_days"], occupancy_room_days)
+    check("room_days: allotment vs monthly license tables",
+          allotment["total_room_days"], monthly_room_days)
+    check("room_days: monthly command table vs monthly license tables",
+          monthly["total_days"], monthly_room_days)
+    check("bookings: allotment vs occupancy",
+          allotment["total_allotments"], occupancy["total_bookings"])
+    check("bookings: allotment vs guest_details",
+          allotment["total_allotments"], guest_details["total_bookings"])
+    check("nights: allotment vs guest_details",
+          allotment["total_nights"], guest_details["total_nights"])
+
+    return {
+        "month": month,
+        "year": year,
+        "consistent": len(mismatches) == 0,
+        "mismatches": mismatches,
+        "totals": {
+            "revenue": {
+                "room_allotment": allotment["total_revenue"],
+                "guest_details": guest_details["total_revenue"],
+                "room_occupancy": occupancy_revenue,
+                "monthly_grand_total": monthly["grand_total"],
+            },
+            "room_days": {
+                "room_allotment": allotment["total_room_days"],
+                "room_occupancy": occupancy_room_days,
+                "monthly_command_table": monthly["total_days"],
+                "monthly_license_tables": monthly_room_days,
+            },
+            "bookings": {
+                "room_allotment": allotment["total_allotments"],
+                "guest_details": guest_details["total_bookings"],
+                "room_occupancy": occupancy["total_bookings"],
+            },
+        },
+    }
+
 
 # Health check endpoint for Render
 @api_router.get("/health")
