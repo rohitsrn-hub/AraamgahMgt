@@ -104,7 +104,7 @@ export default function ManualExcelTab() {
           <p>Columns match the manual ledger exactly: Ser No, Army No, Rank, Name, Unit, Total Days, Bill No, Advance Amt, Room Rent, Licence Chg, Extra Bed, Total Amt.</p>
           <p>
             <span className="font-semibold text-amber-700">Army No, Rank, Unit, and Bill No are left blank</span> (highlighted) for manual completion — the app does not digitize these fields.
-            Two extra columns, <span className="font-semibold">Aadhaar Number</span> and <span className="font-semibold">Org / Non-Org</span>, are included so each row can still be matched to a person by name.
+            Two extra columns, <span className="font-semibold">Mobile Number</span> and <span className="font-semibold">Org / Non-Org</span>, are included so each row can still be matched to a person by name.
           </p>
           <p>All financial figures (Room Rent, Licence Fee, Extra Bed, Total Amt) use the same calculation as the Room Allotment, Guest Details, Room Occupancy and Monthly reports, so this export will always reconcile with them.</p>
         </CardContent>

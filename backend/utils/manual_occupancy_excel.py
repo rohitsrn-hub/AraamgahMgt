@@ -10,9 +10,11 @@ Columns Army No / Rank / Unit / Bill No are intentionally left blank: the
 app does not store military rank, service number or unit (removed during
 the sanitization pass as confidential, paper-only fields — see
 generateOrgDataForm in pdfUtils.js) and "Bill No" is the guesthouse's
-physical voucher-book number, which has no digital equivalent. Aadhaar
+physical voucher-book number, which has no digital equivalent. Mobile
 Number and Org/Non-Org are included instead so a row can still be matched
-to a person by name without those fields.
+to a person by name without those fields — mobile number is captured on
+every booking, unlike Aadhaar which has no capture point anywhere in the
+app's UI today.
 """
 from datetime import date
 from io import BytesIO
@@ -24,9 +26,9 @@ from openpyxl.utils import get_column_letter
 from utils.report_calc import booking_financials, build_room_maps, report_booking_query
 
 # Column layout mirrors the manual sheet exactly, with two extra identification
-# columns (Aadhaar No, Org/Non-Org) inserted after Name.
+# columns (Mobile No, Org/Non-Org) inserted after Name.
 HEADERS = [
-    "Ser\nNo", "Army No", "Rank", "Name", "Aadhaar No", "Org /\nNon-Org", "Unit",
+    "Ser\nNo", "Army No", "Rank", "Name", "Mobile No", "Org /\nNon-Org", "Unit",
     "Total No\nof days", "Bill No", "Advance\nAmt", "Room\nRent", "Licence\nChg",
     "Extra\nBed", "Total Amt",
 ]
@@ -67,7 +69,7 @@ async def build_manual_occupancy_workbook(db, month: int, year: int) -> BytesIO:
         for room in fin["rooms"]:
             rows.append({
                 "name": bk.get("guest_name", ""),
-                "aadhaar_no": bk.get("aadhaar_number") or "",
+                "mobile_no": bk.get("guest_contact") or "",
                 "org_status": "Org" if is_org else "Non-Org",
                 "days": room["nights"],
                 "advance_amt": bk.get("advance_paid", 0) or 0,
@@ -105,7 +107,7 @@ async def build_manual_occupancy_workbook(db, month: int, year: int) -> BytesIO:
         ws.cell(row=r, column=1, value=i)  # Ser No
         # B (Army No), C (Rank), G (Unit), I (Bill No) intentionally left blank
         ws.cell(row=r, column=4, value=row["name"])
-        ws.cell(row=r, column=5, value=row["aadhaar_no"])
+        ws.cell(row=r, column=5, value=row["mobile_no"])
         ws.cell(row=r, column=6, value=row["org_status"])
         ws.cell(row=r, column=8, value=row["days"])
         ws.cell(row=r, column=10, value=round(row["advance_amt"], 2))
