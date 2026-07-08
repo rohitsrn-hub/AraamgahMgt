@@ -15,6 +15,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _json_default(obj):
+    """json.dump() fallback for values it can't serialize natively.
+
+    Most documents store created_at/updated_at as ISO strings, but a few
+    write paths (e.g. confirm_extension) store a raw BSON/Python datetime
+    instead. json.dump has no idea how to serialize that and raises
+    'Object of type datetime is not JSON serializable' the first time a
+    backup actually reaches one of those documents. Convert to the same
+    ISO-string form the rest of the app already uses; anything genuinely
+    unexpected still raises, same as json.dump's default behavior.
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
 # Backup directory
 # Use relative path for Render deployment compatibility
 BACKUP_DIR = Path(__file__).parent.parent / "backups"  # backend/backups
@@ -76,7 +91,7 @@ async def perform_full_backup(db) -> Dict:
         
         # Write to file
         with open(file_path, 'w') as f:
-            json.dump(backup_data, f, indent=2)
+            json.dump(backup_data, f, indent=2, default=_json_default)
         
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
         
@@ -180,7 +195,7 @@ async def perform_incremental_backup(db) -> Dict:
         
         # Write to file
         with open(file_path, 'w') as f:
-            json.dump(backup_data, f, indent=2)
+            json.dump(backup_data, f, indent=2, default=_json_default)
         
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
         
