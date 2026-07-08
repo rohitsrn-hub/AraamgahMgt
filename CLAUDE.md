@@ -47,6 +47,17 @@ Vercel site the same day. Never push half-done work.
 - Live production DB: any migration or bulk data change needs the owner's
   explicit go-ahead first, plus a stated rollback path.
 
+## Deliberate design choices (not bugs — do not "fix")
+- **Overstay**: a guest still checked in past their planned checkout date
+  does NOT block that room from a new booking. Owner ruling: an overstay
+  almost always means staff delayed processing the checkout, not that the
+  guest is still there — an Extend action is the correct path if they
+  genuinely stayed longer. Do not add auto-blocking logic here.
+- **Early check-in**: staff can check a guest in before the booked
+  check-in date, with no date restriction. Owner ruling: this is normal —
+  covers early walk-ins and same-day timing requests. Do not add a
+  date-order validation that blocks this.
+
 ## Conventions
 - Frontend API calls: always `${API}` (imported from `App.js`); a relative
   `/api/...` hits the Vercel domain and returns 405.
