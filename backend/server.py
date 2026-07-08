@@ -9,8 +9,9 @@ import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
+import re
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date as date_type
 from enum import Enum
 
 # Import backup services
@@ -541,7 +542,6 @@ class Payment(BaseModel):
 
 # ============= HELPER FUNCTIONS =============
 # Note: Helper functions moved to utils/ for better organization
-import re
 
 # ============= API ROUTES =============
 
@@ -659,18 +659,21 @@ async def update_settings(request: AppSettingsUpdate):
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
     result = await db.app_settings.update_one({}, {"$set": update_data})
-    if result.modified_count == 0:
+    # matched_count, not modified_count: Mongo reports modified_count == 0 when
+    # the new values equal the old ones, so re-saving an unchanged settings form
+    # used to raise a spurious "Settings not found".
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Settings not found")
-    
+
     return await get_settings()
 
 @api_router.post("/settings/reset-setup")
 async def reset_setup():
     """P3: Reset is_setup_complete flag to show setup wizard again"""
     result = await db.app_settings.update_one({}, {"$set": {"is_setup_complete": False}})
-    if result.modified_count == 0:
+    if result.matched_count == 0:  # matched, not modified — see update_settings
         raise HTTPException(status_code=404, detail="Settings not found")
-    
+
     return {"message": "Setup reset successfully. Please reload the page."}
 
 @api_router.put("/settings/categories")
@@ -690,9 +693,9 @@ async def update_room_categories(categories: List[dict]):
         }}
     )
     
-    if result.modified_count == 0:
+    if result.matched_count == 0:  # matched, not modified — see update_settings
         raise HTTPException(status_code=404, detail="Settings not found")
-    
+
     return {"message": "Room categories updated successfully", "categories": categories}
 
 # ============= AUTHENTICATION =============
@@ -846,19 +849,24 @@ async def create_user(
     """
     # Validate role
     user_data.validate_role()
-    
-    # Check if username already exists
-    existing = await db.users.find_one({"email": user_data.email}, {"_id": 0})
+
+    # Normalize the username to lowercase. Login always looks up by the
+    # lowercased value, so storing any capital letter (e.g. "Rakesh") made the
+    # account permanently unreachable. Store and dedupe case-insensitively.
+    username = user_data.email.strip().lower()
+
+    # Check if username already exists (case-insensitive)
+    existing = await db.users.find_one({"email": username}, {"_id": 0})
     if existing:
         raise HTTPException(
             status_code=400,
             detail="Username already exists"
         )
-    
+
     # Create user
     new_user = User(
         id=str(uuid.uuid4()),
-        email=user_data.email,  # Username
+        email=username,  # Username (normalized lowercase)
         password_hash=hash_password(user_data.password),
         name=user_data.name,
         role=user_data.role,
@@ -1565,6 +1573,32 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest):
 
     now = datetime.now(timezone.utc)
 
+    # The amendments were computed by plan-extension against room availability
+    # at that moment; a booking made by someone else in the gap between plan and
+    # confirm could now conflict. Re-validate here — but exclude every booking in
+    # THIS amendment set from the conflict check, since they are being moved
+    # together as one coordinated shuffle (the solver may reassign B to free a
+    # room for A). Only an outside booking should block the confirm.
+    amended_ids = {a.get("booking_id") for a in request.amendments if a.get("booking_id")}
+    amended_ids.add(booking_id)
+
+    async def _extension_conflict(room_ids_to_check, window_start, window_end):
+        for rid in room_ids_to_check:
+            conflicting = await db.bookings.find_one({
+                "id": {"$nin": list(amended_ids)},
+                "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+                "$or": [{"room_ids": rid}, {"room_id": rid}],
+                "check_in_date": {"$lt": window_end},
+                "check_out_date": {"$gt": window_start},
+            })
+            if conflicting:
+                room = await db.rooms.find_one({"id": rid}, {"_id": 0})
+                name = room.get("room_number") if room else rid
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Room {name} was booked by another guest since planning; extension cannot be confirmed. Re-plan the extension."
+                )
+
     for amendment in request.amendments:
         bid = amendment.get("booking_id")
         if not bid:
@@ -1578,6 +1612,11 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest):
         changes = []
 
         if change_type == "extension":
+            # New nights added on the same rooms → check that window is still free
+            await _extension_conflict(
+                b.get("room_ids", []) or ([b["room_id"]] if b.get("room_id") else []),
+                amendment["old_check_out"], amendment["new_check_out"],
+            )
             update["check_out_date"] = amendment["new_check_out"]
             update["total_amount"] = amendment["new_total"]
             update["balance_amount"] = round(amendment["new_total"] - b.get("advance_paid", 0), 2)
@@ -1587,6 +1626,11 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest):
             ]
 
         elif change_type == "room_reassignment":
+            # Guest moved to new rooms for the whole stay → those rooms must be
+            # free for the booking's full window (excluding the co-moved set).
+            await _extension_conflict(
+                amendment["new_room_ids"], b["check_in_date"], b["check_out_date"],
+            )
             update["room_ids"] = amendment["new_room_ids"]
             update["room_numbers"] = amendment["new_room_numbers"]
             update["room_categories"] = amendment["new_room_categories"]
@@ -1598,6 +1642,11 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest):
             ]
 
         elif change_type == "extension_room_change":
+            # Extension nights are served by DIFFERENT rooms → those extension
+            # rooms must be free for the extension window (excluding co-moved set).
+            await _extension_conflict(
+                amendment["extension_room_ids"], amendment["old_check_out"], amendment["new_check_out"],
+            )
             # Build room_segments: original period in current rooms, extension in new rooms
             orig_check_in = date_type.fromisoformat(b["check_in_date"])
             orig_check_out = date_type.fromisoformat(amendment["old_check_out"])
@@ -1708,6 +1757,7 @@ async def process_room_segments(room_segments: List[dict], check_in_date: str, c
     room_categories = []
     
     # Validate that all rooms exist
+    room_number_by_id = {}
     for rid in room_ids:
         room = await db.rooms.find_one({"id": rid}, {"_id": 0})
         if not room:
@@ -1716,7 +1766,25 @@ async def process_room_segments(room_segments: List[dict], check_in_date: str, c
             raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
         room_numbers.append(room["room_number"])
         room_categories.append(room["category"])
-    
+        room_number_by_id[rid] = room["room_number"]
+
+    # Availability check: a segmented booking spans check_in..check_out, so any
+    # existing confirmed/checked-in booking overlapping that window and holding
+    # one of these rooms is a conflict. Without this, mix & match bookings had
+    # no availability check at all and could double-book an occupied room.
+    for rid in room_ids:
+        conflicting = await db.bookings.find_one({
+            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+            "$or": [{"room_ids": rid}, {"room_id": rid}],
+            "check_in_date": {"$lt": check_out_date},
+            "check_out_date": {"$gt": check_in_date},
+        })
+        if conflicting:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Room {room_number_by_id.get(rid, rid)} is not available for the selected dates"
+            )
+
     # Calculate total amount from segments
     total_amount = 0.0
     start_date = datetime.strptime(check_in_date, "%Y-%m-%d").date()
@@ -1766,7 +1834,18 @@ async def create_booking(booking: BookingCreate):
         raise HTTPException(status_code=400, detail="Invalid mobile number. Must be 10 digits starting with 6-9")
     if booking.upi_phone and not validate_indian_mobile(booking.upi_phone):
         raise HTTPException(status_code=400, detail="Invalid UPI phone number. Must be 10 digits starting with 6-9")
-    
+
+    # Validate dates. Without this a reversed range (checkout before checkin)
+    # was accepted, charged one night, and — because its date window is empty —
+    # never blocked its room again and never conflicted with anything.
+    try:
+        _ci = date_type.fromisoformat(booking.check_in_date)
+        _co = date_type.fromisoformat(booking.check_out_date)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Dates must be valid YYYY-MM-DD")
+    if _co <= _ci:
+        raise HTTPException(status_code=400, detail="Check-out date must be after check-in date")
+
     # Determine booking type: traditional (room_ids) or segmented (room_segments)
     is_segmented = booking.room_segments is not None and len(booking.room_segments) > 0
     
@@ -2050,14 +2129,34 @@ async def update_booking_rooms(booking_id: str, request: dict):
     new_room_ids = request.get("room_ids", [])
     if not new_room_ids or len(new_room_ids) != len(booking.get("room_ids", [])):
         raise HTTPException(status_code=400, detail="Invalid room_ids - must match number of originally booked rooms")
-    
+
     # Get new room details
     new_rooms = []
     for room_id in new_room_ids:
         room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
         if not room:
             raise HTTPException(status_code=404, detail=f"Room {room_id} not found")
+        if room.get("status") == RoomStatus.MAINTENANCE.value:
+            raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is under maintenance")
         new_rooms.append(room)
+
+    # The new rooms must actually be free for this booking's dates — this
+    # endpoint previously swapped rooms with only an existence check, so a
+    # pre-check-in swap could land on a room already booked for those nights.
+    for room_id in new_room_ids:
+        conflicting = await db.bookings.find_one({
+            "id": {"$ne": booking_id},
+            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+            "$or": [{"room_ids": room_id}, {"room_id": room_id}],
+            "check_in_date": {"$lt": booking["check_out_date"]},
+            "check_out_date": {"$gt": booking["check_in_date"]},
+        })
+        if conflicting:
+            room = next((r for r in new_rooms if r["id"] == room_id), None)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Room {room['room_number'] if room else room_id} is not available for this booking's dates"
+            )
     
     # Extract room details for booking
     room_numbers = [r["room_number"] for r in new_rooms]
@@ -2315,13 +2414,17 @@ async def cancel_booking(request: CancelBookingRequest):
                 {"$set": {"status": RoomStatus.AVAILABLE.value}}
             )
     
-    # Create refund record if advance was paid
-    if request.refund_amount > 0:
+    # Create refund record if advance was paid. Cap at what the guest actually
+    # paid in advance — the client sends refund_amount and nothing else stops a
+    # typo (or a forged request) from queueing a ₹99,999 refund on a ₹400 advance.
+    advance_paid = booking.get("advance_paid", 0) or 0
+    refund_amount = min(max(request.refund_amount, 0), advance_paid)
+    if refund_amount > 0:
         refund = Refund(
             booking_id=booking["id"],
             booking_number=booking["booking_number"],
             guest_name=booking["guest_name"],
-            amount=request.refund_amount,
+            amount=refund_amount,
             bank_details=booking.get("bank_details"),
             upi_number=booking.get("upi_number"),
             bank_name=booking.get("bank_name"),
@@ -2424,29 +2527,43 @@ async def amend_booking(request: AmendBookingRequest):
     changes = []
     
     # Amend dates
+    dates_changed = False
     if request.check_in_date and request.check_in_date != booking["check_in_date"]:
         changes.append(f"Check-in: {booking['check_in_date']} → {request.check_in_date}")
         amendment_data["check_in_date"] = request.check_in_date
-    
+        dates_changed = True
+
     if request.check_out_date and request.check_out_date != booking["check_out_date"]:
         changes.append(f"Check-out: {booking['check_out_date']} → {request.check_out_date}")
         amendment_data["check_out_date"] = request.check_out_date
-    
-    # Amend rooms
-    if request.room_ids and request.room_ids != booking.get("room_ids", []):
-        # Validate room availability for new dates
-        check_in = request.check_in_date or booking["check_in_date"]
-        check_out = request.check_out_date or booking["check_out_date"]
-        
-        # Check if new rooms are available
-        for new_room_id in request.room_ids:
+        dates_changed = True
+
+    rooms_changed = bool(request.room_ids and request.room_ids != booking.get("room_ids", []))
+
+    # Validate the amended stay window and re-check availability whenever dates
+    # OR rooms change. Date-only amendments previously skipped this entirely, so
+    # extending a stay could silently overlap another booking on the same room.
+    final_check_in = request.check_in_date or booking["check_in_date"]
+    final_check_out = request.check_out_date or booking["check_out_date"]
+    try:
+        if date_type.fromisoformat(final_check_out) <= date_type.fromisoformat(final_check_in):
+            raise HTTPException(status_code=400, detail="Check-out date must be after check-in date")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Dates must be valid YYYY-MM-DD")
+
+    if dates_changed or rooms_changed:
+        if rooms_changed:
+            rooms_to_check = request.room_ids
+        else:
+            rooms_to_check = booking.get("room_ids") or ([booking["room_id"]] if booking.get("room_id") else [])
+        for new_room_id in rooms_to_check:
             conflicting = await db.bookings.find_one({
                 "id": {"$ne": request.booking_id},
-                "room_ids": new_room_id,
                 "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
-                "$or": [
-                    {"check_in_date": {"$lt": check_out}, "check_out_date": {"$gt": check_in}},
-                ]
+                # Legacy bookings stored a single room_id, not room_ids — check both
+                "$or": [{"room_ids": new_room_id}, {"room_id": new_room_id}],
+                "check_in_date": {"$lt": final_check_out},
+                "check_out_date": {"$gt": final_check_in},
             })
             if conflicting:
                 room = await db.rooms.find_one({"id": new_room_id}, {"_id": 0})
@@ -2454,7 +2571,9 @@ async def amend_booking(request: AmendBookingRequest):
                     status_code=400,
                     detail=f"Room {room.get('room_number') if room else new_room_id} not available for selected dates"
                 )
-        
+
+    # Amend rooms
+    if rooms_changed:
         # Fetch new room details
         new_rooms = []
         new_room_numbers = []
@@ -2644,19 +2763,22 @@ async def get_guest_history(
     # Build query - combine multiple search criteria
     or_conditions = []
     
+    # Escape all user input before it becomes a regex — otherwise a value like
+    # ".*" matches every guest and a crafted pattern like "(a+)+$" can hang the
+    # query (ReDoS). re.escape treats the input as a literal substring.
     if phone_number:
-        phone_clean = phone_number.replace(" ", "").replace("+91", "").replace("-", "")
+        phone_clean = re.escape(phone_number.replace(" ", "").replace("+91", "").replace("-", ""))
         or_conditions.extend([
             {"guest_contact": {"$regex": phone_clean, "$options": "i"}},
             {"guest_contact": {"$regex": f"\\+91.*{phone_clean}", "$options": "i"}}
         ])
-    
+
     if aadhaar_number:
-        aadhaar_clean = aadhaar_number.replace(" ", "").replace("-", "")
+        aadhaar_clean = re.escape(aadhaar_number.replace(" ", "").replace("-", ""))
         or_conditions.append({"id_proof_number": {"$regex": aadhaar_clean, "$options": "i"}})
-    
+
     if guest_name:
-        or_conditions.append({"guest_name": {"$regex": guest_name, "$options": "i"}})
+        or_conditions.append({"guest_name": {"$regex": re.escape(guest_name), "$options": "i"}})
     
     query = {"$or": or_conditions}
     
@@ -2815,15 +2937,19 @@ async def update_refund(refund_id: str, update: RefundUpdate):
         update_data["refund_date"] = update.refund_date
     if update.status == RefundStatus.COMPLETED:
         update_data["processed_at"] = now
-    
-    result = await db.refunds.update_one({"id": refund_id}, {"$set": update_data})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Refund not found")
-    
-    refund = await db.refunds.find_one({"id": refund_id}, {"_id": 0})
-    
-    # Record refund payment
-    if update.status == RefundStatus.COMPLETED:
+        # Atomic transition: only flip to completed if not already completed,
+        # so re-submitting (double-click, retry) can't insert a second negative
+        # payment and double-count the refund in the funds dashboard.
+        result = await db.refunds.update_one(
+            {"id": refund_id, "status": {"$ne": RefundStatus.COMPLETED.value}},
+            {"$set": update_data},
+        )
+        refund = await db.refunds.find_one({"id": refund_id}, {"_id": 0})
+        if refund is None:
+            raise HTTPException(status_code=404, detail="Refund not found")
+        if result.modified_count == 0:
+            # Already completed earlier — idempotent no-op, no duplicate payment
+            return refund
         payment = Payment(
             booking_id=refund["booking_id"],
             booking_number=refund["booking_number"],
@@ -2831,8 +2957,13 @@ async def update_refund(refund_id: str, update: RefundUpdate):
             payment_type="refund"
         )
         await db.payments.insert_one(serialize_doc(payment.model_dump()))
-    
-    return refund
+        return refund
+
+    result = await db.refunds.update_one({"id": refund_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Refund not found")
+
+    return await db.refunds.find_one({"id": refund_id}, {"_id": 0})
 
 # ============= TOILETRY =============
 
@@ -3367,11 +3498,12 @@ async def get_calendar_data(month: int, year: int):
 async def get_guests(search: Optional[str] = None):
     query = {}
     if search:
+        safe = re.escape(search)  # treat input as a literal, not a regex (ReDoS / match-all)
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"contact_number": {"$regex": search, "$options": "i"}}
+            {"name": {"$regex": safe, "$options": "i"}},
+            {"contact_number": {"$regex": safe, "$options": "i"}}
         ]
-    
+
     guests = await db.guests.find(query, {"_id": 0}).to_list(100)
     return guests
 
