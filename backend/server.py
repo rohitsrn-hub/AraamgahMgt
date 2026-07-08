@@ -1360,6 +1360,26 @@ async def find_optimal_room_combination(
 
 # ============= STAY EXTENSION =============
 
+def _extension_cost(settings: dict, room_categories: list, nights: int, is_org: bool) -> float:
+    """Shared cost calculation for stay-extension nights.
+
+    Uses the same split rate fields (report_calc.rate_components) as every
+    report and the check-in billing path, instead of the legacy flat
+    cat_i_rate/cat_ii_rate fields this used to read — those aren't edited by
+    the Settings screen anymore, so extension pricing could silently drift
+    from every other financial surface in the app the moment an admin
+    changed a rate. plan_extension and confirm_extension both call this so
+    the price shown for approval and the price actually charged can't differ.
+    """
+    if nights <= 0:
+        return 0.0
+    total = 0.0
+    for cat in room_categories:
+        rent, licence = rate_components(settings, is_org, cat)
+        total += (rent + licence) * nights
+    return total
+
+
 @api_router.post("/bookings/{booking_id}/plan-extension")
 async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., description="New checkout date YYYY-MM-DD"), current_user: dict = Depends(require_staff_or_admin_role)):
     from datetime import date as date_type, timedelta
@@ -1386,19 +1406,7 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
 
     def calc_cost(room_cats, check_in_s, check_out_s, is_org_flag):
         nights = (date_type.fromisoformat(check_out_s) - date_type.fromisoformat(check_in_s)).days
-        if nights <= 0:
-            return 0.0
-        total = 0.0
-        for cat in room_cats:
-            if is_org_flag:
-                if cat == "Cat I":
-                    total += float(settings.get("cat_i_rate", 500)) * nights
-                else:
-                    total += float(settings.get("cat_ii_rate", 400)) * nights
-            else:
-                non_org = float(settings.get("non_org_room_rent", 570)) + float(settings.get("non_org_license_fee", 30))
-                total += non_org * nights
-        return total
+        return _extension_cost(settings, room_cats, nights, is_org_flag)
 
     old_total = booking.get("total_amount", 0.0)
     ext_cost = calc_cost(current_room_categories, extension_start, extension_end, is_org)
@@ -1598,6 +1606,7 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
         raise HTTPException(status_code=400, detail="Can only confirm extension for checked-in bookings")
 
     now = datetime.now(timezone.utc)
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
 
     # The amendments were computed by plan-extension against room availability
     # at that moment; a booking made by someone else in the gap between plan and
@@ -1625,6 +1634,26 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
                     detail=f"Room {name} was booked by another guest since planning; extension cannot be confirmed. Re-plan the extension."
                 )
 
+    async def _rooms_by_id(room_ids):
+        """Fetch room_number/category fresh from the rooms collection, keyed
+        by id. Money and room labels are derived from this, never from the
+        client-supplied amendment — an amendment is a proposal the client
+        echoes back, not a source of truth for what a room actually is."""
+        out = {}
+        for rid in room_ids:
+            room = await db.rooms.find_one({"id": rid}, {"_id": 0})
+            out[rid] = room or {"id": rid, "room_number": rid, "category": "Cat I"}
+        return out
+
+    async def _release_room_if_unclaimed(room_id, exclude_booking_id):
+        other = await db.bookings.find_one({
+            "id": {"$ne": exclude_booking_id},
+            "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+            "$or": [{"room_ids": room_id}, {"room_id": room_id}],
+        })
+        if not other:
+            await db.rooms.update_one({"id": room_id}, {"$set": {"status": RoomStatus.AVAILABLE.value}})
+
     for amendment in request.amendments:
         bid = amendment.get("booking_id")
         if not bid:
@@ -1634,50 +1663,86 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
             continue
 
         change_type = amendment.get("change_type", "")
-        update: dict = {"updated_at": now, "is_amended": True}
+        # updated_at must be an ISO string like every other timestamp in this
+        # app — a raw datetime object here is exactly what made a full backup
+        # crash with "Object of type datetime is not JSON serializable" the
+        # first time it reached one of these documents.
+        update: dict = {"updated_at": now.isoformat(), "is_amended": True}
         changes = []
 
         if change_type == "extension":
-            # New nights added on the same rooms → check that window is still free
+            # New nights added on the same rooms. Old checkout and room
+            # categories come from the booking itself (b), not the amendment,
+            # so the charge can't be manipulated by a tampered request.
+            old_check_out = b["check_out_date"]
+            new_check_out = amendment["new_check_out"]
             await _extension_conflict(
                 b.get("room_ids", []) or ([b["room_id"]] if b.get("room_id") else []),
-                amendment["old_check_out"], amendment["new_check_out"],
+                old_check_out, new_check_out,
             )
-            update["check_out_date"] = amendment["new_check_out"]
-            update["total_amount"] = amendment["new_total"]
-            update["balance_amount"] = round(amendment["new_total"] - b.get("advance_paid", 0), 2)
+            nights = (date_type.fromisoformat(new_check_out) - date_type.fromisoformat(old_check_out)).days
+            old_total = b.get("total_amount", 0.0)
+            ext_cost = _extension_cost(settings, b.get("room_categories", []), nights, b.get("is_org", False))
+            new_total = round(old_total + ext_cost, 2)
+
+            update["check_out_date"] = new_check_out
+            update["total_amount"] = new_total
+            update["balance_amount"] = round(new_total - b.get("advance_paid", 0), 2)
             changes = [
-                f"Stay extended: checkout {amendment['old_check_out']} → {amendment['new_check_out']}",
-                f"Amount: ₹{amendment['old_total']:.0f} → ₹{amendment['new_total']:.0f}",
+                f"Stay extended: checkout {old_check_out} → {new_check_out}",
+                f"Amount: ₹{old_total:.0f} → ₹{new_total:.0f}",
             ]
 
         elif change_type == "room_reassignment":
             # Guest moved to new rooms for the whole stay → those rooms must be
             # free for the booking's full window (excluding the co-moved set).
-            await _extension_conflict(
-                amendment["new_room_ids"], b["check_in_date"], b["check_out_date"],
-            )
-            update["room_ids"] = amendment["new_room_ids"]
-            update["room_numbers"] = amendment["new_room_numbers"]
-            update["room_categories"] = amendment["new_room_categories"]
-            update["total_amount"] = amendment["new_total"]
-            update["balance_amount"] = round(amendment["new_total"] - b.get("advance_paid", 0), 2)
+            new_room_ids = amendment["new_room_ids"]
+            await _extension_conflict(new_room_ids, b["check_in_date"], b["check_out_date"])
+
+            old_room_ids = b.get("room_ids", []) or ([b["room_id"]] if b.get("room_id") else [])
+            new_rooms_by_id = await _rooms_by_id(new_room_ids)
+            new_room_numbers = [new_rooms_by_id[rid]["room_number"] for rid in new_room_ids]
+            new_room_categories = [new_rooms_by_id[rid]["category"] for rid in new_room_ids]
+
+            nights = (date_type.fromisoformat(b["check_out_date"]) - date_type.fromisoformat(b["check_in_date"])).days
+            old_total = b.get("total_amount", 0.0)
+            new_total = round(_extension_cost(settings, new_room_categories, nights, b.get("is_org", False)), 2)
+
+            update["room_ids"] = new_room_ids
+            update["room_numbers"] = new_room_numbers
+            update["room_categories"] = new_room_categories
+            update["total_amount"] = new_total
+            update["balance_amount"] = round(new_total - b.get("advance_paid", 0), 2)
             changes = [
-                f"Room reassigned: {', '.join(amendment['old_room_numbers'])} → {', '.join(amendment['new_room_numbers'])}",
-                f"Amount: ₹{amendment['old_total']:.0f} → ₹{amendment['new_total']:.0f}",
+                f"Room reassigned: {', '.join(b.get('room_numbers', []))} → {', '.join(new_room_numbers)}",
+                f"Amount: ₹{old_total:.0f} → ₹{new_total:.0f}",
             ]
+
+            # The guest is moving rooms right now (this booking is checked in),
+            # so reflect that immediately: free the old rooms (only if no other
+            # active booking still holds them) and occupy the new ones. This
+            # was previously left stale — the old room stayed "occupied" and
+            # the new room stayed whatever it was before.
+            for rid in old_room_ids:
+                await _release_room_if_unclaimed(rid, bid)
+            for rid in new_room_ids:
+                await db.rooms.update_one({"id": rid}, {"$set": {"status": RoomStatus.OCCUPIED.value}})
 
         elif change_type == "extension_room_change":
             # Extension nights are served by DIFFERENT rooms → those extension
             # rooms must be free for the extension window (excluding co-moved set).
-            await _extension_conflict(
-                amendment["extension_room_ids"], amendment["old_check_out"], amendment["new_check_out"],
-            )
+            extension_room_ids = amendment["extension_room_ids"]
+            old_check_out = b["check_out_date"]
+            new_check_out = amendment["new_check_out"]
+            await _extension_conflict(extension_room_ids, old_check_out, new_check_out)
+
+            ext_rooms_by_id = await _rooms_by_id(extension_room_ids)
+
             # Build room_segments: original period in current rooms, extension in new rooms
             orig_check_in = date_type.fromisoformat(b["check_in_date"])
-            orig_check_out = date_type.fromisoformat(amendment["old_check_out"])
+            orig_check_out = date_type.fromisoformat(old_check_out)
             ext_start = orig_check_out
-            ext_end = date_type.fromisoformat(amendment["new_check_out"])
+            ext_end = date_type.fromisoformat(new_check_out)
 
             orig_rooms_seg = [
                 {"id": rid, "room_number": rnum, "category": rcat}
@@ -1686,10 +1751,8 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
                 )
             ]
             ext_rooms_seg = [
-                {"id": rid, "room_number": rnum, "category": rcat}
-                for rid, rnum, rcat in zip(
-                    amendment["extension_room_ids"], amendment["extension_room_numbers"], amendment["extension_room_categories"]
-                )
+                {"id": rid, "room_number": ext_rooms_by_id[rid]["room_number"], "category": ext_rooms_by_id[rid]["category"]}
+                for rid in extension_room_ids
             ]
 
             segments = []
@@ -1700,23 +1763,37 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
                 night = (ext_start + timedelta(days=i)).strftime("%Y-%m-%d")
                 segments.append({"night_date": night, "rooms": ext_rooms_seg})
 
-            all_room_ids = list(set(b.get("room_ids", []) + amendment["extension_room_ids"]))
+            all_room_ids = list(set(b.get("room_ids", []) + extension_room_ids))
             all_room_numbers = list({r["room_number"] for r in orig_rooms_seg + ext_rooms_seg})
             all_room_cats = list({r["category"] for r in orig_rooms_seg + ext_rooms_seg})
 
-            update["check_out_date"] = amendment["new_check_out"]
+            ext_nights = (ext_end - ext_start).days
+            ext_categories = [ext_rooms_by_id[rid]["category"] for rid in extension_room_ids]
+            old_total = b.get("total_amount", 0.0)
+            ext_cost = _extension_cost(settings, ext_categories, ext_nights, b.get("is_org", False))
+            new_total = round(old_total + ext_cost, 2)
+
+            update["check_out_date"] = new_check_out
             update["room_segments"] = segments
             update["has_room_changes"] = True
             update["room_ids"] = all_room_ids
             update["room_numbers"] = all_room_numbers
             update["room_categories"] = all_room_cats
-            update["total_amount"] = amendment["new_total"]
-            update["balance_amount"] = round(amendment["new_total"] - b.get("advance_paid", 0), 2)
+            update["total_amount"] = new_total
+            update["balance_amount"] = round(new_total - b.get("advance_paid", 0), 2)
             changes = [
-                f"Stay extended: checkout {amendment['old_check_out']} → {amendment['new_check_out']}",
-                f"Extension rooms: {', '.join(amendment['extension_room_numbers'])} (different from original {', '.join(b.get('room_numbers', []))})",
-                f"Amount: ₹{amendment['old_total']:.0f} → ₹{amendment['new_total']:.0f}",
+                f"Stay extended: checkout {old_check_out} → {new_check_out}",
+                f"Extension rooms: {', '.join(r['room_number'] for r in ext_rooms_seg)} (different from original {', '.join(b.get('room_numbers', []))})",
+                f"Amount: ₹{old_total:.0f} → ₹{new_total:.0f}",
             ]
+            # Note: the extension rooms only take over from ext_start (a future
+            # date relative to "now" in the common case), and room.status has
+            # no time dimension — it's a single current-state flag. Flipping
+            # extension_room_ids to "occupied" immediately would incorrectly
+            # mark them occupied before the guest has actually moved in. Room
+            # status for segmented stays is intentionally left to check-in/
+            # check-out to manage; room_segments already tracks the true
+            # night-by-night assignment for reports and billing.
         else:
             continue
 
