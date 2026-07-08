@@ -94,12 +94,19 @@ def serialize_response(doc: dict) -> dict:
 
 
 def calculate_nights(check_in: str, check_out: str) -> int:
-    """Calculate number of nights between dates"""
+    """Calculate number of nights between dates.
+
+    Never raises: an explicit None (not just a missing/empty string) for
+    either date used to raise AttributeError from .replace(), uncaught by
+    the original (ValueError, TypeError) — a caller relying on this being
+    a safe fallback (e.g. create_feedback) would crash instead of degrading
+    to the 1-night default.
+    """
     try:
         ci = datetime.fromisoformat(check_in.replace('Z', '+00:00'))
         co = datetime.fromisoformat(check_out.replace('Z', '+00:00'))
         return max(1, (co - ci).days)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         return 1
 
 

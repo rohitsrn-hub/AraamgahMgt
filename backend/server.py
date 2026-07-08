@@ -1122,6 +1122,10 @@ async def get_room(room_id: str, current_user: dict = Depends(get_current_user_w
 
 @api_router.post("/rooms")
 async def create_room(room: RoomCreate, current_user: dict = Depends(require_admin_role)):
+    existing = await db.rooms.find_one({"room_number": room.room_number}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Room {room.room_number} already exists")
+
     room_obj = Room(**room.model_dump())
     doc = serialize_doc(room_obj.model_dump())
     await db.rooms.insert_one(doc)
@@ -1134,15 +1138,40 @@ async def update_room(room_id: str, update: RoomUpdate, current_user: dict = Dep
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
-    
+
+    if "room_number" in update_data:
+        collision = await db.rooms.find_one(
+            {"room_number": update_data["room_number"], "id": {"$ne": room_id}}, {"_id": 0}
+        )
+        if collision:
+            raise HTTPException(status_code=400, detail=f"Room {update_data['room_number']} already exists")
+
     result = await db.rooms.update_one({"id": room_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Room not found")
-    
+
     return await get_room(room_id)
 
 @api_router.delete("/rooms/{room_id}")
 async def delete_room(room_id: str, current_user: dict = Depends(require_admin_role)):
+    # Refuse to delete a room a currently-active booking still holds — those
+    # bookings' availability checks resolve the room live from this
+    # collection, so deleting it out from under a confirmed/checked-in guest
+    # would silently break their booking. Past bookings (checked_out/
+    # cancelled) already store their own room_numbers/room_categories on the
+    # booking document itself, so they don't depend on the room still
+    # existing here — otherwise no room actually used by this guesthouse
+    # could ever be deleted.
+    referencing = await db.bookings.find_one({
+        "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+        "$or": [{"room_ids": room_id}, {"room_id": room_id}],
+    }, {"_id": 0})
+    if referencing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete this room — active booking {referencing.get('booking_number', referencing.get('id'))} references it."
+        )
+
     result = await db.rooms.delete_one({"id": room_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -2948,8 +2977,15 @@ async def get_guest_history(
                 checkout = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
                 nights = (checkout - checkin).days
                 total_nights += nights
-            except Exception:
-                pass
+            except Exception as e:
+                # Undercounting a guest's stay history is a data-quality bug,
+                # not something to hide — log it so a malformed date on an
+                # old booking gets noticed and fixed, instead of silently
+                # skewing this guest's "nights stayed" number forever.
+                logger.warning(
+                    f"guest-history: could not compute nights for booking "
+                    f"{booking.get('booking_number', booking.get('id'))}: {e}"
+                )
     
     statistics = {
         "total_bookings": total_bookings,
@@ -3675,11 +3711,10 @@ async def create_feedback(fb: FeedbackCreate, current_user: dict = Depends(requi
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
-    # Compute duration
-    try:
-        nights = calculate_nights(booking.get("check_in_date", ""), booking.get("check_out_date", ""))
-    except Exception:
-        nights = 0
+    # Compute duration. calculate_nights already catches malformed dates
+    # internally and returns 1 (never raises), so this no longer wraps it in
+    # a redundant try/except that silently turned any failure into 0 nights.
+    nights = calculate_nights(booking.get("check_in_date", ""), booking.get("check_out_date", ""))
     
     feedback_doc = {
         "id": str(uuid.uuid4()),
