@@ -2096,12 +2096,15 @@ async def check_in(request: CheckInRequest):
     if request.notes:
         update_fields["notes"] = request.notes
 
-    # Update booking
-    await db.bookings.update_one(
-        {"id": request.booking_id},
+    # Atomically claim the check-in: only flip if still confirmed, so two
+    # simultaneous check-in submissions can't both apply side effects.
+    claim = await db.bookings.update_one(
+        {"id": request.booking_id, "status": BookingStatus.CONFIRMED.value},
         {"$set": update_fields}
     )
-    
+    if claim.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Booking is already being checked in or has been checked in")
+
     # Update room status for all rooms in this booking
     room_ids = booking.get("room_ids", [])
     # backward compat: old bookings may have single room_id
@@ -2297,12 +2300,18 @@ async def check_out(request: CheckOutRequest):
         if v is not None:
             update_fields[k] = v
     
-    # Update booking
-    await db.bookings.update_one(
-        {"id": request.booking_id},
+    # Atomically claim the checkout: only flip if still checked_in. Two
+    # simultaneous checkout submissions (double-click, retry) both passed the
+    # find_one guard above; without this, both would insert a "final" payment
+    # and double-count the collection. Only the update that actually changes the
+    # status proceeds to touch rooms and record payment.
+    claim = await db.bookings.update_one(
+        {"id": request.booking_id, "status": BookingStatus.CHECKED_IN.value},
         {"$set": update_fields}
     )
-    
+    if claim.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Booking is already being checked out or has been checked out")
+
     # Update room status for all rooms in this booking
     room_ids = booking.get("room_ids", [])
     if not room_ids and booking.get("room_id"):
@@ -2312,7 +2321,7 @@ async def check_out(request: CheckOutRequest):
             {"id": rid},
             {"$set": {"status": RoomStatus.AVAILABLE.value}}
         )
-    
+
     # Record final payment if any
     if request.final_payment > 0:
         payment = Payment(
@@ -2323,7 +2332,7 @@ async def check_out(request: CheckOutRequest):
             payment_mode=request.payment_mode
         )
         await db.payments.insert_one(serialize_doc(payment.model_dump()))
-    
+
     updated_booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     return {"message": "Check-out successful", "booking_id": request.booking_id, "booking": updated_booking}
 
@@ -2457,24 +2466,41 @@ async def delete_booking(booking_id: str):
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
-    # Free up rooms if booking is confirmed or checked_in
+    # Free up rooms if booking is confirmed or checked_in — but only rooms no
+    # other active booking still holds, so deleting one booking can't flip a
+    # room that a different checked-in guest occupies to "available".
     if booking["status"] in [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]:
         room_ids = booking.get("room_ids", [])
         if not room_ids and booking.get("room_id"):
             room_ids = [booking["room_id"]]
-        
+
         for rid in room_ids:
-            await db.rooms.update_one(
-                {"id": rid},
-                {"$set": {"status": RoomStatus.AVAILABLE.value}}
-            )
-    
+            other = await db.bookings.find_one({
+                "id": {"$ne": booking_id},
+                "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+                "$or": [{"room_ids": rid}, {"room_id": rid}],
+            })
+            if not other:
+                await db.rooms.update_one(
+                    {"id": rid},
+                    {"$set": {"status": RoomStatus.AVAILABLE.value}}
+                )
+
     # Delete the booking
     result = await db.bookings.delete_one({"id": booking_id})
-    
+
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Booking not found or already deleted")
-    
+
+    # Remove any still-pending refund for this booking — a permanently deleted
+    # "wrong entry" must not leave a payable refund sitting in the queue.
+    # Completed refunds/payments are left untouched (they record money that
+    # actually moved and belong to the accounting history).
+    await db.refunds.delete_many({
+        "booking_id": booking_id,
+        "status": {"$ne": RefundStatus.COMPLETED.value},
+    })
+
     return {
         "message": "Booking permanently deleted",
         "booking_id": booking_id,

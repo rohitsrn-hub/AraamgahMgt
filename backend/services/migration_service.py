@@ -111,8 +111,15 @@ class MigrationService:
             logger.info("Step 1: Archiving defense data...")
             logs.append("Step 1: Archiving defense data")
             
-            bookings = await self.db.bookings.find({}, {"_id": 0}).to_list(5000)
-            
+            # Only process bookings that still carry the legacy guest_rank field.
+            # Already-sanitized bookings have it removed; including them would
+            # recompute is_org from an empty rank (→ False) and silently wipe
+            # every Org classification if this migration ever re-ran after a
+            # crash/failed status. Filtering here makes a re-run a safe no-op.
+            bookings = await self.db.bookings.find(
+                {"guest_rank": {"$exists": True, "$nin": [None, ""]}}, {"_id": 0}
+            ).to_list(5000)
+
             if not bookings:
                 logs.append("No bookings found to archive")
                 await self.mark_migration_complete(
