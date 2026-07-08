@@ -5,6 +5,20 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-07-08 — Deferred audit items cleared (branch: claude/qa-audit-fixes)
+Worked through everything deferred from the login-enforcement work: extension
+pricing now reads the same rate settings as reports (was legacy fields, could
+drift after a rate change); confirm-extension recomputes the charge and room
+categories server-side instead of trusting the client's numbers; room status
+now updates correctly on an immediate room move; fixed the exact datetime bug
+that crashed backups, at its source. Also: booking numbers are now allocated
+atomically (two simultaneous bookings could get the same number before);
+rooms can't be deleted out from under an active booking or created/renamed
+into a duplicate room number; a guest-history stats bug that silently
+undercounted nights now logs instead of hiding it. Two items intentionally
+left as open policy questions for the owner (overstay handling, early
+check-in) rather than silently decided.
+
 ## 2026-07-06 — Server-side login enforcement (branch: claude/qa-audit-fixes)
 Closed audit item #1: the server now actually checks who's logged in on every
 one of its 79 actions (previously only the browser enforced login — anyone
