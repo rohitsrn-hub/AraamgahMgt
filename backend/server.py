@@ -34,6 +34,7 @@ from utils.report_calc import (
     effective_stay,
     build_room_maps,
     booking_financials,
+    rate_components,
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
 
@@ -564,7 +565,27 @@ async def get_settings():
 async def complete_setup(request: SetupRequest):
     """Complete first-time setup"""
     existing = await db.app_settings.find_one({})
-    
+
+    # Guard against a destructive re-run. Setup recreates all rooms with new
+    # internal IDs (delete_many below); if bookings already reference the old
+    # room IDs, wiping rooms orphans them — availability checks match by room
+    # ID, so every existing booking silently stops blocking its room and the
+    # same nights can be double-booked. Once setup is complete and any booking
+    # exists, refuse rather than corrupt live data. Use the Settings screen to
+    # change rates; room structure changes on a live DB need a deliberate
+    # migration with the owner's sign-off.
+    if existing and existing.get("is_setup_complete"):
+        booking_count = await db.bookings.count_documents({})
+        if booking_count > 0:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Setup already completed and bookings exist. Re-running setup "
+                    "would recreate rooms and orphan existing bookings. Change rates "
+                    "via Settings; room-structure changes need a data migration."
+                ),
+            )
+
     # Default cancellation policy (hours-based)
     # >96 hours (4 days): 100% refund
     # 48-96 hours (2-4 days): 50% refund
@@ -1918,38 +1939,44 @@ async def check_in(request: CheckInRequest):
     # Get settings for rate calculation
     settings = await db.app_settings.find_one({}, {"_id": 0})
     
-    # Recalculate room charges based on room_guest_mapping (NEW STRUCTURE)
+    # Recalculate room charges. Rent and licence fee are summed SEPARATELY,
+    # both from the same split-rate settings the reports use
+    # (cat_i_room_rent/cat_i_license_fee, etc.) via report_calc.rate_components —
+    # so the stored total_amount can never drift from what the reports compute.
+    # (Previously this read the legacy cat_i_rate/cat_ii_rate fields, which the
+    # Settings screen no longer edits, and then added license_fee_total on top,
+    # double-counting the licence portion.)
+    check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
+    check_out_date = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
+    nights = (check_out_date - check_in_date).days
+
     new_room_rent_total = 0.0
+    new_license_fee_total = 0.0
     if request.room_guest_mapping and len(request.room_guest_mapping) > 0:
-        # Calculate nights
-        check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
-        check_out_date = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
-        nights = (check_out_date - check_in_date).days
-        
         for room in request.room_guest_mapping:
             room_category = room.get("room_category", "Cat I")
             charge_category = room.get("charge_category", room_category)
-            
-            # Determine rate per night based on charge category
-            if charge_category == "Non-Org":
-                rate_per_night = settings.get("non_org_room_rent", 570.0) + settings.get("non_org_license_fee", 30.0)
-            else:
-                # Regular Cat I/II rates
-                if room_category == "Cat I":
-                    rate_per_night = settings.get("cat_i_rate", 500.0)
-                else:
-                    rate_per_night = settings.get("cat_ii_rate", 400.0)
-            
-            new_room_rent_total += rate_per_night * nights
+            # A per-room "Non-Org" charge overrides the booking's org status
+            # for that room (a room in an Org booking can be billed Non-Org).
+            is_org_room = charge_category != "Non-Org"
+            rent, licence = rate_components(settings or {}, is_org_room, room_category)
+            new_room_rent_total += rent * nights
+            new_license_fee_total += licence * nights
     else:
-        # Fallback to original total if no mapping provided (backward compatibility)
-        new_room_rent_total = booking.get("room_rent_total", 0.0)
-    
+        # No per-room mapping: recompute from the booking's own rooms and its
+        # org status (never trust a stored room_rent_total — create_booking
+        # doesn't set it, so the old fallback zeroed the bill).
+        is_org_booking = booking.get("is_org", False)
+        for cat in (booking.get("room_categories") or ["Cat I"]):
+            rent, licence = rate_components(settings or {}, is_org_booking, cat)
+            new_room_rent_total += rent * nights
+            new_license_fee_total += licence * nights
+
     # Calculate extra bed charge
     extra_bed_charge = request.extra_beds * 75.0
-    
+
     # Recalculate total and balance
-    new_total_amount = new_room_rent_total + booking.get("license_fee_total", 0.0)
+    new_total_amount = new_room_rent_total + new_license_fee_total
     new_balance = new_total_amount + extra_bed_charge - booking.get("advance_paid", 0.0)
 
     # Build update fields — only overwrite non-None values
@@ -1959,7 +1986,8 @@ async def check_in(request: CheckInRequest):
         "checked_in_by": request.staff_id,
         "extra_beds": request.extra_beds,
         "extra_bed_charge": extra_bed_charge,
-        "room_rent_total": new_room_rent_total,  # Update room rent based on new pricing
+        "room_rent_total": new_room_rent_total,   # rent only (licence tracked separately)
+        "license_fee_total": new_license_fee_total,
         "total_amount": new_total_amount,  # Update total amount
         "balance_amount": new_balance,  # Update balance
         "updated_at": now
@@ -2113,13 +2141,16 @@ async def check_out(request: CheckOutRequest):
             
             room_rent_recalculated += rate_per_night * charged_nights
     else:
-        # Fallback to original calculation if no mapping
+        # Fallback to original calculation if no mapping. room_rent_recalculated
+        # represents rent + licence combined, so include both stored parts
+        # (room_rent_total is rent-only since the check-in split).
+        stored_room_and_licence = booking.get("room_rent_total", 0) + booking.get("license_fee_total", 0)
         original_nights = (original_checkout_dt - check_in_dt).days
         if original_nights > 0:
-            per_night_rate = booking.get("room_rent_total", 0) / original_nights
+            per_night_rate = stored_room_and_licence / original_nights
             room_rent_recalculated = per_night_rate * charged_nights
         else:
-            room_rent_recalculated = booking.get("room_rent_total", 0)
+            room_rent_recalculated = stored_room_and_licence
     
     # Calculate extra bed charges
     extra_bed_charge_checkout = (request.extra_beds_checkout or 0) * (request.extra_bed_days or 0) * 75
@@ -4374,8 +4405,9 @@ async def get_migration_status():
 
 
 @api_router.get("/migration/download-archive")
-async def download_migration_archive():
-    """Download the defense data archive file"""
+async def download_migration_archive(current_user: dict = Depends(require_admin_role)):
+    """Download the defense data archive file (admin only — contains confidential
+    service data that policy forbids exposing; must never be world-readable)."""
     try:
         # Get migration status to find archive file
         status = await db.migration_status.find_one(
@@ -4412,8 +4444,8 @@ async def download_migration_archive():
 
 
 @api_router.delete("/migration/delete-archive")
-async def delete_migration_archive():
-    """Delete the migration archive file (after verification)"""
+async def delete_migration_archive(current_user: dict = Depends(require_admin_role)):
+    """Delete the migration archive file (admin only — after verification)."""
     try:
         # Get migration status to find archive file
         status = await db.migration_status.find_one(

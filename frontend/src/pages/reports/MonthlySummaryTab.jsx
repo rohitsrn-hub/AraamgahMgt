@@ -106,10 +106,10 @@ export default function MonthlySummaryTab({ settings }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {(report.command_breakdown || []).map((c, i) => (
-                      <tr key={c.command}>
+                    {(report.color_breakdown || []).map((c, i) => (
+                      <tr key={c.color}>
                         <td>{i + 1}</td>
-                        <td className="font-medium">{c.command}</td>
+                        <td className="font-medium">{c.color}</td>
                         <td className="text-center">{c.guests}</td>
                         <td className="text-center">{c.days}</td>
                       </tr>

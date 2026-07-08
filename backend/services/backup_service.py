@@ -151,11 +151,20 @@ async def perform_incremental_backup(db) -> Dict:
             try:
                 collection = db[collection_name]
                 
-                # Query for records created or updated after last backup
+                # Query for records created or updated after last backup.
+                # created_at/updated_at are stored as ISO strings in most
+                # documents (serialize_doc) but as BSON dates in a few code
+                # paths. Mongo comparisons are type-bracketed — a $gt against
+                # a datetime never matches string fields and vice versa — so
+                # query BOTH representations or the incremental silently
+                # backs up nothing (which is exactly what it did until now).
+                last_backup_iso = last_backup_time.isoformat()
                 query = {
                     "$or": [
                         {"created_at": {"$gt": last_backup_time}},
-                        {"updated_at": {"$gt": last_backup_time}}
+                        {"updated_at": {"$gt": last_backup_time}},
+                        {"created_at": {"$gt": last_backup_iso}},
+                        {"updated_at": {"$gt": last_backup_iso}},
                     ]
                 }
                 

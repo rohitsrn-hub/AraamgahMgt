@@ -394,17 +394,17 @@ export function generateMonthlyReportPDF(data, settings) {
   // Command breakdown table
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
-  doc.text("COMMAND-WISE OCCUPANCY", 10, y);
+  doc.text("COLOUR-WISE OCCUPANCY", 10, y);
   y += 4;
 
-  const cmdRows = (data.command_breakdown || []).map((c, i) => [
-    i + 1, c.command, c.guests, c.days
+  const cmdRows = (data.color_breakdown || []).map((c, i) => [
+    i + 1, c.color, c.guests, c.days
   ]);
   cmdRows.push(["", "TOTAL", data.total_guests, data.total_days]);
 
   autoTable(doc, {
     startY: y,
-    head: [["No", "Command / Service", "Total Guests", "No of Days"]],
+    head: [["No", "Colour", "Total Guests", "No of Days"]],
     body: cmdRows,
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: PRIMARY_COLOR, textColor: 255 },
