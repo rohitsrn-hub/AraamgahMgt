@@ -5,6 +5,17 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-07-06 — Quality audit + fixes (branch: claude/qa-audit-fixes)
+Full codebase audit; fixed ~20 issues across 5 commits. Safety: broken daily
+backups, confidential archive now admin-only, setup-wizard re-run guarded.
+Money: check-in billing routed through the shared rate engine (was legacy
+fields + could zero the bill), monthly report colour table (was always blank),
+refund capped at advance, no duplicate refund/checkout payments. Integrity:
+availability checks added to mix-&-match bookings, date-only amendments, room
+swaps, and stay-extension confirm; IST timezone for dates and the cancellation
+slab; lowercase usernames; migration re-run made safe. NOT done: full backend
+login enforcement (#1, deferred for discussion) and a few low-severity items.
+
 ## 2026-07-06 — Standing-instructions rewrite
 Rewrote project CLAUDE.md as pure standing instructions (was a mixed session
 log), created this history file, and added a copy of the computer-level
