@@ -25,8 +25,12 @@ import {
   CalendarBlank,
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Toiletry() {
+  const { user } = useAuth();
+  const isViewer = user?.role === 'viewer';
+  const isAdmin = user?.role === 'admin';
   const [items, setItems] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -250,9 +254,11 @@ export default function Toiletry() {
           </h1>
           <p className="text-slate-500 mt-1">Manage toiletry stock and consumption</p>
         </div>
-        <Button 
+        <Button
           onClick={() => { resetItemForm(); setShowItemDialog(true); }}
           className="earms-btn-primary flex items-center gap-2"
+          disabled={isViewer}
+          title={isViewer ? "Viewers cannot add items" : undefined}
           data-testid="add-item-btn"
         >
           <Plus size={20} />
@@ -297,10 +303,12 @@ export default function Toiletry() {
               <CardContent className="py-12 text-center">
                 <Package size={48} className="mx-auto text-slate-300 mb-4" />
                 <p className="text-slate-500">No items in inventory</p>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="mt-4"
                   onClick={() => { resetItemForm(); setShowItemDialog(true); }}
+                  disabled={isViewer}
+                  title={isViewer ? "Viewers cannot add items" : undefined}
                 >
                   Add First Item
                 </Button>
@@ -340,6 +348,8 @@ export default function Toiletry() {
                         variant="outline"
                         className="flex-1 text-emerald-600 border-emerald-200 hover:bg-emerald-50"
                         onClick={() => { setSelectedItem(item); setShowStockInDialog(true); }}
+                        disabled={isViewer}
+                        title={isViewer ? "Viewers cannot record stock" : undefined}
                         data-testid={`stock-in-${item.id}`}
                       >
                         <ArrowUp size={16} className="mr-1" />
@@ -350,6 +360,8 @@ export default function Toiletry() {
                         variant="outline"
                         className="flex-1 text-blue-600 border-blue-200 hover:bg-blue-50"
                         onClick={() => { setSelectedItem(item); setShowConsumptionDialog(true); }}
+                        disabled={isViewer}
+                        title={isViewer ? "Viewers cannot record consumption" : undefined}
                         data-testid={`consume-${item.id}`}
                       >
                         <ArrowDown size={16} className="mr-1" />
@@ -362,6 +374,8 @@ export default function Toiletry() {
                         size="sm"
                         variant="ghost"
                         onClick={() => openEditDialog(item)}
+                        disabled={isViewer}
+                        title={isViewer ? "Viewers cannot edit items" : undefined}
                         data-testid={`edit-item-${item.id}`}
                       >
                         <Pencil size={16} />
@@ -371,6 +385,8 @@ export default function Toiletry() {
                         variant="ghost"
                         className="text-red-500 hover:text-red-600 hover:bg-red-50"
                         onClick={() => handleDeleteItem(item.id)}
+                        disabled={!isAdmin}
+                        title={!isAdmin ? "Only admins can delete items" : undefined}
                         data-testid={`delete-item-${item.id}`}
                       >
                         <Trash size={16} />

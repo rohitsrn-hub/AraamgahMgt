@@ -8,8 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Bed, Wrench, CheckCircle, XCircle } from "@phosphor-icons/react";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Rooms() {
+  const { user } = useAuth();
+  const isViewer = user?.role === 'viewer';
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -281,9 +284,11 @@ export default function Rooms() {
             <Button variant="outline" onClick={() => setShowStatusDialog(false)}>
               Cancel
             </Button>
-            <Button 
-              onClick={handleStatusChange} 
+            <Button
+              onClick={handleStatusChange}
               className="earms-btn-primary"
+              disabled={isViewer}
+              title={isViewer ? "Viewers cannot change room status" : undefined}
               data-testid="confirm-status-change"
             >
               Update Status

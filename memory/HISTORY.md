@@ -5,6 +5,20 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-07-06 — Server-side login enforcement (branch: claude/qa-audit-fixes)
+Closed audit item #1: the server now actually checks who's logged in on every
+one of its 79 actions (previously only the browser enforced login — anyone
+who found the backend address could act with no password). Four tiers: open
+(login/health only), any logged-in user (viewing), staff+admin (day-to-day
+actions), admin-only (settings, users, staff records, backups/restore,
+destructive deletes). Feedback submission now requires login. Fixed two
+"Extend stay" requests that were silently missing their login token. Added
+matching disabled-button+tooltip states on Rooms/Staff/Toiletry/Backup pages
+so blocked actions look disabled instead of failing with a surprise error.
+NOT yet done: confirm the Render backend has a real JWT_SECRET_KEY set
+before this can safely go live — a placeholder default would let anyone
+forge an admin session.
+
 ## 2026-07-06 — Quality audit + fixes (branch: claude/qa-audit-fixes)
 Full codebase audit; fixed ~20 issues across 5 commits. Safety: broken daily
 backups, confidential archive now admin-only, setup-wizard re-run guarded.

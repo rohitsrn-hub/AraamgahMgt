@@ -11,8 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Plus, Users, Pencil, Trash, UserCircle, Phone } from "@phosphor-icons/react";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Staff() {
+  const { user } = useAuth();
+  // Staff roster management (like User Management) is admin-only on the backend.
+  const isAdmin = user?.role === 'admin';
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
@@ -125,9 +129,11 @@ export default function Staff() {
           </h1>
           <p className="text-slate-500 mt-1">Manage staff members</p>
         </div>
-        <Button 
+        <Button
           onClick={() => { resetForm(); setShowDialog(true); }}
           className="earms-btn-primary flex items-center gap-2"
+          disabled={!isAdmin}
+          title={!isAdmin ? "Only admins can add staff" : undefined}
           data-testid="add-staff-btn"
         >
           <Plus size={20} />
@@ -157,10 +163,12 @@ export default function Staff() {
           <CardContent className="py-12 text-center">
             <Users size={48} className="mx-auto text-slate-300 mb-4" />
             <p className="text-slate-500">No staff members found</p>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="mt-4"
               onClick={() => { resetForm(); setShowDialog(true); }}
+              disabled={!isAdmin}
+              title={!isAdmin ? "Only admins can add staff" : undefined}
             >
               Add First Staff Member
             </Button>
@@ -212,6 +220,8 @@ export default function Staff() {
                       size="sm"
                       variant="ghost"
                       onClick={() => openEditDialog(staff)}
+                      disabled={!isAdmin}
+                      title={!isAdmin ? "Only admins can edit staff" : undefined}
                       data-testid={`edit-staff-${staff.id}`}
                     >
                       <Pencil size={16} />
@@ -221,6 +231,8 @@ export default function Staff() {
                       variant="ghost"
                       className="text-red-500 hover:text-red-600 hover:bg-red-50"
                       onClick={() => handleDelete(staff.id)}
+                      disabled={!isAdmin}
+                      title={!isAdmin ? "Only admins can delete staff" : undefined}
                       data-testid={`delete-staff-${staff.id}`}
                     >
                       <Trash size={16} />

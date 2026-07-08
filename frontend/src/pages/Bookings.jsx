@@ -1350,6 +1350,7 @@ export default function Bookings() {
     try {
       const res = await fetch(`${API}/bookings/${selectedBooking.id}/plan-extension?new_check_out_date=${extendNewCheckOut}`, {
         method: "POST",
+        headers: { Authorization: `Bearer ${sessionStorage.getItem('token')}` },
       });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
@@ -1375,7 +1376,10 @@ export default function Bookings() {
     try {
       const res = await fetch(`${API}/bookings/${selectedBooking.id}/confirm-extension`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionStorage.getItem('token')}`,
+        },
         body: JSON.stringify({ new_check_out_date: extendNewCheckOut, amendments: extensionPlan.proposed_amendments }),
       });
       const data = await res.json();
@@ -3813,6 +3817,8 @@ export default function Bookings() {
                         size="sm"
                         onClick={() => handleProcessRefund(refund)}
                         className="bg-emerald-500 hover:bg-emerald-600 text-white"
+                        disabled={isViewer}
+                        title={isViewer ? "Viewers cannot process refunds" : undefined}
                         data-testid={`process-refund-btn-${refund.id}`}
                       >
                         Mark Refunded

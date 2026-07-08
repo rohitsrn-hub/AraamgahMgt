@@ -22,6 +22,7 @@ import {
 } from "@phosphor-icons/react";
 import { parseISO, format } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Helper function to format UTC date to IST
 const formatIST = (utcDateString, formatStr = "dd MMM yyyy, HH:mm") => {
@@ -42,6 +43,10 @@ const formatIST = (utcDateString, formatStr = "dd MMM yyyy, HH:mm") => {
 };
 
 export default function BackupRestore() {
+  const { user } = useAuth();
+  // Restoring overwrites live data, so it's admin-only on the backend even
+  // though staff can view this page and trigger safe (additive) manual backups.
+  const isAdmin = user?.role === 'admin';
   const [status, setStatus] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -422,41 +427,47 @@ export default function BackupRestore() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid md:grid-cols-3 gap-4">
-            <Button 
+            <Button
               variant="outline"
               onClick={() => {
                 setRestoreType('last');
                 setShowRestoreDialog(true);
               }}
               className="h-16 border-green-300 text-green-700 hover:bg-green-50"
+              disabled={!isAdmin}
+              title={!isAdmin ? "Only admins can restore backups" : undefined}
             >
               <div className="flex flex-col items-center gap-1">
                 <ArrowCounterClockwise size={20} />
                 <span className="text-sm">Last Backup</span>
               </div>
             </Button>
-            
-            <Button 
+
+            <Button
               variant="outline"
               onClick={() => {
                 setRestoreType('full');
                 setShowRestoreDialog(true);
               }}
               className="h-16 border-blue-300 text-blue-700 hover:bg-blue-50"
+              disabled={!isAdmin}
+              title={!isAdmin ? "Only admins can restore backups" : undefined}
             >
               <div className="flex flex-col items-center gap-1">
                 <Database size={20} />
                 <span className="text-sm">Select Backup</span>
               </div>
             </Button>
-            
-            <Button 
+
+            <Button
               variant="outline"
               onClick={() => {
                 setRestoreType('range');
                 setShowRestoreDialog(true);
               }}
               className="h-16 border-purple-300 text-purple-700 hover:bg-purple-50"
+              disabled={!isAdmin}
+              title={!isAdmin ? "Only admins can restore backups" : undefined}
             >
               <div className="flex flex-col items-center gap-1">
                 <CalendarBlank size={20} />
@@ -499,7 +510,7 @@ export default function BackupRestore() {
                 className="w-20 mt-1"
               />
             </div>
-            <Button onClick={updateSchedule}>
+            <Button onClick={updateSchedule} disabled={!isAdmin} title={!isAdmin ? "Only admins can change the backup schedule" : undefined}>
               Update Schedule
             </Button>
           </div>

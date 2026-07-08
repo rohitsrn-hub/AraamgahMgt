@@ -1481,6 +1481,8 @@ export default function Dashboard() {
                         size="sm"
                         className="bg-emerald-500 hover:bg-emerald-600 text-white"
                         onClick={() => handleMarkRefundPaid(refund.id)}
+                        disabled={isViewer}
+                        title={isViewer ? "Viewers cannot process refunds" : undefined}
                         data-testid={`mark-refund-paid-${refund.id}`}
                       >
                         <CheckCircle size={16} className="mr-1" weight="fill" />

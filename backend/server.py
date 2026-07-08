@@ -100,6 +100,43 @@ logger = logging.getLogger(__name__)
 # ============= HELPER FUNCTIONS =============
 # Note: Helper functions moved to utils/ for better organization
 
+# Create dependency that injects db into get_current_user
+async def get_current_user_with_db(credentials = Security(security)):
+    """Wrapper to inject db into get_current_user"""
+    from utils.auth import decode_access_token
+    
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    user_id = payload.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="User account is disabled")
+    
+    return user
+
+
+async def require_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
+    """Require admin role"""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+
+async def require_staff_or_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
+    """Require staff or admin role"""
+    role = current_user.get("role")
+    if role not in ["admin", "staff"]:
+        raise HTTPException(status_code=403, detail="Staff or Admin access required")
+    return current_user
+
 # ============= ENUMS =============
 class RoomCategory(str, Enum):
     CAT_I = "Cat I"
@@ -569,7 +606,7 @@ async def root():
 # ============= APP SETTINGS =============
 
 @api_router.get("/settings")
-async def get_settings():
+async def get_settings(current_user: dict = Depends(get_current_user_with_db)):
     settings = await db.app_settings.find_one({}, {"_id": 0})
     if not settings:
         # Return default settings
@@ -578,7 +615,7 @@ async def get_settings():
     return settings
 
 @api_router.post("/settings/setup")
-async def complete_setup(request: SetupRequest):
+async def complete_setup(request: SetupRequest, current_user: dict = Depends(require_admin_role)):
     """Complete first-time setup"""
     existing = await db.app_settings.find_one({})
 
@@ -669,7 +706,7 @@ async def complete_setup(request: SetupRequest):
     return {"message": "Setup completed successfully", "settings": settings_response}
 
 @api_router.put("/settings")
-async def update_settings(request: AppSettingsUpdate):
+async def update_settings(request: AppSettingsUpdate, current_user: dict = Depends(require_admin_role)):
     """Update app settings"""
     update_data = {k: v for k, v in request.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -684,7 +721,7 @@ async def update_settings(request: AppSettingsUpdate):
     return await get_settings()
 
 @api_router.post("/settings/reset-setup")
-async def reset_setup():
+async def reset_setup(current_user: dict = Depends(require_admin_role)):
     """P3: Reset is_setup_complete flag to show setup wizard again"""
     result = await db.app_settings.update_one({}, {"$set": {"is_setup_complete": False}})
     if result.matched_count == 0:  # matched, not modified — see update_settings
@@ -693,7 +730,7 @@ async def reset_setup():
     return {"message": "Setup reset successfully. Please reload the page."}
 
 @api_router.put("/settings/categories")
-async def update_room_categories(categories: List[dict]):
+async def update_room_categories(categories: List[dict], current_user: dict = Depends(require_admin_role)):
     """P4: Update room categories configuration"""
     # Validate categories
     for cat in categories:
@@ -716,42 +753,6 @@ async def update_room_categories(categories: List[dict]):
 
 # ============= AUTHENTICATION =============
 
-# Create dependency that injects db into get_current_user
-async def get_current_user_with_db(credentials = Security(security)):
-    """Wrapper to inject db into get_current_user"""
-    from utils.auth import decode_access_token
-    
-    token = credentials.credentials
-    payload = decode_access_token(token)
-    
-    user_id = payload.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-    
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    if not user.get("is_active", True):
-        raise HTTPException(status_code=403, detail="User account is disabled")
-    
-    return user
-
-
-async def require_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
-    """Require admin role"""
-    if current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return current_user
-
-
-async def require_staff_or_admin_role(current_user: dict = Depends(get_current_user_with_db)) -> dict:
-    """Require staff or admin role"""
-    role = current_user.get("role")
-    if role not in ["admin", "staff"]:
-        raise HTTPException(status_code=403, detail="Staff or Admin access required")
-    return current_user
 
 
 @api_router.post("/auth/login", response_model=LoginResponse)
@@ -1042,7 +1043,7 @@ async def reset_user_password(
 # ============= ROOMS =============
 
 @api_router.get("/rooms", response_model=List[dict])
-async def get_rooms(category: Optional[RoomCategory] = None, status: Optional[RoomStatus] = None):
+async def get_rooms(category: Optional[RoomCategory] = None, status: Optional[RoomStatus] = None, current_user: dict = Depends(get_current_user_with_db)):
     query = {}
     if category:
         query["category"] = category.value
@@ -1056,7 +1057,8 @@ async def get_rooms(category: Optional[RoomCategory] = None, status: Optional[Ro
 async def get_available_rooms(
     check_in: str = Query(..., description="Check-in date (YYYY-MM-DD)"),
     check_out: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
-    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check")
+    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check"),
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """Get available rooms for given date range, optionally excluding a specific booking
     
@@ -1112,14 +1114,14 @@ async def get_available_rooms(
     return available_rooms
 
 @api_router.get("/rooms/{room_id}")
-async def get_room(room_id: str):
+async def get_room(room_id: str, current_user: dict = Depends(get_current_user_with_db)):
     room = await db.rooms.find_one({"id": room_id}, {"_id": 0})
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
     return room
 
 @api_router.post("/rooms")
-async def create_room(room: RoomCreate):
+async def create_room(room: RoomCreate, current_user: dict = Depends(require_admin_role)):
     room_obj = Room(**room.model_dump())
     doc = serialize_doc(room_obj.model_dump())
     await db.rooms.insert_one(doc)
@@ -1128,7 +1130,7 @@ async def create_room(room: RoomCreate):
     return created_room
 
 @api_router.put("/rooms/{room_id}")
-async def update_room(room_id: str, update: RoomUpdate):
+async def update_room(room_id: str, update: RoomUpdate, current_user: dict = Depends(require_staff_or_admin_role)):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
@@ -1140,7 +1142,7 @@ async def update_room(room_id: str, update: RoomUpdate):
     return await get_room(room_id)
 
 @api_router.delete("/rooms/{room_id}")
-async def delete_room(room_id: str):
+async def delete_room(room_id: str, current_user: dict = Depends(require_admin_role)):
     result = await db.rooms.delete_one({"id": room_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -1151,7 +1153,8 @@ async def find_optimal_room_combination(
     check_in: str = Query(..., description="Check-in date (YYYY-MM-DD)"),
     check_out: str = Query(..., description="Check-out date (YYYY-MM-DD)"),
     num_rooms: int = Query(..., ge=1, description="Number of rooms needed per night"),
-    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check")
+    exclude_booking_id: Optional[str] = Query(None, description="Booking ID to exclude from conflict check"),
+    current_user: dict = Depends(require_staff_or_admin_role)
 ):
     """
     Find optimal room combination for date range when single rooms aren't available for entire duration.
@@ -1358,7 +1361,7 @@ async def find_optimal_room_combination(
 # ============= STAY EXTENSION =============
 
 @api_router.post("/bookings/{booking_id}/plan-extension")
-async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., description="New checkout date YYYY-MM-DD")):
+async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., description="New checkout date YYYY-MM-DD"), current_user: dict = Depends(require_staff_or_admin_role)):
     from datetime import date as date_type, timedelta
 
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
@@ -1585,7 +1588,7 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
 
 
 @api_router.post("/bookings/{booking_id}/confirm-extension")
-async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest):
+async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     from datetime import datetime, timezone, timedelta, date as date_type
 
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
@@ -1737,7 +1740,8 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest):
 async def get_bookings(
     status: Optional[BookingStatus] = None,
     from_date: Optional[str] = None,
-    to_date: Optional[str] = None
+    to_date: Optional[str] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     query = {}
     if status:
@@ -1754,7 +1758,7 @@ async def get_bookings(
     return bookings
 
 @api_router.get("/bookings/{booking_id}")
-async def get_booking(booking_id: str):
+async def get_booking(booking_id: str, current_user: dict = Depends(get_current_user_with_db)):
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -1842,7 +1846,7 @@ async def process_room_segments(room_segments: List[dict], check_in_date: str, c
 
 
 @api_router.post("/bookings")
-async def create_booking(booking: BookingCreate):
+async def create_booking(booking: BookingCreate, current_user: dict = Depends(require_staff_or_admin_role)):
     # Normalize uppercase fields FIRST (army_number, bank_ifsc)
     booking_data = booking.model_dump()
     booking_data = normalize_uppercase_fields(booking_data)
@@ -1997,7 +2001,7 @@ async def create_booking(booking: BookingCreate):
     return created_booking
 
 @api_router.post("/bookings/check-in")
-async def check_in(request: CheckInRequest):
+async def check_in(request: CheckInRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     # Normalize uppercase fields FIRST (dependent_id in family members, bank_ifsc)
     request_data = request.model_dump()
     request_data = normalize_uppercase_fields(request_data)
@@ -2143,7 +2147,7 @@ async def check_in(request: CheckInRequest):
     return {"message": "Check-in successful", "booking_id": request.booking_id, "booking": updated_booking}
 
 @api_router.put("/bookings/{booking_id}/update-rooms")
-async def update_booking_rooms(booking_id: str, request: dict):
+async def update_booking_rooms(booking_id: str, request: dict, current_user: dict = Depends(require_staff_or_admin_role)):
     """P2: Update room assignments for a confirmed booking before check-in"""
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     if not booking:
@@ -2204,7 +2208,7 @@ async def update_booking_rooms(booking_id: str, request: dict):
     return {"message": "Room assignments updated", "booking": updated_booking}
 
 @api_router.post("/bookings/check-out")
-async def check_out(request: CheckOutRequest):
+async def check_out(request: CheckOutRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -2360,7 +2364,7 @@ async def check_out(request: CheckOutRequest):
     return {"message": "Check-out successful", "booking_id": request.booking_id, "booking": updated_booking}
 
 @api_router.get("/bookings/{booking_id}/calculate-refund")
-async def calculate_refund(booking_id: str):
+async def calculate_refund(booking_id: str, current_user: dict = Depends(get_current_user_with_db)):
     """Calculate refund amount based on cancellation policy
     
     Policy (flexible - supports both hours_before and days_before):
@@ -2412,7 +2416,7 @@ async def calculate_refund(booking_id: str):
     }
 
 @api_router.post("/bookings/cancel")
-async def cancel_booking(request: CancelBookingRequest):
+async def cancel_booking(request: CancelBookingRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -2467,7 +2471,7 @@ async def cancel_booking(request: CancelBookingRequest):
     return {"message": "Booking cancelled successfully", "booking_id": request.booking_id}
 
 @api_router.delete("/bookings/{booking_id}")
-async def delete_booking(booking_id: str):
+async def delete_booking(booking_id: str, current_user: dict = Depends(require_admin_role)):
     """
     Permanently delete a booking (NOT cancellation - complete removal)
     
@@ -2529,7 +2533,7 @@ async def delete_booking(booking_id: str):
     }
 
 @api_router.post("/bookings/amend")
-async def amend_booking(request: AmendBookingRequest):
+async def amend_booking(request: AmendBookingRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     """
     Amend a confirmed booking
     
@@ -2794,7 +2798,8 @@ async def amend_booking(request: AmendBookingRequest):
 async def get_guest_history(
     phone_number: Optional[str] = Query(None, description="Guest phone number"),
     aadhaar_number: Optional[str] = Query(None, description="Guest Aadhaar number"),
-    guest_name: Optional[str] = Query(None, description="Guest name (full or partial)")
+    guest_name: Optional[str] = Query(None, description="Guest name (full or partial)"),
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """
     Get booking history for a guest by phone number, Aadhaar, or name.
@@ -2914,7 +2919,7 @@ async def get_guest_history(
 # ============= STAFF =============
 
 @api_router.get("/staff", response_model=List[dict])
-async def get_staff(staff_type: Optional[StaffType] = None, active_only: bool = True):
+async def get_staff(staff_type: Optional[StaffType] = None, active_only: bool = True, current_user: dict = Depends(get_current_user_with_db)):
     query = {}
     if staff_type:
         query["staff_type"] = staff_type.value
@@ -2925,14 +2930,14 @@ async def get_staff(staff_type: Optional[StaffType] = None, active_only: bool = 
     return staff
 
 @api_router.get("/staff/{staff_id}")
-async def get_staff_member(staff_id: str):
+async def get_staff_member(staff_id: str, current_user: dict = Depends(get_current_user_with_db)):
     staff = await db.staff.find_one({"id": staff_id}, {"_id": 0})
     if not staff:
         raise HTTPException(status_code=404, detail="Staff not found")
     return staff
 
 @api_router.post("/staff")
-async def create_staff(staff: StaffCreate):
+async def create_staff(staff: StaffCreate, current_user: dict = Depends(require_admin_role)):
     staff_obj = Staff(**staff.model_dump())
     doc = serialize_doc(staff_obj.model_dump())
     await db.staff.insert_one(doc)
@@ -2941,7 +2946,7 @@ async def create_staff(staff: StaffCreate):
     return created_staff
 
 @api_router.put("/staff/{staff_id}")
-async def update_staff(staff_id: str, update: StaffUpdate):
+async def update_staff(staff_id: str, update: StaffUpdate, current_user: dict = Depends(require_admin_role)):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
@@ -2953,7 +2958,7 @@ async def update_staff(staff_id: str, update: StaffUpdate):
     return await get_staff_member(staff_id)
 
 @api_router.delete("/staff/{staff_id}")
-async def delete_staff(staff_id: str):
+async def delete_staff(staff_id: str, current_user: dict = Depends(require_admin_role)):
     result = await db.staff.delete_one({"id": staff_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Staff not found")
@@ -2962,7 +2967,7 @@ async def delete_staff(staff_id: str):
 # ============= REFUNDS =============
 
 @api_router.get("/refunds", response_model=List[dict])
-async def get_refunds(status: Optional[RefundStatus] = None):
+async def get_refunds(status: Optional[RefundStatus] = None, current_user: dict = Depends(get_current_user_with_db)):
     query = {}
     if status:
         query["status"] = status.value
@@ -2971,7 +2976,7 @@ async def get_refunds(status: Optional[RefundStatus] = None):
     return refunds
 
 @api_router.put("/refunds/{refund_id}")
-async def update_refund(refund_id: str, update: RefundUpdate):
+async def update_refund(refund_id: str, update: RefundUpdate, current_user: dict = Depends(require_staff_or_admin_role)):
     now = datetime.now(timezone.utc).isoformat()
     
     update_data = {"status": update.status.value}
@@ -3014,12 +3019,12 @@ async def update_refund(refund_id: str, update: RefundUpdate):
 # ============= TOILETRY =============
 
 @api_router.get("/toiletry/items", response_model=List[dict])
-async def get_toiletry_items():
+async def get_toiletry_items(current_user: dict = Depends(get_current_user_with_db)):
     items = await db.toiletry_inventory.find({}, {"_id": 0}).to_list(100)
     return items
 
 @api_router.post("/toiletry/items")
-async def create_toiletry_item(item: ToiletryItemCreate):
+async def create_toiletry_item(item: ToiletryItemCreate, current_user: dict = Depends(require_staff_or_admin_role)):
     item_obj = ToiletryItem(**item.model_dump())
     doc = serialize_doc(item_obj.model_dump())
     await db.toiletry_inventory.insert_one(doc)
@@ -3028,7 +3033,7 @@ async def create_toiletry_item(item: ToiletryItemCreate):
     return created_item
 
 @api_router.put("/toiletry/items/{item_id}")
-async def update_toiletry_item(item_id: str, update: ToiletryItemUpdate):
+async def update_toiletry_item(item_id: str, update: ToiletryItemUpdate, current_user: dict = Depends(require_staff_or_admin_role)):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
@@ -3039,14 +3044,14 @@ async def update_toiletry_item(item_id: str, update: ToiletryItemUpdate):
     return await db.toiletry_inventory.find_one({"id": item_id}, {"_id": 0})
 
 @api_router.delete("/toiletry/items/{item_id}")
-async def delete_toiletry_item(item_id: str):
+async def delete_toiletry_item(item_id: str, current_user: dict = Depends(require_admin_role)):
     result = await db.toiletry_inventory.delete_one({"id": item_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item not found")
     return {"message": "Item deleted successfully"}
 
 @api_router.post("/toiletry/stock-in")
-async def stock_in(request: StockInRequest):
+async def stock_in(request: StockInRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     item = await db.toiletry_inventory.find_one({"id": request.item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -3070,7 +3075,7 @@ async def stock_in(request: StockInRequest):
     return {"message": "Stock added successfully", "new_quantity": new_quantity}
 
 @api_router.post("/toiletry/consumption")
-async def record_consumption(request: ConsumptionRequest):
+async def record_consumption(request: ConsumptionRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     item = await db.toiletry_inventory.find_one({"id": request.item_id}, {"_id": 0})
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -3101,7 +3106,8 @@ async def record_consumption(request: ConsumptionRequest):
 @api_router.get("/toiletry/transactions")
 async def get_toiletry_transactions(
     from_date: Optional[str] = None,
-    to_date: Optional[str] = None
+    to_date: Optional[str] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     query = {}
     if from_date or to_date:
@@ -3117,7 +3123,7 @@ async def get_toiletry_transactions(
 # ============= DASHBOARD =============
 
 @api_router.post("/admin/sync-room-status")
-async def sync_room_status():
+async def sync_room_status(current_user: dict = Depends(require_admin_role)):
     """
     Admin utility: Sync room status based on checked-in bookings
     
@@ -3167,7 +3173,7 @@ async def sync_room_status():
     }
 
 @api_router.get("/dashboard/occupancy")
-async def get_occupancy():
+async def get_occupancy(current_user: dict = Depends(get_current_user_with_db)):
     """
     Get real-time occupancy data
     
@@ -3241,7 +3247,7 @@ async def get_occupancy():
     }
 
 @api_router.get("/dashboard/bookings")
-async def get_dashboard_bookings():
+async def get_dashboard_bookings(current_user: dict = Depends(get_current_user_with_db)):
     """Get today's and upcoming bookings"""
     today = ist_today_str()
     
@@ -3269,7 +3275,8 @@ async def get_analytics(
     month: Optional[int] = None,
     year: Optional[int] = None,
     from_date: Optional[str] = None,
-    to_date: Optional[str] = None
+    to_date: Optional[str] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """Get analytics for specified period"""
     now = datetime.now(timezone.utc)
@@ -3310,7 +3317,8 @@ async def get_analytics(
 @api_router.get("/dashboard/funds")
 async def get_fund_dashboard(
     month: Optional[int] = None,
-    year: Optional[int] = None
+    year: Optional[int] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """Get fund generation dashboard"""
     now = datetime.now(timezone.utc)
@@ -3381,7 +3389,8 @@ async def get_fund_dashboard(
 async def check_room_availability(
     check_in_date: str,
     check_out_date: str,
-    category: Optional[RoomCategory] = None
+    category: Optional[RoomCategory] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """
     Check available rooms for given dates
@@ -3427,7 +3436,7 @@ async def check_room_availability(
     }
 
 @api_router.get("/dashboard/calendar")
-async def get_calendar_data(month: int, year: int):
+async def get_calendar_data(month: int, year: int, current_user: dict = Depends(get_current_user_with_db)):
     """Get calendar/planner data for a given month showing room bookings per day
     
     Booking Time Logic:
@@ -3541,7 +3550,7 @@ async def get_calendar_data(month: int, year: int):
 # ============= GUESTS =============
 
 @api_router.get("/guests", response_model=List[dict])
-async def get_guests(search: Optional[str] = None):
+async def get_guests(search: Optional[str] = None, current_user: dict = Depends(get_current_user_with_db)):
     query = {}
     if search:
         safe = re.escape(search)  # treat input as a literal, not a regex (ReDoS / match-all)
@@ -3554,7 +3563,7 @@ async def get_guests(search: Optional[str] = None):
     return guests
 
 @api_router.get("/guests/{guest_id}")
-async def get_guest(guest_id: str):
+async def get_guest(guest_id: str, current_user: dict = Depends(get_current_user_with_db)):
     guest = await db.guests.find_one({"id": guest_id}, {"_id": 0})
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
@@ -3577,7 +3586,7 @@ class FeedbackCreate(BaseModel):
     would_recommend: bool = True
 
 @api_router.post("/feedback")
-async def create_feedback(fb: FeedbackCreate):
+async def create_feedback(fb: FeedbackCreate, current_user: dict = Depends(require_staff_or_admin_role)):
     # Validate ratings
     for field in ["cleanliness", "room_comfort", "basic_amenities", "check_in_procedure",
                   "check_out_procedure", "overall_stay", "staff_behaviour"]:
@@ -3624,7 +3633,7 @@ async def create_feedback(fb: FeedbackCreate):
     return {"message": "Feedback submitted successfully", "feedback_id": feedback_doc["id"]}
 
 @api_router.get("/feedback")
-async def get_feedbacks(booking_id: Optional[str] = None):
+async def get_feedbacks(booking_id: Optional[str] = None, current_user: dict = Depends(get_current_user_with_db)):
     query = {}
     if booking_id:
         query["booking_id"] = booking_id
@@ -3632,7 +3641,7 @@ async def get_feedbacks(booking_id: Optional[str] = None):
     return feedbacks
 
 @api_router.get("/feedback/analysis")
-async def get_feedback_analysis():
+async def get_feedback_analysis(current_user: dict = Depends(get_current_user_with_db)):
     feedbacks = await db.feedbacks.find({}, {"_id": 0}).to_list(1000)
     if not feedbacks:
         return {
@@ -3674,7 +3683,7 @@ async def get_feedback_analysis():
 from datetime import date as date_type
 
 @api_router.get("/reports/monthly")
-async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000)):
+async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000), current_user: dict = Depends(get_current_user_with_db)):
     import calendar as cal_mod
     days_in_month = cal_mod.monthrange(year, month)[1]
     month_start_str = f"{year}-{month:02d}-01"
@@ -3813,7 +3822,8 @@ async def get_room_occupancy_report(
     year: Optional[int] = None,
     quarter: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """Get room occupancy report with flexible date filters"""
     import calendar as cal_mod
@@ -3979,7 +3989,8 @@ async def get_room_allotment_report(
     year: Optional[int] = None,
     quarter: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """Get room allotment report showing all bookings with room assignments"""
     import calendar as cal_mod
@@ -4113,7 +4124,8 @@ async def get_guest_details_report(
     year: Optional[int] = None,
     quarter: Optional[int] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """Get comprehensive guest details report - includes ALL party members"""
     import calendar as cal_mod
@@ -4236,7 +4248,7 @@ async def get_guest_details_report(
     }
 
 @api_router.get("/reports/reconcile")
-async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000)):
+async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000), current_user: dict = Depends(get_current_user_with_db)):
     """Cross-check that all four reports agree for a month.
 
     Re-derives the headline numbers of the Room Allotment, Guest Details,
@@ -4308,7 +4320,8 @@ async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Qu
 
 @api_router.get("/reports/manual-occupancy-excel")
 async def download_manual_occupancy_excel(
-    month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000)
+    month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000),
+    current_user: dict = Depends(get_current_user_with_db)
 ):
     """Excel export matching the guesthouse's manual 'Summary of Room Occupancy'
     paper ledger format for the given month (one row per room per booking).
@@ -4397,7 +4410,7 @@ async def shutdown_db_client():
 # ============= BACKUP & RESTORE APIs =============
 
 @api_router.post("/backups/manual/full")
-async def trigger_full_backup():
+async def trigger_full_backup(current_user: dict = Depends(require_staff_or_admin_role)):
     """Manually trigger a full backup"""
     try:
         metadata = await backup_service.perform_full_backup(db)
@@ -4412,7 +4425,7 @@ async def trigger_full_backup():
 
 
 @api_router.post("/backups/manual/incremental")
-async def trigger_incremental_backup():
+async def trigger_incremental_backup(current_user: dict = Depends(require_staff_or_admin_role)):
     """Manually trigger an incremental backup"""
     try:
         metadata = await backup_service.perform_incremental_backup(db)
@@ -4427,7 +4440,7 @@ async def trigger_incremental_backup():
 
 
 @api_router.get("/backups/status")
-async def get_backup_status():
+async def get_backup_status(current_user: dict = Depends(require_staff_or_admin_role)):
     """Get current backup status and statistics"""
     try:
         # Get last backup
@@ -4462,7 +4475,7 @@ async def get_backup_status():
 
 
 @api_router.get("/backups/history")
-async def get_backup_history(limit: int = Query(50, ge=1, le=100)):
+async def get_backup_history(limit: int = Query(50, ge=1, le=100), current_user: dict = Depends(require_staff_or_admin_role)):
     """Get backup history"""
     try:
         history = await backup_service.get_backup_history(db, limit=limit)
@@ -4476,7 +4489,7 @@ async def get_backup_history(limit: int = Query(50, ge=1, le=100)):
 
 
 @api_router.post("/backups/restore/full/{backup_id}")
-async def restore_full_backup(backup_id: str):
+async def restore_full_backup(backup_id: str, current_user: dict = Depends(require_admin_role)):
     """Restore a specific backup (MERGE strategy)"""
     try:
         result = await restore_service.restore_full(backup_id, db)
@@ -4491,7 +4504,7 @@ async def restore_full_backup(backup_id: str):
 
 
 @api_router.post("/backups/restore/last")
-async def restore_last_backup():
+async def restore_last_backup(current_user: dict = Depends(require_admin_role)):
     """Restore the most recent successful backup"""
     try:
         result = await restore_service.restore_last_backup(db)
@@ -4510,7 +4523,7 @@ class DateRangeRestore(BaseModel):
     end_date: str
 
 @api_router.post("/backups/restore/range")
-async def restore_date_range(request: DateRangeRestore):
+async def restore_date_range(request: DateRangeRestore, current_user: dict = Depends(require_admin_role)):
     """Restore all backups within a date range"""
     try:
         start = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
@@ -4532,7 +4545,7 @@ class ScheduleUpdate(BaseModel):
     minute: int = Field(..., ge=0, le=59)
 
 @api_router.put("/backups/schedule")
-async def update_backup_schedule(request: ScheduleUpdate):
+async def update_backup_schedule(request: ScheduleUpdate, current_user: dict = Depends(require_admin_role)):
     """Update scheduled backup time"""
     try:
         result = await scheduler_service.update_backup_schedule(
@@ -4547,7 +4560,7 @@ async def update_backup_schedule(request: ScheduleUpdate):
 
 
 @api_router.get("/backups/restore-history")
-async def get_restore_history(limit: int = Query(20, ge=1, le=50)):
+async def get_restore_history(limit: int = Query(20, ge=1, le=50), current_user: dict = Depends(require_staff_or_admin_role)):
     """Get restore operation history"""
     try:
         history = await restore_service.get_restore_history(db, limit=limit)
@@ -4562,7 +4575,7 @@ async def get_restore_history(limit: int = Query(20, ge=1, le=50)):
 # ============= MIGRATION ENDPOINTS =============
 
 @api_router.get("/migration/status")
-async def get_migration_status():
+async def get_migration_status(current_user: dict = Depends(require_admin_role)):
     """Get status of one-time data sanitization migration"""
     try:
         status = await db.migration_status.find_one(
