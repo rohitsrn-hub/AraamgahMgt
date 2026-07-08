@@ -39,6 +39,22 @@ from utils.report_calc import (
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
 
+# The guesthouse operates in IST; the backend may run in UTC (e.g. on Render).
+# A calendar date meaningful to staff ("today", the default checkout date) must
+# be computed in IST — a UTC date is a day behind between 00:00 and 05:30 IST.
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def ist_today_str() -> str:
+    return datetime.now(IST).strftime("%Y-%m-%d")
+
+def checkin_moment(check_in_str: str) -> datetime:
+    """The actual check-in instant for a booking: 13:00 IST on the check-in
+    date (standard guesthouse check-in time). Used for cancellation-slab timing
+    so the hours-before-check-in count matches reality — parsing the date as
+    00:00 UTC put it 7.5h early and could drop guests into a worse refund tier."""
+    d = date_type.fromisoformat(str(check_in_str).split("T")[0])
+    return datetime(d.year, d.month, d.day, 13, 0, tzinfo=IST)
+
 # Import auth utilities
 from utils.auth import (
     hash_password,
@@ -2198,7 +2214,7 @@ async def check_out(request: CheckOutRequest):
     original_check_in = booking["check_in_date"]
     original_check_out = booking["check_out_date"]
     planned_early_checkout = booking.get("planned_early_checkout_date")  # Informed at check-in
-    actual_checkout_date = request.actual_checkout_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    actual_checkout_date = request.actual_checkout_date or ist_today_str()
     
     # Parse dates
     check_in_dt = datetime.fromisoformat(original_check_in.replace('Z', '+00:00')).date() if isinstance(original_check_in, str) else original_check_in
@@ -2356,13 +2372,10 @@ async def calculate_refund(booking_id: str):
         {"hours_before": 0, "charge_percent": 100}
     ])
     
-    # Calculate hours until check-in
-    check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
-    if isinstance(check_in_date, datetime) and check_in_date.tzinfo is None:
-        check_in_date = check_in_date.replace(tzinfo=timezone.utc)
-    
-    now = datetime.now(timezone.utc)
-    hours_until_checkin = (check_in_date - now).total_seconds() / 3600
+    # Calculate hours until check-in (13:00 IST on the check-in date)
+    check_in_moment = checkin_moment(booking["check_in_date"])
+    now = datetime.now(IST)
+    hours_until_checkin = (check_in_moment - now).total_seconds() / 3600
     
     # Find applicable charge percent
     # Support both hours_before and days_before formats
@@ -3223,7 +3236,7 @@ async def get_occupancy():
 @api_router.get("/dashboard/bookings")
 async def get_dashboard_bookings():
     """Get today's and upcoming bookings"""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = ist_today_str()
     
     # Today's bookings
     today_bookings = await db.bookings.find({
@@ -3804,7 +3817,7 @@ async def get_room_occupancy_report(
     # Determine date range based on filter type
     if filter_type == "daily":
         if not start_date:
-            start_date = date_type.today().isoformat()
+            start_date = ist_today_str()
         end_date = start_date
         period_label = f"Daily Report - {start_date}"
     elif filter_type == "monthly":
@@ -3970,7 +3983,7 @@ async def get_room_allotment_report(
     # Determine date range based on filter type (same logic as occupancy)
     if filter_type == "daily":
         if not start_date:
-            start_date = date_type.today().isoformat()
+            start_date = ist_today_str()
         end_date = start_date
         period_label = f"Daily Report - {start_date}"
     elif filter_type == "monthly":
@@ -4101,7 +4114,7 @@ async def get_guest_details_report(
     # Determine date range based on filter type
     if filter_type == "daily":
         if not start_date:
-            start_date = date_type.today().isoformat()
+            start_date = ist_today_str()
         end_date = start_date
         period_label = f"Daily Report - {start_date}"
     elif filter_type == "monthly":
