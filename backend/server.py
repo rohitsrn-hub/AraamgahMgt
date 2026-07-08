@@ -1416,9 +1416,15 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
     }
 
     # PHASE 1 — current rooms free during extension?
+    # Match both room_ids (current) and the legacy singular room_id, or a legacy
+    # booking holding one of these rooms would be missed and the extension would
+    # wrongly believe the room is free.
     conflicts = await db.bookings.find({
         "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
-        "room_ids": {"$in": current_room_ids},
+        "$or": [
+            {"room_ids": {"$in": current_room_ids}},
+            {"room_id": {"$in": current_room_ids}},
+        ],
         "check_in_date": {"$lt": extension_end},
         "check_out_date": {"$gt": extension_start},
         "id": {"$ne": booking_id},
@@ -1448,7 +1454,8 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
         blocking = await db.bookings.find(blocking_query, {"_id": 0}).to_list(200)
         blocked_by_others: set = set()
         for bb in blocking:
-            blocked_by_others.update(bb.get("room_ids", []))
+            rids = bb.get("room_ids") or ([bb["room_id"]] if bb.get("room_id") else [])
+            blocked_by_others.update(rids)
 
         candidates_per_booking[cb["id"]] = [
             r for r in all_rooms_p2
