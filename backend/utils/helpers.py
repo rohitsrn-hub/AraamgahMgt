@@ -7,27 +7,58 @@ from fastapi import HTTPException
 
 
 async def generate_booking_number(db):
-    """Generate sequential booking number starting from BK0001"""
-    # Get the latest booking number
-    latest_booking = await db.bookings.find_one(
-        {},
-        {"_id": 0, "booking_number": 1},
-        sort=[("created_at", -1)]
+    """Atomically allocate the next sequential booking number (BK0001, BK0002, ...).
+
+    Uses a dedicated counters collection with MongoDB's atomic $inc, not the
+    previous read-latest-then-increment approach: two concurrent bookings
+    could both read the same "latest" booking_number and both compute the
+    same next value, producing two bookings with an identical booking_number
+    (used as the key for refunds, receipts, and the manual ledger). $inc on a
+    single document is atomic in MongoDB, so two concurrent calls can never
+    receive the same number.
+
+    No schema migration or unique index required — this only adds one
+    small counters document the first time it's called, seeded from the
+    current highest booking number so numbering continues where it left off.
+    """
+    # Imported lazily so utils/helpers.py (and everything importing utils/)
+    # doesn't need pymongo just to be imported — this module is used by pure
+    # unit tests (test_report_calc.py etc.) that run with no DB and no
+    # heavy dependencies.
+    from pymongo import ReturnDocument
+
+    counter = await db.counters.find_one({"_id": "booking_number"})
+    if not counter:
+        # One-time bootstrap: seed the counter from the current max existing
+        # booking number so this doesn't restart at BK0001 on an existing DB.
+        latest_booking = await db.bookings.find_one(
+            {}, {"_id": 0, "booking_number": 1}, sort=[("created_at", -1)]
+        )
+        start = 0
+        if latest_booking and latest_booking.get("booking_number"):
+            try:
+                start = int(latest_booking["booking_number"].replace("BK", ""))
+            except ValueError:
+                start = await db.bookings.count_documents({})
+        else:
+            start = await db.bookings.count_documents({})
+        # $setOnInsert + upsert is itself atomic: if two requests race here,
+        # only the first actually creates the document — the second's upsert
+        # matches the just-created doc and does nothing. Either way, every
+        # subsequent allocation below is a single atomic increment.
+        await db.counters.update_one(
+            {"_id": "booking_number"},
+            {"$setOnInsert": {"seq": start}},
+            upsert=True,
+        )
+
+    result = await db.counters.find_one_and_update(
+        {"_id": "booking_number"},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
     )
-    
-    if not latest_booking or not latest_booking.get("booking_number"):
-        return "BK0001"
-    
-    try:
-        # Extract the number from the booking number (e.g., BK0001 -> 1)
-        current_number = int(latest_booking["booking_number"].replace("BK", ""))
-        next_number = current_number + 1
-        # Format with leading zeros (e.g., 1 -> BK0001)
-        return f"BK{next_number:04d}"
-    except (ValueError, KeyError):
-        # Fallback to counting all bookings if format is unexpected
-        count = await db.bookings.count_documents({})
-        return f"BK{count + 1:04d}"
+    return f"BK{result['seq']:04d}"
 
 
 def serialize_datetime(obj):
