@@ -15,9 +15,9 @@ destructive deletes). Feedback submission now requires login. Fixed two
 "Extend stay" requests that were silently missing their login token. Added
 matching disabled-button+tooltip states on Rooms/Staff/Toiletry/Backup pages
 so blocked actions look disabled instead of failing with a surprise error.
-NOT yet done: confirm the Render backend has a real JWT_SECRET_KEY set
-before this can safely go live — a placeholder default would let anyone
-forge an admin session.
+Owner confirmed Render's JWT_SECRET_KEY is set to a real value (2026-07-06) —
+the one blocking safety gate is clear. Ready for owner to test all three
+roles on the preview site and merge when satisfied.
 
 ## 2026-07-06 — Quality audit + fixes (branch: claude/qa-audit-fixes)
 Full codebase audit; fixed ~20 issues across 5 commits. Safety: broken daily
