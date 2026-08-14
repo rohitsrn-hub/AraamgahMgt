@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import RateSchedule from "@/components/RateSchedule";
 import { toast } from "sonner";
 import { 
   Gear, 
@@ -422,6 +423,9 @@ export default function Settings({ settings, onUpdate }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Rate Schedule (date-versioned future rate changes) */}
+      <RateSchedule />
 
       {/* Colors Management */}
       <Card className="earms-card" data-testid="colors-section">
