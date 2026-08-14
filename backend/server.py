@@ -36,6 +36,7 @@ from utils.report_calc import (
     booking_financials,
     rate_components,
     effective_rate_settings,
+    RATE_FIELDS,
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
 
@@ -245,6 +246,16 @@ class AppSettingsUpdate(BaseModel):
     default_advance_amount: Optional[float] = None
     colors: Optional[List[str]] = None
     cancellation_policy: Optional[List[dict]] = None
+
+class RateScheduleEntry(BaseModel):
+    effective_date: str  # YYYY-MM-DD — the check-in date from which this rate applies
+    cat_i_room_rent: Optional[float] = None
+    cat_i_license_fee: Optional[float] = None
+    cat_ii_room_rent: Optional[float] = None
+    cat_ii_license_fee: Optional[float] = None
+    non_org_room_rent: Optional[float] = None
+    non_org_license_fee: Optional[float] = None
+    note: Optional[str] = None
 
 class SetupRequest(BaseModel):
     fmn_sign_1_url: Optional[str] = None
@@ -750,6 +761,91 @@ async def update_room_categories(categories: List[dict], current_user: dict = De
         raise HTTPException(status_code=404, detail="Settings not found")
 
     return {"message": "Room categories updated successfully", "categories": categories}
+
+# ============= RATE SCHEDULE (date-versioned rate changes) =============
+# A booking bills entirely at whichever rate was in effect on its own
+# check-in date (see utils/report_calc.effective_rate_settings) — so a
+# future rate change can be entered here today without touching any
+# existing or currently-active booking's price. Only rooms/utils/
+# report_calc.rate_components() may read these fields for money; nothing
+# here computes a rupee amount itself.
+
+@api_router.get("/settings/rate-schedule")
+async def get_rate_schedule(current_user: dict = Depends(require_admin_role)):
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    history = sorted(settings.get("rate_history") or [], key=lambda h: h.get("effective_date", ""))
+    base_rates = {k: settings.get(k) for k in RATE_FIELDS}
+    return {
+        "current_base_rates": base_rates,
+        "today_effective_rates": effective_rate_settings(settings, ist_today_str()),
+        "scheduled_changes": history,
+    }
+
+@api_router.post("/settings/rate-schedule")
+async def add_rate_schedule_entry(entry: RateScheduleEntry, current_user: dict = Depends(require_admin_role)):
+    try:
+        effective = date_type.fromisoformat(entry.effective_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="effective_date must be YYYY-MM-DD")
+
+    # No backdating: every report and every booking's price is recomputed
+    # live from this history on each request, not stored as a snapshot — a
+    # past-dated entry would silently change already-quoted bookings and
+    # historical report totals the instant it's saved.
+    today = date_type.fromisoformat(ist_today_str())
+    if effective < today:
+        raise HTTPException(status_code=400, detail="effective_date cannot be in the past")
+
+    provided_rates = {k: getattr(entry, k) for k in RATE_FIELDS if getattr(entry, k) is not None}
+    if not provided_rates:
+        raise HTTPException(status_code=400, detail="At least one rate field must be provided")
+    for k, v in provided_rates.items():
+        if v < 0:
+            raise HTTPException(status_code=400, detail=f"{k} cannot be negative")
+
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    existing_dates = {h.get("effective_date") for h in (settings.get("rate_history") or [])}
+    if entry.effective_date in existing_dates:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A rate change is already scheduled for {entry.effective_date}. Delete it first to replace it."
+        )
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "effective_date": entry.effective_date,
+        **provided_rates,
+        "note": entry.note,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": current_user.get("username") or current_user.get("id"),
+    }
+
+    result = await db.app_settings.update_one({}, {"$push": {"rate_history": doc}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Settings not found")
+
+    return {"message": "Rate change scheduled", "entry": doc}
+
+@api_router.delete("/settings/rate-schedule/{entry_id}")
+async def delete_rate_schedule_entry(entry_id: str, current_user: dict = Depends(require_admin_role)):
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    entry = next((h for h in (settings.get("rate_history") or []) if h.get("id") == entry_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Scheduled rate change not found")
+
+    # Same protection as the backdating check above: deleting an entry whose
+    # date has already passed would retroactively drop every booking dated
+    # on/after it back to the older rate on next calculation.
+    today = date_type.fromisoformat(ist_today_str())
+    effective = date_type.fromisoformat(entry["effective_date"])
+    if effective <= today:
+        raise HTTPException(
+            status_code=409,
+            detail="This rate change has already taken effect and can no longer be removed."
+        )
+
+    await db.app_settings.update_one({}, {"$pull": {"rate_history": {"id": entry_id}}})
+    return {"message": "Scheduled rate change removed"}
 
 # ============= AUTHENTICATION =============
 
