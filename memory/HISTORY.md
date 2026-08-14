@@ -5,6 +5,24 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-08-14 — Date-versioned room rates for the 16 Aug rate revision (branch: claude/qa-audit-fixes)
+Administration is revising room rates effective 16 Aug 2026. Rates weren't
+date-aware at all before this — a single "current rate," applied to every
+booking past and future the instant Settings was saved. Built a proper
+rate-history engine instead: a booking bills entirely at whichever rate was
+in effect on its own check-in date, locked in at check-in (a spanning stay
+never splits per-night; an Extend keeps the original rate). New "Rate
+Schedule" section on Settings lets the admin enter the new rate now with
+16 Aug as the effective date — nothing changes today, existing/current
+bookings are unaffected, only check-ins from 16 Aug onward pick it up
+automatically. While wiring every money path onto the shared rate function
+(the only way a rate change is guaranteed to apply everywhere at once),
+found and fixed a real, previously-unknown bug: booking amendments were
+silently using stale legacy rate fields with leftover debug prints in the
+code — likely wrong ever since the rate-split migration. Also retired a
+second, parallel rate-lookup helper that had been drifting from the
+report engine.
+
 ## 2026-07-08 — Deferred audit items cleared (branch: claude/qa-audit-fixes)
 Worked through everything deferred from the login-enforcement work: extension
 pricing now reads the same rate settings as reports (was legacy fields, could
