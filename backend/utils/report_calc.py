@@ -120,21 +120,70 @@ def resolve_rooms(bk: dict, room_maps: dict) -> list:
     return list(zip(room_nums, room_cats[: len(room_nums)]))
 
 
-def rate_components(settings: dict, is_org: bool, category: str):
-    """(room_rent, license_fee) per night for one room."""
+RATE_FIELDS = (
+    "cat_i_room_rent", "cat_i_license_fee",
+    "cat_ii_room_rent", "cat_ii_license_fee",
+    "non_org_room_rent", "non_org_license_fee",
+)
+
+
+def effective_rate_settings(settings: dict, check_in_date) -> dict:
+    """Resolve the rate fields that apply to a booking, by its check-in date.
+
+    Rates are locked in per booking by check-in date, not split night-by-night
+    across a rate change — a stay that spans a rate revision bills entirely at
+    whichever rate was in effect on the date the booking is/was dated to check
+    in (owner-confirmed policy, for the Aug 2026 rate revision: a booking
+    reserved for a date on/after the new rate's effective_date bills at the
+    new rate in full, even if made before that date; a stay already checked
+    in before it keeps the old rate for its whole stay, including an Extend).
+
+    settings' flat cat_i_room_rent/... fields are the base/current rate. Each
+    entry in settings["rate_history"] (added via Settings > Rate Schedule)
+    carries an effective_date and overrides some or all of those fields for
+    any check-in on or after that date. Entries are applied oldest-first so
+    the latest one that already applies to this check_in_date wins.
+    """
+    # Only copy fields settings actually has — a field missing here must stay
+    # missing, not become an explicit None, so rate_components()'s own
+    # .get(key, default) fallback still applies. dict.get(key, default) only
+    # uses default when the key is ABSENT; a key present with value None
+    # would silently defeat every hardcoded fallback (470/385/etc.) below.
+    resolved = {k: settings[k] for k in RATE_FIELDS if settings.get(k) is not None}
+    ci = check_in_date if isinstance(check_in_date, date) else _parse_date(check_in_date)
+    if ci is None:
+        return resolved
+
+    history = [h for h in (settings.get("rate_history") or []) if _parse_date(h.get("effective_date"))]
+    history.sort(key=lambda h: _parse_date(h["effective_date"]))
+    for h in history:
+        if _parse_date(h["effective_date"]) <= ci:
+            for k in RATE_FIELDS:
+                if h.get(k) is not None:
+                    resolved[k] = h[k]
+    return resolved
+
+
+def rate_components(settings: dict, is_org: bool, category: str, check_in_date):
+    """(room_rent, license_fee) per night for one room, resolved for the
+    booking's own check_in_date (required — see effective_rate_settings).
+    No default: every caller must be explicit about which booking's rate
+    this is, so a future rate change can't silently apply to the wrong
+    booking because a call site forgot to pass a date."""
+    r = effective_rate_settings(settings, check_in_date)
     if not is_org:
         return (
-            settings.get("non_org_room_rent", 570),
-            settings.get("non_org_license_fee", 30),
+            r.get("non_org_room_rent", 570),
+            r.get("non_org_license_fee", 30),
         )
     if category == "Cat I":
         return (
-            settings.get("cat_i_room_rent", 470),
-            settings.get("cat_i_license_fee", 30),
+            r.get("cat_i_room_rent", 470),
+            r.get("cat_i_license_fee", 30),
         )
     return (
-        settings.get("cat_ii_room_rent", 385),
-        settings.get("cat_ii_license_fee", 15),
+        r.get("cat_ii_room_rent", 385),
+        r.get("cat_ii_license_fee", 15),
     )
 
 
@@ -181,7 +230,7 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
     if bk.get("room_segments"):
         seg_rooms = _segment_room_nights(bk, period_start, period_end, room_maps)
         for rn, (rm_nights, cat) in seg_rooms.items():
-            rent, lf = rate_components(settings, is_org, cat)
+            rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
             rooms_out.append({
                 "room_number": rn, "category": cat, "nights": rm_nights,
                 "rate_per_night": rent + lf,
@@ -192,7 +241,7 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
     else:
         if nights > 0:
             for rn, cat in resolve_rooms(bk, room_maps):
-                rent, lf = rate_components(settings, is_org, cat)
+                rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
                 rooms_out.append({
                     "room_number": rn, "category": cat, "nights": nights,
                     "rate_per_night": rent + lf,

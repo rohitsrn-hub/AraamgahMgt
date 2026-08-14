@@ -28,7 +28,6 @@ from utils import (
     serialize_doc,
     serialize_response,
     calculate_nights,
-    get_room_rate
 )
 from utils.report_calc import (
     report_booking_query,
@@ -36,6 +35,7 @@ from utils.report_calc import (
     build_room_maps,
     booking_financials,
     rate_components,
+    effective_rate_settings,
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
 
@@ -1389,7 +1389,7 @@ async def find_optimal_room_combination(
 
 # ============= STAY EXTENSION =============
 
-def _extension_cost(settings: dict, room_categories: list, nights: int, is_org: bool) -> float:
+def _extension_cost(settings: dict, room_categories: list, nights: int, is_org: bool, booking_check_in_date) -> float:
     """Shared cost calculation for stay-extension nights.
 
     Uses the same split rate fields (report_calc.rate_components) as every
@@ -1399,12 +1399,16 @@ def _extension_cost(settings: dict, room_categories: list, nights: int, is_org: 
     from every other financial surface in the app the moment an admin
     changed a rate. plan_extension and confirm_extension both call this so
     the price shown for approval and the price actually charged can't differ.
+
+    booking_check_in_date is always the booking's ORIGINAL check-in date, not
+    the extension window — an Extend keeps the rate that was locked in when
+    the guest checked in, even if the extra nights fall after a rate change.
     """
     if nights <= 0:
         return 0.0
     total = 0.0
     for cat in room_categories:
-        rent, licence = rate_components(settings, is_org, cat)
+        rent, licence = rate_components(settings, is_org, cat, booking_check_in_date)
         total += (rent + licence) * nights
     return total
 
@@ -1435,7 +1439,7 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
 
     def calc_cost(room_cats, check_in_s, check_out_s, is_org_flag):
         nights = (date_type.fromisoformat(check_out_s) - date_type.fromisoformat(check_in_s)).days
-        return _extension_cost(settings, room_cats, nights, is_org_flag)
+        return _extension_cost(settings, room_cats, nights, is_org_flag, booking["check_in_date"])
 
     old_total = booking.get("total_amount", 0.0)
     ext_cost = calc_cost(current_room_categories, extension_start, extension_end, is_org)
@@ -1711,7 +1715,7 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
             )
             nights = (date_type.fromisoformat(new_check_out) - date_type.fromisoformat(old_check_out)).days
             old_total = b.get("total_amount", 0.0)
-            ext_cost = _extension_cost(settings, b.get("room_categories", []), nights, b.get("is_org", False))
+            ext_cost = _extension_cost(settings, b.get("room_categories", []), nights, b.get("is_org", False), b.get("check_in_date"))
             new_total = round(old_total + ext_cost, 2)
 
             update["check_out_date"] = new_check_out
@@ -1735,7 +1739,7 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
 
             nights = (date_type.fromisoformat(b["check_out_date"]) - date_type.fromisoformat(b["check_in_date"])).days
             old_total = b.get("total_amount", 0.0)
-            new_total = round(_extension_cost(settings, new_room_categories, nights, b.get("is_org", False)), 2)
+            new_total = round(_extension_cost(settings, new_room_categories, nights, b.get("is_org", False), b.get("check_in_date")), 2)
 
             update["room_ids"] = new_room_ids
             update["room_numbers"] = new_room_numbers
@@ -1799,7 +1803,7 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
             ext_nights = (ext_end - ext_start).days
             ext_categories = [ext_rooms_by_id[rid]["category"] for rid in extension_room_ids]
             old_total = b.get("total_amount", 0.0)
-            ext_cost = _extension_cost(settings, ext_categories, ext_nights, b.get("is_org", False))
+            ext_cost = _extension_cost(settings, ext_categories, ext_nights, b.get("is_org", False), b.get("check_in_date"))
             new_total = round(old_total + ext_cost, 2)
 
             update["check_out_date"] = new_check_out
@@ -1878,7 +1882,9 @@ async def process_room_segments(room_segments: List[dict], check_in_date: str, c
         tuple: (room_ids, room_numbers, room_categories, total_amount, has_room_changes)
     """
     from datetime import datetime, timedelta
-    
+
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+
     # Extract all unique room IDs from segments
     all_room_ids = set()
     for segment in room_segments:
@@ -1935,8 +1941,7 @@ async def process_room_segments(room_segments: List[dict], check_in_date: str, c
     for segment in room_segments:
         for room_data in segment.get("rooms", []):
             room_category = RoomCategory(room_data["category"])
-            rate = await get_room_rate(db, room_category, is_org)
-            license_fee = await get_room_rate(db, room_category, is_org, is_license_fee=True)
+            rate, license_fee = rate_components(settings, is_org, room_category, check_in_date)
             total_amount += rate + license_fee
     
     # Check if rooms change during stay
@@ -1992,6 +1997,7 @@ async def create_booking(booking: BookingCreate, current_user: dict = Depends(re
         room_categories = []
         total_amount = 0.0
         nights = calculate_nights(booking.check_in_date, booking.check_out_date)
+        settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
 
         for rid in booking.room_ids:
             room = await db.rooms.find_one({"id": rid}, {"_id": 0})
@@ -2015,8 +2021,7 @@ async def create_booking(booking: BookingCreate, current_user: dict = Depends(re
             if overlapping:
                 raise HTTPException(status_code=400, detail=f"Room {room['room_number']} is already booked for these dates")
 
-            rate = await get_room_rate(db, RoomCategory(room["category"]), booking.is_org)
-            license_fee = await get_room_rate(db, RoomCategory(room["category"]), booking.is_org, is_license_fee=True)
+            rate, license_fee = rate_components(settings, booking.is_org, room["category"], booking.check_in_date)
             total_amount += (rate + license_fee) * nights
             room_numbers.append(room["room_number"])
             room_categories.append(room["category"])
@@ -2171,7 +2176,7 @@ async def check_in(request: CheckInRequest, current_user: dict = Depends(require
             # A per-room "Non-Org" charge overrides the booking's org status
             # for that room (a room in an Org booking can be billed Non-Org).
             is_org_room = charge_category != "Non-Org"
-            rent, licence = rate_components(settings or {}, is_org_room, room_category)
+            rent, licence = rate_components(settings or {}, is_org_room, room_category, booking["check_in_date"])
             new_room_rent_total += rent * nights
             new_license_fee_total += licence * nights
     else:
@@ -2180,7 +2185,7 @@ async def check_in(request: CheckInRequest, current_user: dict = Depends(require
         # doesn't set it, so the old fallback zeroed the bill).
         is_org_booking = booking.get("is_org", False)
         for cat in (booking.get("room_categories") or ["Cat I"]):
-            rent, licence = rate_components(settings or {}, is_org_booking, cat)
+            rent, licence = rate_components(settings or {}, is_org_booking, cat, booking["check_in_date"])
             new_room_rent_total += rent * nights
             new_license_fee_total += licence * nights
 
@@ -2362,18 +2367,13 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
         for room in room_guest_mapping:
             room_category = room.get("room_category", "Cat I")
             charge_category = room.get("charge_category", room_category)
-            
-            # Determine rate per night based on charge category
-            if charge_category == "Non-Org":
-                # Non-Org rates
-                rate_per_night = (settings.get("non_org_room_rent", 570) + settings.get("non_org_license_fee", 30))
-            else:
-                # Org rates
-                if room_category == "Cat I":
-                    rate_per_night = (settings.get("cat_i_room_rent", 470) + settings.get("cat_i_license_fee", 30))
-                else:
-                    rate_per_night = (settings.get("cat_ii_room_rent", 385) + settings.get("cat_ii_license_fee", 15))
-            
+            is_org_room = charge_category != "Non-Org"
+            # Rate resolved by the booking's own check-in date, not "today" —
+            # a stay checked in before a rate change keeps the old rate for
+            # its whole stay, even if checkout happens after the change.
+            rent, licence = rate_components(settings or {}, is_org_room, room_category, original_check_in)
+            rate_per_night = rent + licence
+
             room_rent_recalculated += rate_per_night * charged_nights
     else:
         # Fallback to original calculation if no mapping. room_rent_recalculated
@@ -2764,51 +2764,34 @@ async def amend_booking(request: AmendBookingRequest, current_user: dict = Depen
         settings = await db.app_settings.find_one({}, {"_id": 0})
         if not settings:
             settings = {}
-        
-        print(f"DEBUG: Settings fetched from app_settings: {bool(settings)}, Keys: {list(settings.keys()) if settings else []}")
-        
+
         check_in = date_type.fromisoformat(amendment_data.get("check_in_date", booking["check_in_date"]))
         check_out = date_type.fromisoformat(amendment_data.get("check_out_date", booking["check_out_date"]))
         nights = (check_out - check_in).days
-        
-        print("=== BACKEND COST CALCULATION ===")
-        print(f"Check-in: {check_in}, Check-out: {check_out}, Nights: {nights}")
-        
+
         # Get room categories (either new or existing)
         room_categories = amendment_data.get("room_categories", booking.get("room_categories", []))
-        print(f"Room categories: {room_categories}")
-        
+
         # Calculate total for each category
         cat_i_count = sum(1 for cat in room_categories if cat == "Cat I")
         cat_ii_count = sum(1 for cat in room_categories if cat == "Cat II")
-        print(f"Cat I count: {cat_i_count}, Cat II count: {cat_ii_count}")
-        
-        # Use is_org to determine rates
+
+        # Use is_org to determine rates. Rate resolved by `check_in` — the
+        # amended date if the amendment moves it, otherwise the booking's
+        # existing one — so moving a booking's check-in across a rate
+        # change correctly re-prices it. Previously this read the legacy
+        # cat_i_rate/cat_ii_rate settings fields (not edited by Settings
+        # since the rate split), so amendments silently used stale/default
+        # rates instead of the real configured ones.
         is_org = booking.get("is_org", False)
-        print(f"Is Org: {is_org}")
-        print(f"Settings keys: {list(settings.keys())}")
-        print(f"Raw cat_i_rate from settings: {settings.get('cat_i_rate')}")
-        print(f"Raw cat_ii_rate from settings: {settings.get('cat_ii_rate')}")
-        
-        if is_org:
-            cat_i_rate = float(settings.get("cat_i_rate", 500))
-            cat_ii_rate = float(settings.get("cat_ii_rate", 400))
-        else:
-            # Non-Org uses same rate for both Cat I and Cat II (570+30=600)
-            non_org_room_rent = float(settings.get("non_org_room_rent", 570))
-            non_org_license_fee = float(settings.get("non_org_license_fee", 30))
-            cat_i_rate = non_org_room_rent + non_org_license_fee
-            cat_ii_rate = non_org_room_rent + non_org_license_fee
-        
-        print(f"Cat I rate: {cat_i_rate}, Cat II rate: {cat_ii_rate}")
-        
+        cat_i_rent, cat_i_licence = rate_components(settings, is_org, "Cat I", check_in)
+        cat_ii_rent, cat_ii_licence = rate_components(settings, is_org, "Cat II", check_in)
+        cat_i_rate = cat_i_rent + cat_i_licence
+        cat_ii_rate = cat_ii_rent + cat_ii_licence
+
         new_total = (cat_i_count * cat_i_rate + cat_ii_count * cat_ii_rate) * nights
         old_total = booking.get("total_amount", 0)
-        
-        print(f"Calculation: ({cat_i_count} × {cat_i_rate} + {cat_ii_count} × {cat_ii_rate}) × {nights} = {new_total}")
-        print(f"Old Total: {old_total}, New Total: {new_total}, Difference: {new_total - old_total}")
-        print("=== END BACKEND CALCULATION ===")
-        
+
         amendment_data["total_amount"] = new_total
         
         # Calculate payment difference and update advance_paid accordingly

@@ -9,7 +9,6 @@ from .helpers import (
     serialize_doc,
     serialize_response,
     calculate_nights,
-    get_room_rate
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "serialize_doc",
     "serialize_response",
     "calculate_nights",
-    "get_room_rate"
 ]

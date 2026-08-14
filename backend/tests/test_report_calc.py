@@ -18,8 +18,10 @@ from utils.report_calc import (
     EXTRA_BED_RATE,
     booking_financials,
     build_room_maps,
+    effective_rate_settings,
     effective_stay,
     nights_in_period,
+    rate_components,
     report_booking_query,
     resolve_rooms,
 )
@@ -177,3 +179,83 @@ class TestNonOrg:
         bk = booking(is_org=False, room_numbers=["C2-08"], room_categories=["Cat II"])
         fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
         assert fin["total_amount"] == 570 + 30
+
+
+class TestDateVersionedRates:
+    """Aug 2026 rate revision — a booking bills entirely at whichever rate was
+    in effect on its own check_in_date, never split per-night across a rate
+    change (owner-confirmed policy: rates lock in at check-in, an Extend on
+    an old-rate booking stays at the old rate for the whole stay)."""
+
+    RAISED = {
+        "rate_history": [
+            {"effective_date": "2026-08-16", "cat_i_room_rent": 500, "cat_i_license_fee": 35,
+             "cat_ii_room_rent": 420, "cat_ii_license_fee": 20,
+             "non_org_room_rent": 600, "non_org_license_fee": 35},
+        ]
+    }
+
+    def test_no_history_uses_base_settings(self):
+        assert effective_rate_settings(SETTINGS, date(2026, 8, 20)) == {}
+        assert rate_components(SETTINGS, True, "Cat I", date(2026, 8, 20)) == (470, 30)
+
+    def test_before_effective_date_uses_old_rate(self):
+        assert rate_components(self.RAISED, True, "Cat I", date(2026, 8, 15)) == (470, 30)
+
+    def test_on_effective_date_uses_new_rate(self):
+        # Boundary is inclusive: the effective date itself already carries the new rate.
+        assert rate_components(self.RAISED, True, "Cat I", date(2026, 8, 16)) == (500, 35)
+
+    def test_after_effective_date_uses_new_rate(self):
+        assert rate_components(self.RAISED, True, "Cat II", date(2026, 9, 1)) == (420, 20)
+
+    def test_non_org_rate_also_versioned(self):
+        assert rate_components(self.RAISED, False, "Cat I", date(2026, 8, 10)) == (570, 30)
+        assert rate_components(self.RAISED, False, "Cat I", date(2026, 8, 16)) == (600, 35)
+
+    def test_multiple_future_entries_latest_qualifying_wins(self):
+        settings = {
+            "rate_history": [
+                {"effective_date": "2027-01-01", "cat_i_room_rent": 900, "cat_i_license_fee": 50},
+                {"effective_date": "2026-08-16", "cat_i_room_rent": 500, "cat_i_license_fee": 35},
+            ]
+        }
+        # Booking checking in Sep 2026: past the Aug entry, not yet the Jan one.
+        assert rate_components(settings, True, "Cat I", date(2026, 9, 1)) == (500, 35)
+        # Booking checking in Feb 2027: both entries qualify, the later wins.
+        assert rate_components(settings, True, "Cat I", date(2027, 2, 1)) == (900, 50)
+
+    def test_partial_override_falls_back_for_unspecified_fields(self):
+        # A history entry only touching Cat I still leaves Cat II on base settings.
+        settings = {"rate_history": [{"effective_date": "2026-08-16", "cat_i_room_rent": 500}]}
+        assert rate_components(settings, True, "Cat I", date(2026, 8, 20)) == (500, 30)
+        assert rate_components(settings, True, "Cat II", date(2026, 8, 20)) == (385, 15)
+
+    def test_missing_or_invalid_check_in_date_falls_back_safely(self):
+        assert rate_components(self.RAISED, True, "Cat I", None) == (470, 30)
+        assert rate_components(self.RAISED, True, "Cat I", "not-a-date") == (470, 30)
+
+    def test_spanning_stay_bills_entirely_at_check_in_rate_not_split(self):
+        # Booked 14 Aug -> 20 Aug, spans the 16 Aug rate change. Whole stay
+        # must bill at the OLD rate throughout — no per-night split.
+        bk = booking(
+            check_in_date="2026-08-14", check_out_date="2026-08-20",
+            room_numbers=["C1-01"], room_categories=["Cat I"],
+        )
+        fin = booking_financials(
+            bk, self.RAISED, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS
+        )
+        assert fin["nights"] == 6
+        assert fin["total_amount"] == (470 + 30) * 6  # old rate for all 6 nights, not new
+
+    def test_booking_dated_after_effective_date_bills_new_rate_in_full(self):
+        # Booked 16 Aug -> 18 Aug: check-in is on the effective date itself.
+        bk = booking(
+            check_in_date="2026-08-16", check_out_date="2026-08-18",
+            room_numbers=["C1-01"], room_categories=["Cat I"],
+        )
+        fin = booking_financials(
+            bk, self.RAISED, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS
+        )
+        assert fin["nights"] == 2
+        assert fin["total_amount"] == (500 + 35) * 2  # new rate for all 2 nights
