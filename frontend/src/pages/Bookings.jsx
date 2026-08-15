@@ -103,6 +103,11 @@ export default function Bookings() {
   const [showCheckOut, setShowCheckOut] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [refundInfo, setRefundInfo] = useState(null);
+  // Set when the recalculated check-in total differs from what the booking
+  // was originally quoted at (e.g. a scheduled rate change took effect
+  // between booking and check-in) — holds what's needed to actually submit
+  // once staff confirms the new amount.
+  const [rateChangeConfirm, setRateChangeConfirm] = useState(null);
   const [showPendingRefunds, setShowPendingRefunds] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [pendingCheckoutBooking, setPendingCheckoutBooking] = useState(null);
@@ -816,6 +821,39 @@ export default function Bookings() {
     };
   };
 
+  // Single source of truth for the check-in bill preview, used by both the
+  // on-screen "Bill Summary" and the pre-submit rate-change check — so they
+  // can never show two different numbers for the same booking.
+  const computeCheckInTotals = () => {
+    if (!selectedBooking) {
+      return { nights: 0, roomChargesTotal: 0, extraBedCharge: 0, totalWithExtra: 0, balance: 0, roomChargesBreakdown: [] };
+    }
+    const nights = Math.ceil(
+      (new Date(selectedBooking.check_out_date) - new Date(selectedBooking.check_in_date)) / 86400000
+    );
+
+    let roomChargesTotal = 0;
+    const roomChargesBreakdown = roomGuestMapping.map(room => {
+      const isOrgRoom = room.charge_category !== "Non-Org";
+      const roomRate = getRoomRate(settings, selectedBooking.check_in_date, isOrgRoom, room.room_category);
+      const ratePerNight = roomRate.rent + roomRate.licenseFee;
+      const roomTotal = ratePerNight * nights;
+      roomChargesTotal += roomTotal;
+      return {
+        room_number: room.room_number,
+        room_category: room.room_category,
+        charge_category: room.charge_category,
+        rate_per_night: ratePerNight,
+        total: roomTotal,
+      };
+    });
+
+    const extraBedCharge = actionForm.extra_beds * 75;
+    const totalWithExtra = roomChargesTotal + extraBedCharge;
+    const balance = totalWithExtra - (selectedBooking.advance_paid || 0);
+    return { nights, roomChargesTotal, extraBedCharge, totalWithExtra, balance, roomChargesBreakdown };
+  };
+
   const handleCheckIn = async () => {
     // Date validation - Cannot check in before scheduled check-in date
     const today = new Date();
@@ -917,6 +955,22 @@ export default function Bookings() {
       });
     });
     
+    // If the recalculated total no longer matches what this booking was
+    // originally quoted at (most commonly: a scheduled rate change took
+    // effect between when it was booked and today's check-in), stop and
+    // make staff explicitly confirm the new amount rather than silently
+    // charging a different number than what the guest was told.
+    const { totalWithExtra } = computeCheckInTotals();
+    const quotedTotal = selectedBooking.total_amount || 0;
+    if (Math.abs(totalWithExtra - quotedTotal) > 0.5) {
+      setRateChangeConfirm({ oldTotal: quotedTotal, newTotal: totalWithExtra, cleanPhone, allFamilyMembers });
+      return;
+    }
+
+    await submitCheckIn(cleanPhone, allFamilyMembers);
+  };
+
+  const submitCheckIn = async (cleanPhone, allFamilyMembers) => {
     try {
       const formattedPhone = "+91 " + cleanPhone.replace(/^\+91/, "");
       await axios.post(`${API}/bookings/check-in`, {
@@ -943,7 +997,7 @@ export default function Bookings() {
         }))
       });
       toast.success("Check-in successful!");
-      
+
       // Generate Org Data Form for Organization guests
       if (selectedBooking.is_org) {
         setTimeout(async () => {
@@ -961,7 +1015,7 @@ export default function Bookings() {
           }
         }, 500);
       }
-      
+
       // Record toiletry kits consumption if qty > 0
       if (actionForm.toiletry_kits_qty > 0 && actionForm.toiletry_kits_item_id) {
         const bookedRooms = selectedBooking?.room_numbers || [];
@@ -979,6 +1033,7 @@ export default function Bookings() {
       setSelectedBooking(null); // Clear selected booking
       resetActionForm(); // Reset form
       setPhoneError(""); // Clear phone error
+      setRateChangeConfirm(null);
       fetchData(); // Refresh booking list
     } catch (error) {
       toast.error(error.response?.data?.detail || "Check-in failed");
@@ -2952,36 +3007,8 @@ export default function Bookings() {
                     <CurrencyInr size={16} className="text-blue-500" /> Bill Summary (Updated with Room Assignments)
                   </h4>
                   {(() => {
-                    const nights = Math.ceil(
-                      (new Date(selectedBooking.check_out_date) - new Date(selectedBooking.check_in_date)) / 86400000
-                    );
-                    
-                    // Calculate per-room charges based on room-guest mapping
-                    let roomChargesTotal = 0;
-                    const roomChargesBreakdown = roomGuestMapping.map(room => {
-                      // Rate resolved by this booking's check-in date. A
-                      // per-room "Non-Org" charge overrides the booking's org
-                      // status for that room, matching the backend.
-                      const isOrgRoom = room.charge_category !== "Non-Org";
-                      const roomRate = getRoomRate(settings, selectedBooking.check_in_date, isOrgRoom, room.room_category);
-                      const ratePerNight = roomRate.rent + roomRate.licenseFee;
+                    const { nights, roomChargesTotal, extraBedCharge, totalWithExtra, balance, roomChargesBreakdown } = computeCheckInTotals();
 
-                      const roomTotal = ratePerNight * nights;
-                      roomChargesTotal += roomTotal;
-                      
-                      return {
-                        room_number: room.room_number,
-                        room_category: room.room_category,
-                        charge_category: room.charge_category,
-                        rate_per_night: ratePerNight,
-                        total: roomTotal
-                      };
-                    });
-                    
-                    const extraBedCharge = actionForm.extra_beds * 75;
-                    const totalWithExtra = roomChargesTotal + extraBedCharge;
-                    const balance = totalWithExtra - (selectedBooking.advance_paid || 0);
-                    
                     return (
                       <div className="space-y-1 text-sm">
                         {/* Per-Room Breakdown */}
@@ -4113,6 +4140,54 @@ export default function Bookings() {
               className="bg-amber-500 hover:bg-amber-600"
             >
               Confirm & Proceed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== RATE CHANGED SINCE BOOKING (shown at check-in) ===== */}
+      <Dialog open={!!rateChangeConfirm} onOpenChange={(open) => { if (!open) setRateChangeConfirm(null); }}>
+        <DialogContent className="max-w-md" data-testid="rate-change-confirm-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <WarningCircle size={24} weight="fill" />
+              Rate Changed Since Booking
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4 space-y-3">
+            <p className="text-slate-700">
+              The room rate has changed since this booking was made (a rate revision took effect for this check-in date). The bill will be recalculated at check-in.
+            </p>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-slate-600">Originally quoted:</span>
+                <span className="font-medium">{fmtINR(rateChangeConfirm?.oldTotal || 0, 0)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">New total:</span>
+                <span className="font-bold text-amber-700">{fmtINR(rateChangeConfirm?.newTotal || 0, 0)}</span>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              Confirm to check in at the new total, or cancel to review the booking first.
+            </p>
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setRateChangeConfirm(null)}
+              data-testid="rate-change-cancel-btn"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => submitCheckIn(rateChangeConfirm.cleanPhone, rateChangeConfirm.allFamilyMembers)}
+              className="bg-amber-500 hover:bg-amber-600"
+              data-testid="rate-change-confirm-btn"
+            >
+              Confirm Check-In
             </Button>
           </DialogFooter>
         </DialogContent>
