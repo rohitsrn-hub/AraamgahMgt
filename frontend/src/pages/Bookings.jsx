@@ -51,6 +51,7 @@ import {
 import { format, parseISO } from "date-fns";
 import { useLocation, useNavigate } from "react-router-dom";
 import { fmtINR } from "@/utils/formatters";
+import { getRoomRate } from "@/utils/rateUtils";
 
 // Indian mobile phone validation
 const validateIndianPhone = (phone) => {
@@ -1464,18 +1465,11 @@ export default function Bookings() {
     // Calculate new total
     let newTotal = 0;
     selectedRooms.forEach(room => {
-      const isNonOrg = !amendBooking.is_org;
-      let rate;
-      if (room.category === "Cat I") {
-        rate = isNonOrg 
-          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30));
-      } else {
-        // Cat II Non-Org uses same rate as Cat I Non-Org (570+30=600)
-        rate = isNonOrg 
-          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : ((settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15));
-      }
+      // Rate resolved by the (possibly amended) check-in date — matches
+      // backend amend_booking, so this preview can't disagree with the
+      // saved total once a scheduled rate change is in play.
+      const { rent, licenseFee } = getRoomRate(settings, amendForm.check_in_date, amendBooking.is_org, room.category);
+      const rate = rent + licenseFee;
       console.log(`Room ${room.room_number} (${room.category}): ${fmtINR(rate, 0)} × ${nights} nights = ${fmtINR(rate * nights, 0)}`);
       newTotal += (rate || 0) * nights;
     });
@@ -1675,19 +1669,11 @@ export default function Bookings() {
   const selectedRooms = availableRooms.filter(r => bookingForm.room_ids.includes(r.id));
   const calculateTotalRate = () => {
     return selectedRooms.reduce((total, room) => {
-      let rate;
-      const isNonOrg = !bookingForm.is_org;  // Non-Org guests get Def Civ rates
-      if (room.category === "Cat I") {
-        rate = isNonOrg 
-          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30));
-      } else {
-        // Cat II Non-Org uses same rate as Cat I Non-Org (570+30=600)
-        rate = isNonOrg 
-          ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-          : ((settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15));
-      }
-      return total + (rate || 0);
+      // Rate resolved by the selected check-in date, not "today" — this is
+      // the exact preview that was silently ignoring a scheduled future
+      // rate change.
+      const { rent, licenseFee } = getRoomRate(settings, bookingForm.check_in_date, bookingForm.is_org, room.category);
+      return total + (rent + licenseFee || 0);
     }, 0);
   };
   const totalRoomRate = calculateTotalRate();
@@ -2190,14 +2176,8 @@ export default function Bookings() {
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-56 overflow-y-auto p-1">
                     {availableRooms.map((room) => {
                       const isSelected = bookingForm.room_ids.includes(room.id);
-                      const isNonOrg = !bookingForm.is_org;  // Non-Org guests get Def Civ rates
-                      const rate = room.category === "Cat I"
-                        ? (isNonOrg 
-                            ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-                            : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30)))
-                        : (isNonOrg 
-                            ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-                            : ((settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15)));
+                      const roomRate = getRoomRate(settings, bookingForm.check_in_date, bookingForm.is_org, room.category);
+                      const rate = roomRate.rent + roomRate.licenseFee;
                       return (
                         <div
                           key={room.id}
@@ -2979,21 +2959,13 @@ export default function Bookings() {
                     // Calculate per-room charges based on room-guest mapping
                     let roomChargesTotal = 0;
                     const roomChargesBreakdown = roomGuestMapping.map(room => {
-                      let ratePerNight = 0;
-                      
-                      // Determine rate based on charge category
-                      if (room.charge_category === "Non-Org") {
-                        // Non-Org rates (same for both Cat I and Cat II: 570+30=600)
-                        ratePerNight = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
-                      } else {
-                        // Organization rates (Cat I or Cat II)
-                        if (room.room_category === "Cat I") {
-                          ratePerNight = (settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30);
-                        } else {
-                          ratePerNight = (settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15);
-                        }
-                      }
-                      
+                      // Rate resolved by this booking's check-in date. A
+                      // per-room "Non-Org" charge overrides the booking's org
+                      // status for that room, matching the backend.
+                      const isOrgRoom = room.charge_category !== "Non-Org";
+                      const roomRate = getRoomRate(settings, selectedBooking.check_in_date, isOrgRoom, room.room_category);
+                      const ratePerNight = roomRate.rent + roomRate.licenseFee;
+
                       const roomTotal = ratePerNight * nights;
                       roomChargesTotal += roomTotal;
                       
@@ -3282,31 +3254,13 @@ export default function Bookings() {
                       
                       let totalRoomCharges = 0;
                       
-                      // Calculate room charges (rate INCLUDES license fee)
+                      // Calculate room charges (rate INCLUDES license fee).
+                      // Resolved by the booking's own check-in date — an
+                      // overstaying guest checked in before a rate change
+                      // keeps the old rate, even though "today" is after it.
                       roomCategories.forEach(category => {
-                        let fullRate; // Room rate + License fee
-                        
-                        if (category === "Cat I") {
-                          // Cat I: Room Rate + License Fee
-                          const roomRate = isNonOrg 
-                            ? (settings?.non_org_room_rent || 570)
-                            : (settings?.cat_i_room_rent || 470);
-                          const licenseFee = isNonOrg 
-                            ? (settings?.non_org_license_fee || 30)
-                            : (settings?.cat_i_license_fee || 30);
-                          fullRate = roomRate + licenseFee;
-                        } else {
-                          // Cat II: Room Rate + License Fee
-                          // Non-Org uses same rate as Cat I Non-Org (570+30=600)
-                          const roomRate = isNonOrg
-                            ? (settings?.non_org_room_rent || 570)
-                            : (settings?.cat_ii_room_rent || 385);
-                          const licenseFee = isNonOrg 
-                            ? (settings?.non_org_license_fee || 30)
-                            : (settings?.cat_ii_license_fee || 15);
-                          fullRate = roomRate + licenseFee;
-                        }
-                        
+                        const roomRate = getRoomRate(settings, selectedBooking.check_in_date, !isNonOrg, category);
+                        const fullRate = roomRate.rent + roomRate.licenseFee;
                         totalRoomCharges += fullRate * actualNights;
                       });
                       

@@ -623,7 +623,14 @@ async def get_settings(current_user: dict = Depends(get_current_user_with_db)):
         # Return default settings
         default = AppSettings()
         return default.model_dump()
-    return settings
+
+    # Merge in whichever rate is effective TODAY, so the Settings page's
+    # display/edit fields (Room Rates Summary, License Fee Breakdown) show
+    # the current real rate once a scheduled change's date arrives, instead
+    # of staying frozen on the old base values forever. rate_history itself
+    # stays in the response untouched — booking previews resolve per their
+    # own check-in date, not "today" (see frontend/src/utils/rateUtils.js).
+    return {**settings, **effective_rate_settings(settings, ist_today_str())}
 
 @api_router.post("/settings/setup")
 async def complete_setup(request: SetupRequest, current_user: dict = Depends(require_admin_role)):
