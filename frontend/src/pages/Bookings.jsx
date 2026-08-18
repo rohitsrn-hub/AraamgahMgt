@@ -77,6 +77,15 @@ const toUpperCase = (value) => {
   return value.toUpperCase();
 };
 
+// Cycled by category index so the "available rooms" count boxes work for
+// any number of configured categories, not just a fixed Cat I / Cat II pair.
+const AVAILABLE_COUNT_COLORS = [
+  { bg: "bg-blue-50", text: "text-blue-600", textBold: "text-blue-800" },
+  { bg: "bg-purple-50", text: "text-purple-600", textBold: "text-purple-800" },
+  { bg: "bg-emerald-50", text: "text-emerald-600", textBold: "text-emerald-800" },
+  { bg: "bg-amber-50", text: "text-amber-600", textBold: "text-amber-800" },
+];
+
 export default function Bookings() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -2250,15 +2259,16 @@ export default function Bookings() {
                       );
                     })}
                   </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3">
-                    <div className="p-3 bg-blue-50 rounded-lg text-center">
-                      <div className="text-sm text-blue-600">Cat I Available</div>
-                      <div className="text-xl font-bold text-blue-800">{availableRooms.filter(r => r.category === "Cat I").length}</div>
-                    </div>
-                    <div className="p-3 bg-purple-50 rounded-lg text-center">
-                      <div className="text-sm text-purple-600">Cat II Available</div>
-                      <div className="text-xl font-bold text-purple-800">{availableRooms.filter(r => r.category === "Cat II").length}</div>
-                    </div>
+                  <div className={`mt-3 grid gap-3`} style={{ gridTemplateColumns: `repeat(${Math.max(1, new Set(availableRooms.map(r => r.category)).size)}, minmax(0, 1fr))` }}>
+                    {[...new Set(availableRooms.map(r => r.category))].map((cat, idx) => {
+                      const palette = AVAILABLE_COUNT_COLORS[idx % AVAILABLE_COUNT_COLORS.length];
+                      return (
+                        <div key={cat} className={`p-3 ${palette.bg} rounded-lg text-center`}>
+                          <div className={`text-sm ${palette.text}`}>{cat} Available</div>
+                          <div className={`text-xl font-bold ${palette.textBold}`}>{availableRooms.filter(r => r.category === cat).length}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </>
               )}
