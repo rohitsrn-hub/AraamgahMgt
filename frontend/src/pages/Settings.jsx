@@ -27,18 +27,11 @@ const DEFAULT_COLORS = [
 
 export default function Settings({ settings, onUpdate }) {
   const [formData, setFormData] = useState({
-    cat_i_rate: settings?.cat_i_rate || 500,
-    cat_ii_rate: settings?.cat_ii_rate || 400,
-    def_civ_cat_i_rate: settings?.def_civ_cat_i_rate || 600,
-    def_civ_cat_ii_rate: settings?.def_civ_cat_ii_rate || 600,
-    cat_i_room_rent: settings?.cat_i_room_rent || 470,
-    cat_i_license_fee: settings?.cat_i_license_fee || 30,
-    cat_ii_room_rent: settings?.cat_ii_room_rent || 385,
-    cat_ii_license_fee: settings?.cat_ii_license_fee || 15,
+    // Org category rates (room_rent/license_fee per category) now live on
+    // the categories[] array below, edited in Room Categories — not here.
+    // Non-Org stays a flat, category-independent rate, edited here.
     non_org_room_rent: settings?.non_org_room_rent || settings?.def_civ_room_rent || 570,
     non_org_license_fee: settings?.non_org_license_fee || settings?.def_civ_license_fee || 30,
-    cat_i_rooms_count: settings?.cat_i_rooms_count || 6,
-    cat_ii_rooms_count: settings?.cat_ii_rooms_count || 9,
     default_advance_amount: settings?.default_advance_amount || 400,
     colors: settings?.colors || [...DEFAULT_COLORS],
     cancellation_policy: settings?.cancellation_policy || [
@@ -52,37 +45,42 @@ export default function Settings({ settings, onUpdate }) {
   const [newColor, setNewColor] = useState("");
 
   // formData's initial values are locked in at mount (useState only reads
-  // its initializer once). The rate fields specifically need to track the
-  // `settings` prop live: GET /settings resolves them to whichever rate is
+  // its initializer once). The Non-Org rate specifically needs to track the
+  // `settings` prop live: GET /settings resolves it to whichever rate is
   // effective TODAY, so the moment a scheduled rate change's date arrives —
   // or the moment a new one is scheduled/removed via the Rate Schedule
   // panel below — this screen would otherwise keep showing whatever was
-  // true when it first mounted. Scoped to just the rate fields, not the
-  // whole form, so it can't clobber an admin's unsaved edits elsewhere.
+  // true when it first mounted. Scoped to just this field, not the whole
+  // form, so it can't clobber an admin's unsaved edits elsewhere.
   useEffect(() => {
     if (!settings) return;
     setFormData((prev) => ({
       ...prev,
-      cat_i_room_rent: settings.cat_i_room_rent ?? prev.cat_i_room_rent,
-      cat_i_license_fee: settings.cat_i_license_fee ?? prev.cat_i_license_fee,
-      cat_ii_room_rent: settings.cat_ii_room_rent ?? prev.cat_ii_room_rent,
-      cat_ii_license_fee: settings.cat_ii_license_fee ?? prev.cat_ii_license_fee,
       non_org_room_rent: settings.non_org_room_rent ?? prev.non_org_room_rent,
       non_org_license_fee: settings.non_org_license_fee ?? prev.non_org_license_fee,
     }));
-  }, [
-    settings?.cat_i_room_rent, settings?.cat_i_license_fee,
-    settings?.cat_ii_room_rent, settings?.cat_ii_license_fee,
-    settings?.non_org_room_rent, settings?.non_org_license_fee,
-  ]);
+  }, [settings?.non_org_room_rent, settings?.non_org_license_fee]);
+
+  // Same staleness problem for categories: room_rent/license_fee per
+  // category also resolve to today's effective rate server-side, and a
+  // category can be added/edited elsewhere (e.g. after provisioning rooms
+  // for a new wing) without this page remounting. Skipped while the admin
+  // has unsaved local edits (categoriesDirty) so this can't clobber them.
+  useEffect(() => {
+    if (settings?.room_categories && !categoriesDirty) setCategories(settings.room_categories);
+  }, [settings?.room_categories, categoriesDirty]);
   
   // P4: Room Categories Management
   const [categories, setCategories] = useState(
     settings?.room_categories || [
-      { id: "cat-i", name: "Cat I", rate: 500, def_civ_rate: 600, room_count: 6, prefix: "C1", capacity: 2 },
-      { id: "cat-ii", name: "Cat II", rate: 400, def_civ_rate: 600, room_count: 9, prefix: "C2", capacity: 2 }
+      { id: "cat-i", name: "Cat I", room_rent: 470, license_fee: 30, room_count: 6, prefix: "C1", capacity: 2 },
+      { id: "cat-ii", name: "Cat II", room_rent: 385, license_fee: 15, room_count: 9, prefix: "C2", capacity: 2 }
     ]
   );
+  // Guards the categories-resync effect below: don't overwrite local edits
+  // the admin hasn't saved yet just because something elsewhere on the page
+  // (e.g. Rate Schedule) triggered a settings refresh.
+  const [categoriesDirty, setCategoriesDirty] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
@@ -136,14 +134,16 @@ export default function Settings({ settings, onUpdate }) {
     const newId = `cat-${Date.now()}`;
     setCategories([
       ...categories,
-      { id: newId, name: "", rate: 0, def_civ_rate: 0, room_count: 0, prefix: "", capacity: 2 }
+      { id: newId, name: "", room_rent: 0, license_fee: 0, room_count: 0, prefix: "", capacity: 2 }
     ]);
+    setCategoriesDirty(true);
   };
 
   const updateCategory = (index, field, value) => {
     const updated = [...categories];
     updated[index] = { ...updated[index], [field]: value };
     setCategories(updated);
+    setCategoriesDirty(true);
   };
 
   const removeCategory = (index) => {
@@ -152,6 +152,7 @@ export default function Settings({ settings, onUpdate }) {
       return;
     }
     setCategories(categories.filter((_, i) => i !== index));
+    setCategoriesDirty(true);
   };
 
   const saveCategories = async () => {
@@ -161,8 +162,8 @@ export default function Settings({ settings, onUpdate }) {
         toast.error("All categories must have a name and prefix");
         return;
       }
-      if (cat.rate <= 0 || cat.def_civ_rate <= 0) {
-        toast.error("Rates must be greater than 0");
+      if (cat.room_rent <= 0 || cat.license_fee < 0) {
+        toast.error("Room rent must be greater than 0 and license fee cannot be negative");
         return;
       }
       if (!cat.capacity || cat.capacity <= 0) {
@@ -173,12 +174,18 @@ export default function Settings({ settings, onUpdate }) {
 
     setSaving(true);
     try {
-      await axios.put(`${API}/settings/categories`, categories);
-      toast.success("Room categories updated successfully!");
+      const res = await axios.put(`${API}/settings/categories`, categories);
+      const created = res.data?.rooms_created || [];
+      toast.success(
+        created.length > 0
+          ? `Room categories updated — created ${created.length} new room(s): ${created.join(", ")}`
+          : "Room categories updated successfully!"
+      );
+      setCategoriesDirty(false);
       onUpdate();
     } catch (error) {
       console.error("Error saving categories:", error);
-      toast.error("Failed to save categories");
+      toast.error(error.response?.data?.detail || "Failed to save categories");
     } finally {
       setSaving(false);
     }
@@ -293,26 +300,29 @@ export default function Settings({ settings, onUpdate }) {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Standard Rate (₹/night) *</Label>
+                    <Label className="text-xs">Room Rent (₹/night) *</Label>
                     <Input
                       type="number"
                       min="0"
-                      value={cat.rate}
-                      onChange={(e) => updateCategory(idx, "rate", parseFloat(e.target.value) || 0)}
+                      value={cat.room_rent}
+                      onChange={(e) => updateCategory(idx, "room_rent", parseFloat(e.target.value) || 0)}
                       onFocus={(e) => e.target.select()}
                       className="earms-input mt-1"
                     />
                   </div>
                   <div>
-                    <Label className="text-xs">Non-Org Rate (₹/night) *</Label>
+                    <Label className="text-xs">License Fee (₹/night) *</Label>
                     <Input
                       type="number"
                       min="0"
-                      value={cat.def_civ_rate}
-                      onChange={(e) => updateCategory(idx, "def_civ_rate", parseFloat(e.target.value) || 0)}
+                      value={cat.license_fee}
+                      onChange={(e) => updateCategory(idx, "license_fee", parseFloat(e.target.value) || 0)}
                       onFocus={(e) => e.target.select()}
                       className="earms-input mt-1"
                     />
+                    <p className="text-xs text-slate-500 mt-1">
+                      Total = ₹{(cat.room_rent || 0) + (cat.license_fee || 0)}/night for Org guests. Non-Org guests are billed a flat rate below, regardless of category.
+                    </p>
                   </div>
                   <div>
                     <Label className="text-xs">Room Capacity (persons) *</Label>
@@ -349,7 +359,10 @@ export default function Settings({ settings, onUpdate }) {
             <Button
               type="button"
               variant="outline"
-              onClick={() => setCategories(settings?.room_categories || categories)}
+              onClick={() => {
+                setCategories(settings?.room_categories || categories);
+                setCategoriesDirty(false);
+              }}
             >
               Cancel
             </Button>
@@ -365,86 +378,31 @@ export default function Settings({ settings, onUpdate }) {
         </CardContent>
       </Card>
 
-      {/* Room Rates Summary (Read-Only) */}
-      <Card className="earms-card" data-testid="room-rates-section">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CurrencyInr size={24} className="text-emerald-500" weight="duotone" />
-            Room Rates Summary
-          </CardTitle>
-          <p className="text-sm text-slate-500">Current room category rates (edit in Room Categories section above)</p>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {categories.map((cat, idx) => (
-              <div key={cat.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h3 className="font-semibold text-slate-800 text-lg">{cat.name}</h3>
-                    <p className="text-xs text-slate-500">Prefix: {cat.prefix} • {cat.room_count} rooms • Capacity: {cat.capacity} person{cat.capacity > 1 ? 's' : ''}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-blue-50 rounded-lg">
-                    <p className="text-xs text-blue-600 font-medium mb-1">Standard Rate</p>
-                    <p className="text-2xl font-bold text-blue-700">₹{cat.rate}</p>
-                    <p className="text-xs text-blue-600">per night</p>
-                  </div>
-                  <div className="p-3 bg-orange-50 rounded-lg">
-                    <p className="text-xs text-orange-600 font-medium mb-1">Non-Org Rate</p>
-                    <p className="text-2xl font-bold text-orange-700">₹{cat.def_civ_rate}</p>
-                    <p className="text-xs text-orange-600">per night</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          {categories.length === 0 && (
-            <div className="text-center py-8 text-slate-400">
-              <p>No room categories configured yet.</p>
-              <p className="text-sm mt-2">Add categories in the Room Categories section above.</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* License Fee Breakdown (for Monthly Report) */}
-      <Card className="earms-card">
+      {/* Non-Org Rate — flat, applies regardless of room category */}
+      <Card className="earms-card" data-testid="non-org-rate-section">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Percent size={24} className="text-blue-500" weight="duotone" />
-            License Fee Breakdown
+            Non-Org Rate
           </CardTitle>
-          <p className="text-sm text-slate-500">For monthly financial report to calculate license fee payable to maintaining agency</p>
+          <p className="text-sm text-slate-500">
+            Flat rate for Non-Org guests, the same regardless of which room category they stay in.
+            Org guest rates are set per category above, in Room Categories.
+          </p>
         </CardHeader>
         <CardContent>
-          <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 mb-4">
-            <p className="text-xs text-blue-700">Total rate = Room Rent + License Fee. These are used in the monthly financial report to calculate the license fee payable to the maintaining agency.</p>
+          <div className="grid grid-cols-2 gap-4 max-w-md">
+            <div>
+              <Label className="text-xs text-slate-500">Room Rent (₹)</Label>
+              <Input type="number" value={formData.non_org_room_rent} onChange={(e) => setFormData({...formData, non_org_room_rent: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid="input-non_org_room_rent" />
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">License Fee (₹)</Label>
+              <Input type="number" value={formData.non_org_license_fee} onChange={(e) => setFormData({...formData, non_org_license_fee: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid="input-non_org_license_fee" />
+            </div>
           </div>
-          <div className="grid md:grid-cols-3 gap-4">
-            {[
-              { label: "Org (Cat I)", rentKey: "cat_i_room_rent", feeKey: "cat_i_license_fee", bgClass: "bg-blue-50 border-blue-200", textClass: "text-blue-800", totalClass: "text-blue-700" },
-              { label: "Org (Cat II)", rentKey: "cat_ii_room_rent", feeKey: "cat_ii_license_fee", bgClass: "bg-purple-50 border-purple-200", textClass: "text-purple-800", totalClass: "text-purple-700" },
-              { label: "Non-Org", rentKey: "non_org_room_rent", feeKey: "non_org_license_fee", bgClass: "bg-orange-50 border-orange-200", textClass: "text-orange-800", totalClass: "text-orange-700" }
-            ].map(({ label, rentKey, feeKey, bgClass, textClass, totalClass }) => (
-              <div key={rentKey} className={`p-4 rounded-xl border ${bgClass}`}>
-                <h4 className={`font-semibold mb-3 ${textClass}`}>{label}</h4>
-                <div className="space-y-2">
-                  <div>
-                    <Label className="text-xs text-slate-500">Room Rent (₹)</Label>
-                    <Input type="number" value={formData[rentKey]} onChange={(e) => setFormData({...formData, [rentKey]: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid={`input-${rentKey}`} />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-slate-500">License Fee (₹)</Label>
-                    <Input type="number" value={formData[feeKey]} onChange={(e) => setFormData({...formData, [feeKey]: parseFloat(e.target.value) || 0})} onFocus={(e) => e.target.select()} className="earms-input mt-1" data-testid={`input-${feeKey}`} />
-                  </div>
-                  <div className={`text-xs font-semibold mt-2 p-2 bg-white rounded ${totalClass}`}>
-                    Total = ₹{(formData[rentKey] || 0) + (formData[feeKey] || 0)}/night
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="text-xs font-semibold mt-3 p-2 bg-orange-50 text-orange-700 rounded max-w-md">
+            Total = ₹{(formData.non_org_room_rent || 0) + (formData.non_org_license_fee || 0)}/night
           </div>
         </CardContent>
       </Card>
@@ -650,43 +608,6 @@ export default function Settings({ settings, onUpdate }) {
         </CardContent>
       </Card>
 
-      {/* Room Configuration Info */}
-      <Card className="earms-card" data-testid="room-config-section">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Buildings size={24} className="text-slate-500" weight="duotone" />
-            Room Configuration
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="p-6 bg-blue-50 rounded-2xl text-center">
-              <h3 className="font-semibold text-blue-800 mb-2">Cat I Rooms</h3>
-              <p className="text-4xl font-bold text-blue-600">{settings?.cat_i_rooms_count || 6}</p>
-              <p className="text-sm text-blue-600 mt-2">Total rooms</p>
-            </div>
-            <div className="p-6 bg-purple-50 rounded-2xl text-center">
-              <h3 className="font-semibold text-purple-800 mb-2">Cat II Rooms</h3>
-              <p className="text-4xl font-bold text-purple-600">{settings?.cat_ii_rooms_count || 9}</p>
-              <p className="text-sm text-purple-600 mt-2">Total rooms</p>
-            </div>
-          </div>
-          <div className="mt-6 p-4 bg-slate-50 rounded-xl">
-            <div className="flex items-start gap-3">
-              <Info size={20} className="text-slate-500 mt-0.5" />
-              <div>
-                <p className="font-medium text-slate-700">Room Count Configuration</p>
-                <p className="text-sm text-slate-600 mt-1">
-                  Total Rooms: {(settings?.cat_i_rooms_count || 6) + (settings?.cat_ii_rooms_count || 9)}
-                </p>
-                <p className="text-sm text-slate-500 mt-2">
-                  To modify room counts, please contact the system administrator.
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Save Button */}
       <div className="sticky bottom-0 bg-white p-4 border-t-2 border-blue-200 shadow-lg rounded-t-xl">

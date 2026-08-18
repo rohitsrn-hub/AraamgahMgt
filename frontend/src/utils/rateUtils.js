@@ -1,63 +1,79 @@
-// Mirrors backend/utils/report_calc.py's effective_rate_settings()/rate_components().
-// A booking bills at whichever rate was in effect on its own check-in date —
-// never "today's" rate, never the flat base fields alone. Every rate preview
-// shown to the user (booking form, check-in bill summary, amend cost) must
-// resolve through this so the number on screen matches what the backend
-// actually charges. Previously these read settings.cat_i_room_rent etc.
-// directly, so a scheduled future rate change never showed up until the
-// booking was actually saved.
+// Mirrors backend/utils/report_calc.py's effective_category_rate() /
+// effective_non_org_rate() / rate_components(). A booking bills at whichever
+// rate was in effect on its own check-in date — never "today's" rate, and
+// never a hardcoded Cat I/Cat II assumption. Every rate preview shown to the
+// user (booking form, check-in bill summary, amend cost) must resolve
+// through this so the number on screen matches what the backend actually
+// charges, for any number of configured categories.
+//
+// settings.room_categories is the base rate — [{name, room_rent,
+// license_fee, ...}]. settings.rate_history is a list of {effective_date,
+// category_rates: {categoryName: {room_rent?, license_fee?}},
+// non_org_room_rent?, non_org_license_fee?} entries; the latest one whose
+// effective_date is on/before the check-in date wins, per field.
 
-const RATE_FIELDS = [
-  "cat_i_room_rent", "cat_i_license_fee",
-  "cat_ii_room_rent", "cat_ii_license_fee",
-  "non_org_room_rent", "non_org_license_fee",
-];
+function parseDate(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  return d && !isNaN(dt.getTime()) ? dt : null;
+}
 
-/** Resolve the rate fields that apply for a given check-in date (YYYY-MM-DD
- * string or Date). Falls back to the base settings fields if check_in_date
- * is missing/invalid or no history entry qualifies yet. */
-export function resolveRateFields(settings, checkInDate) {
-  const resolved = {};
-  for (const key of RATE_FIELDS) {
-    if (settings?.[key] != null) resolved[key] = settings[key];
-  }
-
-  const ci = checkInDate instanceof Date ? checkInDate : new Date(checkInDate);
-  if (!checkInDate || isNaN(ci.getTime())) return resolved;
-  ci.setHours(0, 0, 0, 0);
-
-  const history = (settings?.rate_history || [])
+function sortedHistory(settings) {
+  return (settings?.rate_history || [])
     .filter((h) => h?.effective_date)
     .slice()
     .sort((a, b) => a.effective_date.localeCompare(b.effective_date));
-
-  for (const h of history) {
-    const eff = new Date(h.effective_date);
-    eff.setHours(0, 0, 0, 0);
-    if (eff <= ci) {
-      for (const key of RATE_FIELDS) {
-        if (h[key] != null) resolved[key] = h[key];
-      }
-    }
-  }
-  return resolved;
 }
 
-const DEFAULTS = {
-  cat_i_room_rent: 470, cat_i_license_fee: 30,
-  cat_ii_room_rent: 385, cat_ii_license_fee: 15,
-  non_org_room_rent: 570, non_org_license_fee: 30,
-};
+/** The room_categories[] entry matching this name, or undefined. */
+export function getCategoryConfig(settings, categoryName) {
+  return (settings?.room_categories || []).find((c) => c.name === categoryName);
+}
 
-/** { rent, licenseFee } for one room, resolved for checkInDate. */
+/** { rent, licenseFee } for ONE category, resolved for checkInDate. */
+export function resolveCategoryRate(settings, categoryName, checkInDate) {
+  const base = getCategoryConfig(settings, categoryName);
+  let rent = base?.room_rent ?? 470;
+  let licenseFee = base?.license_fee ?? 30;
+
+  const ci = parseDate(checkInDate);
+  if (!ci) return { rent, licenseFee };
+  ci.setHours(0, 0, 0, 0);
+
+  for (const h of sortedHistory(settings)) {
+    const eff = parseDate(h.effective_date);
+    if (!eff) continue;
+    eff.setHours(0, 0, 0, 0);
+    if (eff > ci) continue;
+    const override = h.category_rates?.[categoryName];
+    if (override?.room_rent != null) rent = override.room_rent;
+    if (override?.license_fee != null) licenseFee = override.license_fee;
+  }
+  return { rent, licenseFee };
+}
+
+/** { rent, licenseFee } for the flat Non-Org rate, resolved for checkInDate. */
+export function resolveNonOrgRate(settings, checkInDate) {
+  let rent = settings?.non_org_room_rent ?? 570;
+  let licenseFee = settings?.non_org_license_fee ?? 30;
+
+  const ci = parseDate(checkInDate);
+  if (!ci) return { rent, licenseFee };
+  ci.setHours(0, 0, 0, 0);
+
+  for (const h of sortedHistory(settings)) {
+    const eff = parseDate(h.effective_date);
+    if (!eff) continue;
+    eff.setHours(0, 0, 0, 0);
+    if (eff > ci) continue;
+    if (h.non_org_room_rent != null) rent = h.non_org_room_rent;
+    if (h.non_org_license_fee != null) licenseFee = h.non_org_license_fee;
+  }
+  return { rent, licenseFee };
+}
+
+/** { rent, licenseFee } for one room, resolved for checkInDate. `category`
+ * is any configured category name, not just "Cat I"/"Cat II". */
 export function getRoomRate(settings, checkInDate, isOrg, category) {
-  const r = resolveRateFields(settings, checkInDate);
-  const get = (key) => (r[key] != null ? r[key] : DEFAULTS[key]);
-  if (!isOrg) {
-    return { rent: get("non_org_room_rent"), licenseFee: get("non_org_license_fee") };
-  }
-  if (category === "Cat I") {
-    return { rent: get("cat_i_room_rent"), licenseFee: get("cat_i_license_fee") };
-  }
-  return { rent: get("cat_ii_room_rent"), licenseFee: get("cat_ii_license_fee") };
+  if (!isOrg) return resolveNonOrgRate(settings, checkInDate);
+  return resolveCategoryRate(settings, category, checkInDate);
 }
