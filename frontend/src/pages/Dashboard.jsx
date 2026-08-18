@@ -83,6 +83,27 @@ const getRoomCategories = (booking) => {
   return booking.room_category || "";
 };
 
+// Cycled by category index (in whatever order the backend returns
+// occupancy.by_category) so any number of categories each get a distinct,
+// consistent color — not just a fixed blue/purple pair for exactly two.
+const CATEGORY_DASHBOARD_COLORS = [
+  { gradient: "from-blue-50 to-cyan-50", border: "border-blue-200", text: "text-blue-800", textLight: "text-blue-600", dot: "bg-blue-500", statBorder: "border-blue-100", calendarBg: "bg-blue-50" },
+  { gradient: "from-purple-50 to-pink-50", border: "border-purple-200", text: "text-purple-800", textLight: "text-purple-600", dot: "bg-purple-500", statBorder: "border-purple-100", calendarBg: "bg-purple-50" },
+  { gradient: "from-emerald-50 to-teal-50", border: "border-emerald-200", text: "text-emerald-800", textLight: "text-emerald-600", dot: "bg-emerald-500", statBorder: "border-emerald-100", calendarBg: "bg-emerald-50" },
+  { gradient: "from-amber-50 to-orange-50", border: "border-amber-200", text: "text-amber-800", textLight: "text-amber-600", dot: "bg-amber-500", statBorder: "border-amber-100", calendarBg: "bg-amber-50" },
+];
+
+// Deterministic color per category name (a simple string hash), so the
+// monthly calendar's room-row labels stay consistently colored across
+// renders without needing the category list threaded in — works for any
+// number of categories, not just a fixed Cat I / Cat II pair.
+const categoryColorFor = (categoryName) => {
+  const name = categoryName || "";
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return CATEGORY_DASHBOARD_COLORS[hash % CATEGORY_DASHBOARD_COLORS.length];
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -505,68 +526,48 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {/* Category-wise Breakup */}
-      {occupancy && (
+      {/* Category-wise Breakup — one card per configured category (any
+          number of them), driven by occupancy.by_category rather than a
+          hardcoded Cat I / Cat II pair. */}
+      {occupancy && occupancy.by_category && (
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Cat I */}
-          <Card className="earms-card bg-gradient-to-br from-blue-50 to-cyan-50 border-blue-200 shadow-md" data-testid="cat-i-occupancy-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-blue-800">
-                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                Cat I Rooms
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-4 gap-3">
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-blue-100">
-                  <div className="text-2xl font-bold text-blue-800">{occupancy.cat_i.total}</div>
-                  <div className="text-xs text-blue-600">Total</div>
-                </div>
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-red-100">
-                  <div className="text-2xl font-bold text-red-800">{occupancy.cat_i.occupied}</div>
-                  <div className="text-xs text-red-600">Occupied</div>
-                </div>
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-emerald-100">
-                  <div className="text-2xl font-bold text-emerald-800">{occupancy.cat_i.available}</div>
-                  <div className="text-xs text-emerald-600">Available</div>
-                </div>
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-slate-200">
-                  <div className="text-2xl font-bold text-slate-800">{occupancy.cat_i.occupancy_percent}%</div>
-                  <div className="text-xs text-slate-600">Rate</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Cat II */}
-          <Card className="earms-card bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200 shadow-md" data-testid="cat-ii-occupancy-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-purple-800">
-                <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
-                Cat II Rooms
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-4 gap-3">
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-purple-100">
-                  <div className="text-2xl font-bold text-purple-800">{occupancy.cat_ii.total}</div>
-                  <div className="text-xs text-purple-600">Total</div>
-                </div>
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-red-100">
-                  <div className="text-2xl font-bold text-red-800">{occupancy.cat_ii.occupied}</div>
-                  <div className="text-xs text-red-600">Occupied</div>
-                </div>
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-emerald-100">
-                  <div className="text-2xl font-bold text-emerald-800">{occupancy.cat_ii.available}</div>
-                  <div className="text-xs text-emerald-600">Available</div>
-                </div>
-                <div className="text-center p-3 bg-white/70 rounded-xl border border-slate-200">
-                  <div className="text-2xl font-bold text-slate-800">{occupancy.cat_ii.occupancy_percent}%</div>
-                  <div className="text-xs text-slate-600">Rate</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {Object.entries(occupancy.by_category).map(([categoryName, stats], idx) => {
+            const palette = CATEGORY_DASHBOARD_COLORS[idx % CATEGORY_DASHBOARD_COLORS.length];
+            return (
+              <Card
+                key={categoryName}
+                className={`earms-card bg-gradient-to-br ${palette.gradient} ${palette.border} shadow-md`}
+                data-testid={`category-occupancy-card-${categoryName}`}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className={`flex items-center gap-2 ${palette.text}`}>
+                    <div className={`w-3 h-3 ${palette.dot} rounded-full`}></div>
+                    {categoryName} Rooms
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className={`text-center p-3 bg-white/70 rounded-xl border ${palette.statBorder}`}>
+                      <div className={`text-2xl font-bold ${palette.text}`}>{stats.total}</div>
+                      <div className={`text-xs ${palette.textLight}`}>Total</div>
+                    </div>
+                    <div className="text-center p-3 bg-white/70 rounded-xl border border-red-100">
+                      <div className="text-2xl font-bold text-red-800">{stats.occupied}</div>
+                      <div className="text-xs text-red-600">Occupied</div>
+                    </div>
+                    <div className="text-center p-3 bg-white/70 rounded-xl border border-emerald-100">
+                      <div className="text-2xl font-bold text-emerald-800">{stats.available}</div>
+                      <div className="text-xs text-emerald-600">Available</div>
+                    </div>
+                    <div className="text-center p-3 bg-white/70 rounded-xl border border-slate-200">
+                      <div className="text-2xl font-bold text-slate-800">{stats.occupancy_percent}%</div>
+                      <div className="text-xs text-slate-600">Rate</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -723,7 +724,7 @@ export default function Dashboard() {
               {/* Room rows */}
               {calendarData.rooms.map((room) => (
                 <div key={room.room_id} className="flex" data-testid={`calendar-room-${room.room_number}`}>
-                  <div className={`w-20 min-w-[80px] shrink-0 p-1.5 text-xs font-semibold border-b border-r border-slate-200 sticky left-0 z-10 ${room.category === 'Cat I' ? 'bg-blue-50 text-blue-800' : 'bg-purple-50 text-purple-800'}`}>
+                  <div className={`w-20 min-w-[80px] shrink-0 p-1.5 text-xs font-semibold border-b border-r border-slate-200 sticky left-0 z-10 ${categoryColorFor(room.category).calendarBg} ${categoryColorFor(room.category).text}`}>
                     {room.room_number}
                   </div>
                   {Array.from({ length: calendarData.days_in_month }, (_, i) => {

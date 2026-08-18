@@ -401,10 +401,20 @@ export function generateMonthlyReportPDF(data, settings) {
   doc.text("LICENSE FEE CALCULATION", 10, y);
   y += 4;
 
+  // by_category is dynamic — one row per configured category, any number
+  // of them — falling back to the fixed org_cat_i/org_cat_ii shape only if
+  // an older backend response doesn't carry it yet.
   const lf = data.license_fees || {};
+  const lfByCategory = lf.by_category && Object.keys(lf.by_category).length > 0
+    ? Object.entries(lf.by_category).map(([name, v]) => [
+        `Org (${name})`, `${v.days || 0} days`, fmtINR(v.total || 0, 2),
+      ])
+    : [
+        ["Org (Cat I)", `${lf.org_cat_i?.days || 0} days × ₹${lf.org_cat_i?.rate || 30}`, fmtINR((lf.org_cat_i?.total || 0), 2)],
+        ["Org (Cat II)", `${lf.org_cat_ii?.days || 0} days × ₹${lf.org_cat_ii?.rate || 15}`, fmtINR((lf.org_cat_ii?.total || 0), 2)],
+      ];
   const lfRows = [
-    ["Org (Cat I)", `${lf.org_cat_i?.days || 0} days × ₹${lf.org_cat_i?.rate || 30}`, fmtINR((lf.org_cat_i?.total || 0), 2)],
-    ["Org (Cat II)", `${lf.org_cat_ii?.days || 0} days × ₹${lf.org_cat_ii?.rate || 15}`, fmtINR((lf.org_cat_ii?.total || 0), 2)],
+    ...lfByCategory,
     ["Non-Org", `${lf.non_org?.days || 0} days × ₹${lf.non_org?.rate || 30}`, fmtINR((lf.non_org?.total || 0), 2)],
     ["TOTAL LICENSE FEE", "", fmtINR((data.total_license_fee || 0), 2)],
   ];
@@ -429,9 +439,19 @@ export function generateMonthlyReportPDF(data, settings) {
   y += 4;
 
   const r = data.rates || {};
+  const byCategoryDays = data.by_category_days || {};
+  const summaryByCategory = r.by_category && Object.keys(r.by_category).length > 0
+    ? Object.entries(r.by_category).map(([name, rate]) => {
+        const days = byCategoryDays[name] || 0;
+        const roomRent = rate.room_rent || 0;
+        return [`Org (${name})`, `${days} days × ₹${roomRent} (room rent)`, fmtINR(days * roomRent, 2)];
+      })
+    : [
+        ["Org (Cat I)", `${data.org_cat_i_days || 0} days × ₹${r.cat_i_room_rent || 470} (room rent)`, fmtINR(((data.org_cat_i_days || 0) * (r.cat_i_room_rent || 470)), 2)],
+        ["Org (Cat II)", `${data.org_cat_ii_days || 0} days × ₹${r.cat_ii_room_rent || 385} (room rent)`, fmtINR(((data.org_cat_ii_days || 0) * (r.cat_ii_room_rent || 385)), 2)],
+      ];
   const summaryRows = [
-    ["Org (Cat I)", `${data.org_cat_i_days || 0} days × ₹${r.cat_i_room_rent || 470} (room rent)`, fmtINR(((data.org_cat_i_days || 0) * (r.cat_i_room_rent || 470)), 2)],
-    ["Org (Cat II)", `${data.org_cat_ii_days || 0} days × ₹${r.cat_ii_room_rent || 385} (room rent)`, fmtINR(((data.org_cat_ii_days || 0) * (r.cat_ii_room_rent || 385)), 2)],
+    ...summaryByCategory,
     ["Non-Org", `${data.non_org_days || 0} days × ₹${r.non_org_room_rent || 570} (room rent)`, fmtINR(((data.non_org_days || 0) * (r.non_org_room_rent || 570)), 2)],
     ["Room Rent Sub-Total", "", fmtINR((data.room_rent_total || 0), 2)],
     ["License Fee Total", "", fmtINR((data.total_license_fee || 0), 2)],

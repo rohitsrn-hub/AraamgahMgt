@@ -10,10 +10,22 @@ import { toast } from "sonner";
 import { Bed, Wrench, CheckCircle, XCircle } from "@phosphor-icons/react";
 import { useAuth } from "@/contexts/AuthContext";
 
+// Cycled by category index so any number of categories each get a distinct,
+// consistent color — not just a fixed blue/purple pair for exactly two.
+const CATEGORY_COLORS = [
+  { dot: "bg-blue-500", text: "text-blue-800" },
+  { dot: "bg-purple-500", text: "text-purple-800" },
+  { dot: "bg-emerald-500", text: "text-emerald-800" },
+  { dot: "bg-amber-500", text: "text-amber-800" },
+  { dot: "bg-pink-500", text: "text-pink-800" },
+  { dot: "bg-cyan-500", text: "text-cyan-800" },
+];
+
 export default function Rooms() {
   const { user } = useAuth();
   const isViewer = user?.role === 'viewer';
   const [rooms, setRooms] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -33,8 +45,18 @@ export default function Rooms() {
     }
   };
 
+  const fetchCategories = async () => {
+    try {
+      const response = await axios.get(`${API}/settings`);
+      setCategories(response.data?.room_categories || []);
+    } catch (error) {
+      console.error("Error fetching categories:", error);
+    }
+  };
+
   useEffect(() => {
     fetchRooms();
+    fetchCategories();
   }, []);
 
   const filteredRooms = rooms.filter(room => {
@@ -76,8 +98,20 @@ export default function Rooms() {
     }
   };
 
-  const catIRooms = filteredRooms.filter(r => r.category === "Cat I");
-  const catIIRooms = filteredRooms.filter(r => r.category === "Cat II");
+  // Grouped dynamically by configured category (in the order Settings has
+  // them), so any number of categories each get their own section — a room
+  // whose category doesn't match a configured one still shows up under
+  // "Other" rather than silently vanishing from the page.
+  const knownNames = categories.map((c) => c.name);
+  const roomsByCategory = categories.map((cat, idx) => ({
+    name: cat.name,
+    color: CATEGORY_COLORS[idx % CATEGORY_COLORS.length],
+    rooms: filteredRooms.filter((r) => r.category === cat.name),
+  }));
+  const otherRooms = filteredRooms.filter((r) => !knownNames.includes(r.category));
+  if (otherRooms.length > 0) {
+    roomsByCategory.push({ name: "Other", color: CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length], rooms: otherRooms });
+  }
 
   if (loading) {
     return (
@@ -109,8 +143,9 @@ export default function Rooms() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="Cat I">Cat I</SelectItem>
-                <SelectItem value="Cat II">Cat II</SelectItem>
+                {categories.map((cat) => (
+                  <SelectItem key={cat.id || cat.name} value={cat.name}>{cat.name}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -145,18 +180,20 @@ export default function Rooms() {
         </CardContent>
       </Card>
 
-      {/* Cat I Rooms */}
-      {catIRooms.length > 0 && (
-        <Card className="earms-card" data-testid="cat-i-rooms-section">
+      {/* Rooms grouped by category — any number of them, each with its own
+          color, driven by Settings > Room Categories rather than a
+          hardcoded Cat I / Cat II pair. */}
+      {roomsByCategory.map((group) => group.rooms.length > 0 && (
+        <Card className="earms-card" key={group.name} data-testid={`category-rooms-section-${group.name}`}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-              Cat I Rooms ({catIRooms.length})
+              <div className={`w-3 h-3 ${group.color.dot} rounded-full`}></div>
+              {group.name} Rooms ({group.rooms.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {catIRooms.map((room) => (
+              {group.rooms.map((room) => (
                 <div
                   key={room.id}
                   className={`room-card ${getStatusClass(room.status)}`}
@@ -172,8 +209,8 @@ export default function Rooms() {
                     {getStatusIcon(room.status)}
                   </div>
                   <div className="text-xs text-slate-500">Floor {room.floor}</div>
-                  <Badge 
-                    variant="outline" 
+                  <Badge
+                    variant="outline"
                     className={`mt-2 text-xs ${
                       room.status === "available" ? "border-emerald-300 text-emerald-700" :
                       room.status === "occupied" ? "border-red-300 text-red-700" :
@@ -187,51 +224,7 @@ export default function Rooms() {
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {/* Cat II Rooms */}
-      {catIIRooms.length > 0 && (
-        <Card className="earms-card" data-testid="cat-ii-rooms-section">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
-              Cat II Rooms ({catIIRooms.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {catIIRooms.map((room) => (
-                <div
-                  key={room.id}
-                  className={`room-card ${getStatusClass(room.status)}`}
-                  onClick={() => {
-                    setSelectedRoom(room);
-                    setNewStatus(room.status);
-                    setShowStatusDialog(true);
-                  }}
-                  data-testid={`room-card-${room.id}`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-lg">{room.room_number}</span>
-                    {getStatusIcon(room.status)}
-                  </div>
-                  <div className="text-xs text-slate-500">Floor {room.floor}</div>
-                  <Badge 
-                    variant="outline" 
-                    className={`mt-2 text-xs ${
-                      room.status === "available" ? "border-emerald-300 text-emerald-700" :
-                      room.status === "occupied" ? "border-red-300 text-red-700" :
-                      "border-amber-300 text-amber-700"
-                    }`}
-                  >
-                    {room.status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      ))}
 
       {filteredRooms.length === 0 && (
         <Card className="earms-card">

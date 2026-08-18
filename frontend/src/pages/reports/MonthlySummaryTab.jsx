@@ -14,6 +14,10 @@ const MONTHS = [
   "July","August","September","October","November","December"
 ];
 
+// Cycled by category index so any number of categories each get a
+// distinct, consistent color in the license-fee row list.
+const CATEGORY_ROW_COLORS = ["text-blue-700", "text-purple-700", "text-emerald-700", "text-amber-700"];
+
 export default function MonthlySummaryTab({ settings }) {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
@@ -136,20 +140,27 @@ export default function MonthlySummaryTab({ settings }) {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {[
-                  { label: "Org (Cat I)", key: "org_cat_i", color: "text-blue-700" },
-                  { label: "Org (Cat II)", key: "org_cat_ii", color: "text-purple-700" },
-                  { label: "Non-Org", key: "non_org", color: "text-orange-700" }
-                ].map(({ label, key, color }) => {
-                  const lf = report.license_fees?.[key] || {};
-                  return (
-                    <div key={key} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
+                {(() => {
+                  const byCategory = report.license_fees?.by_category;
+                  const categoryRows = byCategory && Object.keys(byCategory).length > 0
+                    ? Object.entries(byCategory).map(([name, lf], idx) => ({
+                        label: `Org (${name})`, lf, color: CATEGORY_ROW_COLORS[idx % CATEGORY_ROW_COLORS.length],
+                      }))
+                    : [
+                        { label: "Org (Cat I)", lf: report.license_fees?.org_cat_i || {}, color: "text-blue-700" },
+                        { label: "Org (Cat II)", lf: report.license_fees?.org_cat_ii || {}, color: "text-purple-700" },
+                      ];
+                  return [
+                    ...categoryRows,
+                    { label: "Non-Org", lf: report.license_fees?.non_org || {}, color: "text-orange-700" },
+                  ].map(({ label, lf, color }) => (
+                    <div key={label} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                       <span className={`font-medium ${color}`}>{label}</span>
                       <span className="text-slate-600 text-sm">{lf.days || 0} days × {fmtINR(lf.rate || 0, 0)}</span>
                       <span className="font-bold text-slate-800">{fmtINR((lf.total || 0), 2)}</span>
                     </div>
-                  );
-                })}
+                  ));
+                })()}
                 <div className="flex justify-between items-center p-3 bg-amber-50 border border-amber-200 rounded-lg font-bold">
                   <span>Total License Fee</span>
                   <span>{fmtINR((report.total_license_fee || 0), 2)}</span>
@@ -169,8 +180,21 @@ export default function MonthlySummaryTab({ settings }) {
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Row label="Org (Cat I) Room Rent" value={`${report.org_cat_i_days || 0} × ₹${report.rates?.cat_i_room_rent || 470} = ${fmtINR((report.org_cat_i_days || 0) * (report.rates?.cat_i_room_rent || 470), 2)}`} />
-                  <Row label="Org (Cat II) Room Rent" value={`${report.org_cat_ii_days || 0} × ₹${report.rates?.cat_ii_room_rent || 385} = ${fmtINR((report.org_cat_ii_days || 0) * (report.rates?.cat_ii_room_rent || 385), 2)}`} />
+                  {(() => {
+                    const byCategory = report.rates?.by_category;
+                    const days = report.by_category_days || {};
+                    const rows = byCategory && Object.keys(byCategory).length > 0
+                      ? Object.entries(byCategory).map(([name, rate]) => {
+                          const d = days[name] || 0;
+                          const rent = rate.room_rent || 0;
+                          return <Row key={name} label={`Org (${name}) Room Rent`} value={`${d} × ₹${rent} = ${fmtINR(d * rent, 2)}`} />;
+                        })
+                      : [
+                          <Row key="cat-i" label="Org (Cat I) Room Rent" value={`${report.org_cat_i_days || 0} × ₹${report.rates?.cat_i_room_rent || 470} = ${fmtINR((report.org_cat_i_days || 0) * (report.rates?.cat_i_room_rent || 470), 2)}`} />,
+                          <Row key="cat-ii" label="Org (Cat II) Room Rent" value={`${report.org_cat_ii_days || 0} × ₹${report.rates?.cat_ii_room_rent || 385} = ${fmtINR((report.org_cat_ii_days || 0) * (report.rates?.cat_ii_room_rent || 385), 2)}`} />,
+                        ];
+                    return rows;
+                  })()}
                   <Row label="Non-Org Room Rent" value={`${report.non_org_days || 0} × ₹${report.rates?.non_org_room_rent || 570} = ${fmtINR((report.non_org_days || 0) * (report.rates?.non_org_room_rent || 570), 2)}`} />
                   <Row label="Room Rent Sub-Total" value={fmtINR((report.room_rent_total || 0), 2)} bold />
                   <Row label="License Fee Total" value={fmtINR((report.total_license_fee || 0), 2)} bold />
