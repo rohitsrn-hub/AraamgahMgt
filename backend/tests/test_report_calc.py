@@ -18,8 +18,11 @@ from utils.report_calc import (
     EXTRA_BED_RATE,
     booking_financials,
     build_room_maps,
-    effective_rate_settings,
+    effective_category_rate,
+    effective_non_org_rate,
     effective_stay,
+    get_category,
+    migrate_legacy_settings,
     nights_in_period,
     rate_components,
     report_booking_query,
@@ -196,7 +199,6 @@ class TestDateVersionedRates:
     }
 
     def test_no_history_uses_base_settings(self):
-        assert effective_rate_settings(SETTINGS, date(2026, 8, 20)) == {}
         assert rate_components(SETTINGS, True, "Cat I", date(2026, 8, 20)) == (470, 30)
 
     def test_before_effective_date_uses_old_rate(self):
@@ -259,3 +261,145 @@ class TestDateVersionedRates:
         )
         assert fin["nights"] == 2
         assert fin["total_amount"] == (500 + 35) * 2  # new rate for all 2 nights
+
+
+class TestLegacyMigration:
+    """migrate_legacy_settings() upgrades an old flat-field settings document
+    to the room_categories[]-based shape, in memory only, without touching
+    or deleting anything old — this is what makes it safe to run against a
+    document that already has real production data (e.g. an existing
+    Aug-2026 rate_history entry saved before N-category support existed)."""
+
+    OLD_SHAPE = {
+        "cat_i_room_rent": 470, "cat_i_license_fee": 30, "cat_i_rooms_count": 6,
+        "cat_ii_room_rent": 385, "cat_ii_license_fee": 15, "cat_ii_rooms_count": 9,
+        "non_org_room_rent": 570, "non_org_license_fee": 30,
+        "rate_history": [
+            {"id": "abc123", "effective_date": "2026-08-16",
+             "cat_i_room_rent": 500, "cat_i_license_fee": 35,
+             "cat_ii_room_rent": 420, "cat_ii_license_fee": 20,
+             "non_org_room_rent": 600, "non_org_license_fee": 35,
+             "note": "Administration rate revision"},
+        ],
+    }
+
+    def test_builds_room_categories_from_flat_fields(self):
+        migrated = migrate_legacy_settings(self.OLD_SHAPE)
+        cat_i = get_category(migrated, "Cat I")
+        cat_ii = get_category(migrated, "Cat II")
+        assert cat_i == {"id": "cat-i", "name": "Cat I", "prefix": "C1", "capacity": 2,
+                          "room_count": 6, "room_rent": 470, "license_fee": 30}
+        assert cat_ii == {"id": "cat-ii", "name": "Cat II", "prefix": "C2", "capacity": 2,
+                           "room_count": 9, "room_rent": 385, "license_fee": 15}
+
+    def test_converts_rate_history_to_category_rates(self):
+        migrated = migrate_legacy_settings(self.OLD_SHAPE)
+        entry = migrated["rate_history"][0]
+        assert entry["category_rates"] == {
+            "Cat I": {"room_rent": 500, "license_fee": 35},
+            "Cat II": {"room_rent": 420, "license_fee": 20},
+        }
+        # Non-category fields (id, effective_date, non_org_*, note) survive untouched.
+        assert entry["id"] == "abc123"
+        assert entry["effective_date"] == "2026-08-16"
+        assert entry["non_org_room_rent"] == 600
+        assert entry["note"] == "Administration rate revision"
+        # Old flat cat_i_room_rent-style keys are gone from the migrated entry
+        # (superseded by category_rates), but the ORIGINAL dict is untouched.
+        assert "cat_i_room_rent" not in entry
+        assert self.OLD_SHAPE["rate_history"][0]["cat_i_room_rent"] == 500
+
+    def test_does_not_mutate_original_dict(self):
+        original_copy = {**self.OLD_SHAPE, "rate_history": list(self.OLD_SHAPE["rate_history"])}
+        migrate_legacy_settings(self.OLD_SHAPE)
+        assert self.OLD_SHAPE == original_copy
+        assert "room_categories" not in self.OLD_SHAPE  # migration didn't add it in place
+
+    def test_idempotent_on_already_migrated_settings(self):
+        once = migrate_legacy_settings(self.OLD_SHAPE)
+        twice = migrate_legacy_settings(once)
+        assert once == twice
+
+    def test_rate_components_gives_identical_numbers_old_vs_migrated_shape(self):
+        # The whole point: billing must not change for existing Cat I/Cat II
+        # bookings just because the storage shape changed underneath them.
+        migrated = migrate_legacy_settings(self.OLD_SHAPE)
+        for cat in ("Cat I", "Cat II"):
+            for ci in (date(2026, 8, 10), date(2026, 8, 16), date(2026, 9, 1)):
+                assert rate_components(self.OLD_SHAPE, True, cat, ci) == \
+                       rate_components(migrated, True, cat, ci)
+
+
+class TestNCategorySupport:
+    """The actual point of this work: a category beyond the original Cat I/
+    Cat II must price correctly, get its own future rate schedule, and never
+    fall through to Cat II's rate by accident (the bug found in the old
+    `if category == "Cat I": ... else: ...` branches throughout the app)."""
+
+    THREE_CATEGORIES = {
+        "room_categories": [
+            {"id": "cat-i", "name": "Cat I", "prefix": "C1", "capacity": 2,
+             "room_count": 6, "room_rent": 470, "license_fee": 30},
+            {"id": "cat-ii", "name": "Cat II", "prefix": "C2", "capacity": 2,
+             "room_count": 9, "room_rent": 385, "license_fee": 15},
+            {"id": "cat-iii", "name": "Cat III", "prefix": "C3", "capacity": 4,
+             "room_count": 24, "room_rent": 650, "license_fee": 40},
+        ],
+        "non_org_room_rent": 570, "non_org_license_fee": 30,
+    }
+
+    def test_third_category_prices_from_its_own_config_not_cat_ii(self):
+        assert rate_components(self.THREE_CATEGORIES, True, "Cat III", date(2026, 9, 1)) == (650, 40)
+
+    def test_effective_category_rate_called_directly(self):
+        # rate_components() is a thin (is_org, category) router — this checks
+        # the underlying per-category resolver itself, dict-shaped.
+        assert effective_category_rate(self.THREE_CATEGORIES, "Cat III", date(2026, 9, 1)) == \
+            {"room_rent": 650, "license_fee": 40}
+
+    def test_effective_non_org_rate_called_directly(self):
+        assert effective_non_org_rate(self.THREE_CATEGORIES, date(2026, 9, 1)) == \
+            {"room_rent": 570, "license_fee": 30}
+
+    def test_third_category_gets_its_own_future_rate_change(self):
+        settings = {
+            **self.THREE_CATEGORIES,
+            "rate_history": [
+                {"effective_date": "2026-10-01", "category_rates": {
+                    "Cat III": {"room_rent": 700, "license_fee": 45},
+                }},
+            ],
+        }
+        # Cat III's change doesn't touch Cat I/II...
+        assert rate_components(settings, True, "Cat I", date(2026, 10, 15)) == (470, 30)
+        assert rate_components(settings, True, "Cat II", date(2026, 10, 15)) == (385, 15)
+        # ...and only applies to Cat III from its effective date.
+        assert rate_components(settings, True, "Cat III", date(2026, 9, 30)) == (650, 40)
+        assert rate_components(settings, True, "Cat III", date(2026, 10, 1)) == (700, 45)
+
+    def test_non_org_stays_flat_regardless_of_which_of_the_three_categories(self):
+        for cat in ("Cat I", "Cat II", "Cat III"):
+            assert rate_components(self.THREE_CATEGORIES, False, cat, date(2026, 9, 1)) == (570, 30)
+
+    def test_unrecognized_category_does_not_silently_bill_as_cat_ii(self):
+        # The old `if category == "Cat I": ... else: (must be Cat II)` branch
+        # made ANY unrecognized category name price as Cat II. A typo'd or
+        # not-yet-configured category name must not silently match Cat II's
+        # rate — it should fall back to the safe default instead.
+        assert get_category(self.THREE_CATEGORIES, "Cat IV — Cottage") is None
+        rent, fee = rate_components(self.THREE_CATEGORIES, True, "Cat IV — Cottage", date(2026, 9, 1))
+        assert (rent, fee) != (385, 15)  # must NOT be Cat II's rate
+        assert (rent, fee) == (470, 30)  # safe default, not a crash
+
+    def test_booking_financials_end_to_end_with_third_category(self):
+        rooms = ROOMS + [{"id": "r5", "room_number": "C3-01", "category": "Cat III"}]
+        room_maps = build_room_maps(rooms)
+        bk = booking(
+            check_in_date="2026-09-01", check_out_date="2026-09-03",
+            room_numbers=["C1-01", "C3-01"], room_categories=["Cat I", "Cat III"],
+        )
+        fin = booking_financials(bk, self.THREE_CATEGORIES, date(2026, 9, 1), date(2026, 9, 30), room_maps)
+        assert fin["nights"] == 2
+        by_room = {r["room_number"]: r["rate_per_night"] for r in fin["rooms"]}
+        assert by_room == {"C1-01": 470 + 30, "C3-01": 650 + 40}
+        assert fin["total_amount"] == (470 + 30) * 2 + (650 + 40) * 2

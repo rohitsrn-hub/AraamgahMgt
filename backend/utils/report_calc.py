@@ -120,36 +120,104 @@ def resolve_rooms(bk: dict, room_maps: dict) -> list:
     return list(zip(room_nums, room_cats[: len(room_nums)]))
 
 
-RATE_FIELDS = (
-    "cat_i_room_rent", "cat_i_license_fee",
-    "cat_ii_room_rent", "cat_ii_license_fee",
-    "non_org_room_rent", "non_org_license_fee",
-)
+# Legacy flat-field names from before room_categories carried its own rates.
+# migrate_legacy_settings() reads these once to build the new shape; nothing
+# else should read them directly any more.
+LEGACY_CATEGORY_DEFAULTS = {
+    "Cat I": {"id": "cat-i", "prefix": "C1", "capacity": 2,
+              "count_field": "cat_i_rooms_count", "count_default": 6,
+              "rent_field": "cat_i_room_rent", "rent_default": 470,
+              "fee_field": "cat_i_license_fee", "fee_default": 30},
+    "Cat II": {"id": "cat-ii", "prefix": "C2", "capacity": 2,
+               "count_field": "cat_ii_rooms_count", "count_default": 9,
+               "rent_field": "cat_ii_room_rent", "rent_default": 385,
+               "fee_field": "cat_ii_license_fee", "fee_default": 15},
+}
 
 
-def effective_rate_settings(settings: dict, check_in_date) -> dict:
-    """Resolve the rate fields that apply to a booking, by its check-in date.
+def migrate_legacy_settings(settings: dict) -> dict:
+    """Upgrade an old-shape settings document to the N-category shape, in
+    memory only — this never writes to the database and never deletes or
+    overwrites a legacy field, so it's always safe to call and always safe
+    to re-run (idempotent). Old fields (cat_i_room_rent, etc.) are left
+    exactly as they were: a rollback is just reverting the code, since the
+    data those old fields need still exists untouched.
 
-    Rates are locked in per booking by check-in date, not split night-by-night
-    across a rate change — a stay that spans a rate revision bills entirely at
-    whichever rate was in effect on the date the booking is/was dated to check
-    in (owner-confirmed policy, for the Aug 2026 rate revision: a booking
-    reserved for a date on/after the new rate's effective_date bills at the
-    new rate in full, even if made before that date; a stay already checked
-    in before it keeps the old rate for its whole stay, including an Extend).
-
-    settings' flat cat_i_room_rent/... fields are the base/current rate. Each
-    entry in settings["rate_history"] (added via Settings > Rate Schedule)
-    carries an effective_date and overrides some or all of those fields for
-    any check-in on or after that date. Entries are applied oldest-first so
-    the latest one that already applies to this check_in_date wins.
+    Before this, a category's rate lived in two disconnected places: the
+    flat cat_i_room_rent/cat_ii_room_rent/... fields (what billing actually
+    read) and a separate room_categories[] array with its own rate/
+    def_civ_rate fields (what the Settings UI showed — write-only, nothing
+    read it back). This makes room_categories[] the single real source,
+    seeded from whichever flat fields already existed, so the two can never
+    drift apart again.
     """
-    # Only copy fields settings actually has — a field missing here must stay
-    # missing, not become an explicit None, so rate_components()'s own
-    # .get(key, default) fallback still applies. dict.get(key, default) only
-    # uses default when the key is ABSENT; a key present with value None
-    # would silently defeat every hardcoded fallback (470/385/etc.) below.
-    resolved = {k: settings[k] for k in RATE_FIELDS if settings.get(k) is not None}
+    settings = dict(settings)
+
+    categories = settings.get("room_categories") or []
+    needs_upgrade = not categories or any(
+        "room_rent" not in c or "license_fee" not in c for c in categories
+    )
+    if needs_upgrade:
+        settings["room_categories"] = [
+            {
+                "id": info["id"],
+                "name": name,
+                "prefix": info["prefix"],
+                "capacity": info["capacity"],
+                "room_count": settings.get(info["count_field"], info["count_default"]),
+                "room_rent": settings.get(info["rent_field"], info["rent_default"]),
+                "license_fee": settings.get(info["fee_field"], info["fee_default"]),
+            }
+            for name, info in LEGACY_CATEGORY_DEFAULTS.items()
+        ]
+
+    migrated_history = []
+    for h in settings.get("rate_history") or []:
+        if "category_rates" in h:
+            migrated_history.append(h)
+            continue
+        category_rates = {}
+        for name, info in LEGACY_CATEGORY_DEFAULTS.items():
+            override = {}
+            if h.get(info["rent_field"]) is not None:
+                override["room_rent"] = h[info["rent_field"]]
+            if h.get(info["fee_field"]) is not None:
+                override["license_fee"] = h[info["fee_field"]]
+            if override:
+                category_rates[name] = override
+        migrated_history.append({
+            **{k: v for k, v in h.items() if k not in
+               ("cat_i_room_rent", "cat_i_license_fee", "cat_ii_room_rent", "cat_ii_license_fee")},
+            "category_rates": category_rates,
+        })
+    settings["rate_history"] = migrated_history
+
+    return settings
+
+
+def get_category(settings: dict, category_name: str) -> Optional[dict]:
+    """The room_categories[] entry matching this category name, or None for
+    a category name that doesn't exist in settings (shouldn't normally
+    happen — every room/booking category should trace back to a configured
+    category — but money code must not crash if it does)."""
+    for cat in settings.get("room_categories") or []:
+        if cat.get("name") == category_name:
+            return cat
+    return None
+
+
+def effective_category_rate(settings: dict, category_name: str, check_in_date) -> dict:
+    """Resolve {room_rent, license_fee} for ONE category, by a booking's own
+    check-in date — same policy as before: a rate change is locked in at
+    check-in, never split per-night across a change (see the module-level
+    Aug 2026 policy note previously here, still in force). Call
+    migrate_legacy_settings() on `settings` first if it might be old-shape.
+    """
+    cat = get_category(settings, category_name)
+    resolved = {
+        "room_rent": cat.get("room_rent") if cat else 470,
+        "license_fee": cat.get("license_fee") if cat else 30,
+    }
     ci = check_in_date if isinstance(check_in_date, date) else _parse_date(check_in_date)
     if ci is None:
         return resolved
@@ -158,33 +226,56 @@ def effective_rate_settings(settings: dict, check_in_date) -> dict:
     history.sort(key=lambda h: _parse_date(h["effective_date"]))
     for h in history:
         if _parse_date(h["effective_date"]) <= ci:
-            for k in RATE_FIELDS:
-                if h.get(k) is not None:
-                    resolved[k] = h[k]
+            override = (h.get("category_rates") or {}).get(category_name)
+            if override:
+                if override.get("room_rent") is not None:
+                    resolved["room_rent"] = override["room_rent"]
+                if override.get("license_fee") is not None:
+                    resolved["license_fee"] = override["license_fee"]
+    return resolved
+
+
+def effective_non_org_rate(settings: dict, check_in_date) -> dict:
+    """Resolve {room_rent, license_fee} for the Non-Org rate — flat, the
+    same regardless of room category, by design (owner ruling)."""
+    resolved = {
+        "room_rent": settings.get("non_org_room_rent", 570),
+        "license_fee": settings.get("non_org_license_fee", 30),
+    }
+    ci = check_in_date if isinstance(check_in_date, date) else _parse_date(check_in_date)
+    if ci is None:
+        return resolved
+
+    history = [h for h in (settings.get("rate_history") or []) if _parse_date(h.get("effective_date"))]
+    history.sort(key=lambda h: _parse_date(h["effective_date"]))
+    for h in history:
+        if _parse_date(h["effective_date"]) <= ci:
+            if h.get("non_org_room_rent") is not None:
+                resolved["room_rent"] = h["non_org_room_rent"]
+            if h.get("non_org_license_fee") is not None:
+                resolved["license_fee"] = h["non_org_license_fee"]
     return resolved
 
 
 def rate_components(settings: dict, is_org: bool, category: str, check_in_date):
     """(room_rent, license_fee) per night for one room, resolved for the
-    booking's own check_in_date (required — see effective_rate_settings).
-    No default: every caller must be explicit about which booking's rate
-    this is, so a future rate change can't silently apply to the wrong
-    booking because a call site forgot to pass a date."""
-    r = effective_rate_settings(settings, check_in_date)
+    booking's own check_in_date (required — no default, so a call site can't
+    silently fall back to "today's rate" by omitting it).
+
+    Self-migrating: applies migrate_legacy_settings() internally, so every
+    caller gets N-category-safe resolution (any category name, not just
+    "Cat I"/"Cat II") automatically, whether or not settings has been
+    upgraded to the new room_categories[] shape yet. A caller processing
+    many rooms in a loop should migrate once and call effective_category_rate
+    directly to avoid repeating the migration per room; this wrapper favors
+    safety over that micro-optimization for the many call sites that don't.
+    """
+    settings = migrate_legacy_settings(settings)
     if not is_org:
-        return (
-            r.get("non_org_room_rent", 570),
-            r.get("non_org_license_fee", 30),
-        )
-    if category == "Cat I":
-        return (
-            r.get("cat_i_room_rent", 470),
-            r.get("cat_i_license_fee", 30),
-        )
-    return (
-        r.get("cat_ii_room_rent", 385),
-        r.get("cat_ii_license_fee", 15),
-    )
+        r = effective_non_org_rate(settings, check_in_date)
+    else:
+        r = effective_category_rate(settings, category, check_in_date)
+    return (r["room_rent"], r["license_fee"])
 
 
 def _segment_room_nights(bk: dict, period_start: date, period_end: date, room_maps: dict) -> dict:
@@ -220,6 +311,7 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
         extra_bed_charge  extra_beds x EXTRA_BED_RATE x nights
         total_amount      room_rent + license_fee + extra_bed_charge
     """
+    settings = migrate_legacy_settings(settings)
     is_org = bk.get("is_org", False)
     nights = nights_in_period(bk, period_start, period_end)
 
