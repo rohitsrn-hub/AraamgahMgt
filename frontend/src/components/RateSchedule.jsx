@@ -21,7 +21,7 @@ const emptyRates = () => ({
   non_org_room_rent: "", non_org_license_fee: "",
 });
 
-export default function RateSchedule() {
+export default function RateSchedule({ onUpdate }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [todayRates, setTodayRates] = useState(null);
@@ -69,6 +69,7 @@ export default function RateSchedule() {
       toast.success(`Rate change scheduled from ${form.effective_date}`);
       setForm({ effective_date: "", note: "", ...emptyRates() });
       fetchSchedule();
+      onUpdate?.(); // refresh the parent's settings so Room Rates Summary etc. can't go stale
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to schedule rate change");
     } finally {
@@ -81,6 +82,7 @@ export default function RateSchedule() {
       await axios.delete(`${API}/settings/rate-schedule/${id}`);
       toast.success("Scheduled rate change removed");
       fetchSchedule();
+      onUpdate?.();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to remove scheduled rate change");
     }

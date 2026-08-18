@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import { API } from "@/App";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +50,31 @@ export default function Settings({ settings, onUpdate }) {
   });
   const [saving, setSaving] = useState(false);
   const [newColor, setNewColor] = useState("");
+
+  // formData's initial values are locked in at mount (useState only reads
+  // its initializer once). The rate fields specifically need to track the
+  // `settings` prop live: GET /settings resolves them to whichever rate is
+  // effective TODAY, so the moment a scheduled rate change's date arrives —
+  // or the moment a new one is scheduled/removed via the Rate Schedule
+  // panel below — this screen would otherwise keep showing whatever was
+  // true when it first mounted. Scoped to just the rate fields, not the
+  // whole form, so it can't clobber an admin's unsaved edits elsewhere.
+  useEffect(() => {
+    if (!settings) return;
+    setFormData((prev) => ({
+      ...prev,
+      cat_i_room_rent: settings.cat_i_room_rent ?? prev.cat_i_room_rent,
+      cat_i_license_fee: settings.cat_i_license_fee ?? prev.cat_i_license_fee,
+      cat_ii_room_rent: settings.cat_ii_room_rent ?? prev.cat_ii_room_rent,
+      cat_ii_license_fee: settings.cat_ii_license_fee ?? prev.cat_ii_license_fee,
+      non_org_room_rent: settings.non_org_room_rent ?? prev.non_org_room_rent,
+      non_org_license_fee: settings.non_org_license_fee ?? prev.non_org_license_fee,
+    }));
+  }, [
+    settings?.cat_i_room_rent, settings?.cat_i_license_fee,
+    settings?.cat_ii_room_rent, settings?.cat_ii_license_fee,
+    settings?.non_org_room_rent, settings?.non_org_license_fee,
+  ]);
   
   // P4: Room Categories Management
   const [categories, setCategories] = useState(
@@ -425,7 +450,7 @@ export default function Settings({ settings, onUpdate }) {
       </Card>
 
       {/* Rate Schedule (date-versioned future rate changes) */}
-      <RateSchedule />
+      <RateSchedule onUpdate={onUpdate} />
 
       {/* Colors Management */}
       <Card className="earms-card" data-testid="colors-section">
