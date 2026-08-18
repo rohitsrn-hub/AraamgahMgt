@@ -8,7 +8,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+from typing import Dict, List, Optional
 import re
 import uuid
 from datetime import datetime, timezone, timedelta, date as date_type
@@ -35,8 +35,10 @@ from utils.report_calc import (
     build_room_maps,
     booking_financials,
     rate_components,
-    effective_rate_settings,
-    RATE_FIELDS,
+    migrate_legacy_settings,
+    get_category,
+    effective_category_rate,
+    effective_non_org_rate,
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
 
@@ -139,9 +141,11 @@ async def require_staff_or_admin_role(current_user: dict = Depends(get_current_u
     return current_user
 
 # ============= ENUMS =============
-class RoomCategory(str, Enum):
-    CAT_I = "Cat I"
-    CAT_II = "Cat II"
+# Room category used to be a fixed 2-value enum (Cat I / Cat II). Categories
+# are now admin-configurable (Settings > Room Categories) — any number of
+# them — so a room/booking's category is a plain string, validated at
+# runtime against the live app_settings.room_categories list rather than a
+# compile-time-fixed enum. See utils/report_calc.get_category().
 
 class RoomStatus(str, Enum):
     AVAILABLE = "available"
@@ -247,12 +251,13 @@ class AppSettingsUpdate(BaseModel):
     colors: Optional[List[str]] = None
     cancellation_policy: Optional[List[dict]] = None
 
+class CategoryRateOverride(BaseModel):
+    room_rent: Optional[float] = None
+    license_fee: Optional[float] = None
+
 class RateScheduleEntry(BaseModel):
     effective_date: str  # YYYY-MM-DD — the check-in date from which this rate applies
-    cat_i_room_rent: Optional[float] = None
-    cat_i_license_fee: Optional[float] = None
-    cat_ii_room_rent: Optional[float] = None
-    cat_ii_license_fee: Optional[float] = None
+    category_rates: Dict[str, CategoryRateOverride] = Field(default_factory=dict)  # category name -> override
     non_org_room_rent: Optional[float] = None
     non_org_license_fee: Optional[float] = None
     note: Optional[str] = None
@@ -283,19 +288,19 @@ class Room(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     room_number: str
-    category: RoomCategory
+    category: str
     status: RoomStatus = RoomStatus.AVAILABLE
     floor: int = 1
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class RoomCreate(BaseModel):
     room_number: str
-    category: RoomCategory
+    category: str
     floor: int = 1
 
 class RoomUpdate(BaseModel):
     room_number: Optional[str] = None
-    category: Optional[RoomCategory] = None
+    category: Optional[str] = None
     status: Optional[RoomStatus] = None
     floor: Optional[int] = None
 
@@ -624,13 +629,23 @@ async def get_settings(current_user: dict = Depends(get_current_user_with_db)):
         default = AppSettings()
         return default.model_dump()
 
-    # Merge in whichever rate is effective TODAY, so the Settings page's
-    # display/edit fields (Room Rates Summary, License Fee Breakdown) show
-    # the current real rate once a scheduled change's date arrives, instead
-    # of staying frozen on the old base values forever. rate_history itself
-    # stays in the response untouched — booking previews resolve per their
-    # own check-in date, not "today" (see frontend/src/utils/rateUtils.js).
-    return {**settings, **effective_rate_settings(settings, ist_today_str())}
+    settings = migrate_legacy_settings(settings)
+    today = ist_today_str()
+
+    # Overlay whichever rate is effective TODAY onto each category, so the
+    # Settings page's Room Categories view shows the current real rate once
+    # a scheduled change's date arrives, instead of staying frozen on
+    # whatever was true when the category was last edited. rate_history
+    # itself stays in the response untouched — booking previews resolve per
+    # their own check-in date, not "today" (see frontend/src/utils/rateUtils.js).
+    settings["room_categories"] = [
+        {**cat, **effective_category_rate(settings, cat["name"], today)}
+        for cat in settings.get("room_categories", [])
+    ]
+    non_org_today = effective_non_org_rate(settings, today)
+    settings["non_org_room_rent"] = non_org_today["room_rent"]
+    settings["non_org_license_fee"] = non_org_today["license_fee"]
+    return settings
 
 @api_router.post("/settings/setup")
 async def complete_setup(request: SetupRequest, current_user: dict = Depends(require_admin_role)):
@@ -689,7 +704,18 @@ async def complete_setup(request: SetupRequest, current_user: dict = Depends(req
     )
     
     doc = serialize_doc(settings.model_dump())
-    
+    # Seed room_categories in the new N-category shape from the start, so a
+    # fresh install never needs migrate_legacy_settings() at all. More
+    # categories can be added afterward via Settings > Room Categories.
+    doc["room_categories"] = [
+        {"id": "cat-i", "name": "Cat I", "prefix": "C1", "capacity": 2,
+         "room_count": request.cat_i_rooms_count,
+         "room_rent": request.cat_i_room_rent, "license_fee": request.cat_i_license_fee},
+        {"id": "cat-ii", "name": "Cat II", "prefix": "C2", "capacity": 2,
+         "room_count": request.cat_ii_rooms_count,
+         "room_rent": request.cat_ii_room_rent, "license_fee": request.cat_ii_license_fee},
+    ]
+
     if existing:
         await db.app_settings.update_one({}, {"$set": doc})
     else:
@@ -702,18 +728,18 @@ async def complete_setup(request: SetupRequest, current_user: dict = Depends(req
     for i in range(1, request.cat_i_rooms_count + 1):
         room = Room(
             room_number=f"C1-{i:02d}",
-            category=RoomCategory.CAT_I,
+            category="Cat I",
             floor=1 if i <= 3 else 2
         )
         await db.rooms.insert_one(serialize_doc(room.model_dump()))
-    
+
     # Create Cat II rooms (continuing from Cat I count, e.g., C2-07 to C2-15)
     start_num = request.cat_i_rooms_count + 1
     for i in range(request.cat_ii_rooms_count):
         room_num = start_num + i
         room = Room(
             room_number=f"C2-{room_num:02d}",
-            category=RoomCategory.CAT_II,
+            category="Cat II",
             floor=1 if (i + 1) <= 5 else 2
         )
         await db.rooms.insert_one(serialize_doc(room.model_dump()))
@@ -747,15 +773,84 @@ async def reset_setup(current_user: dict = Depends(require_admin_role)):
 
     return {"message": "Setup reset successfully. Please reload the page."}
 
+REQUIRED_CATEGORY_FIELDS = ["id", "name", "prefix", "capacity", "room_count", "room_rent", "license_fee"]
+
 @api_router.put("/settings/categories")
 async def update_room_categories(categories: List[dict], current_user: dict = Depends(require_admin_role)):
-    """P4: Update room categories configuration"""
-    # Validate categories
+    """The live source of truth for room categories: identity (name, prefix,
+    capacity), provisioning target (room_count), and base rate (room_rent +
+    license_fee) all in one place, all actually used elsewhere in the app —
+    unlike the old version of this endpoint, which saved this exact
+    structure and nothing ever read it back (billing used a separate,
+    disconnected set of flat cat_i_room_rent/cat_ii_room_rent fields).
+
+    Two side effects on save, both deliberately conservative on live data:
+    - A category whose room_count is now HIGHER than its actual room count
+      gets the difference auto-created (additive, safe).
+    - A category whose room_count is now LOWER does NOT delete anything —
+      it's a target/label only; admin removes specific rooms via the Rooms
+      page (owner's explicit choice: no automatic bulk-delete from a number
+      field on live data).
+    - Removing a category entirely is refused if any room still has that
+      category name (owner's explicit choice) — delete/reassign those rooms
+      via the Rooms page first, then the empty category can be removed.
+    """
+    if not categories:
+        raise HTTPException(status_code=400, detail="At least one category is required")
+
     for cat in categories:
-        if not all(k in cat for k in ["id", "name", "rate", "def_civ_rate", "room_count", "prefix", "capacity"]):
-            raise HTTPException(status_code=400, detail="Invalid category structure - missing required fields")
-    
-    # Update settings
+        missing = [f for f in REQUIRED_CATEGORY_FIELDS if f not in cat or cat[f] in (None, "")]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Category missing required field(s): {', '.join(missing)}")
+        if cat["room_count"] < 0 or cat["room_rent"] < 0 or cat["license_fee"] < 0 or cat["capacity"] < 1:
+            raise HTTPException(status_code=400, detail=f"Category '{cat['name']}' has an invalid numeric field")
+
+    names = [c["name"] for c in categories]
+    if len(names) != len(set(names)):
+        raise HTTPException(status_code=400, detail="Category names must be unique")
+    prefixes = [c["prefix"] for c in categories]
+    if len(prefixes) != len(set(prefixes)):
+        raise HTTPException(status_code=400, detail="Category prefixes must be unique")
+
+    settings = migrate_legacy_settings(await db.app_settings.find_one({}, {"_id": 0}) or {})
+    existing_categories = settings.get("room_categories", [])
+    existing_names = {c["name"] for c in existing_categories}
+    new_names = set(names)
+
+    # Block removing a category that still has rooms under it.
+    removed_names = existing_names - new_names
+    for name in removed_names:
+        still_has_rooms = await db.rooms.find_one({"category": name}, {"_id": 0})
+        if still_has_rooms:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot remove category '{name}' — it still has rooms. Delete or reassign them on the Rooms page first."
+            )
+
+    # Provision rooms for any category whose target room_count increased.
+    created_rooms = []
+    for cat in categories:
+        actual_count = await db.rooms.count_documents({"category": cat["name"]})
+        target_count = int(cat["room_count"])
+        if target_count <= actual_count:
+            continue
+        existing_room_docs = await db.rooms.find({"category": cat["name"]}, {"_id": 0}).to_list(1000)
+        existing_numbers = set()
+        for r in existing_room_docs:
+            suffix = r["room_number"].removeprefix(f"{cat['prefix']}-")
+            if suffix.isdigit():
+                existing_numbers.add(int(suffix))
+        next_num = 1
+        for _ in range(target_count - actual_count):
+            while next_num in existing_numbers:
+                next_num += 1
+            room_number = f"{cat['prefix']}-{next_num:02d}"
+            room_obj = Room(room_number=room_number, category=cat["name"], floor=1)
+            await db.rooms.insert_one(serialize_doc(room_obj.model_dump()))
+            created_rooms.append(room_number)
+            existing_numbers.add(next_num)
+            next_num += 1
+
     result = await db.app_settings.update_one(
         {},
         {"$set": {
@@ -763,28 +858,41 @@ async def update_room_categories(categories: List[dict], current_user: dict = De
             "updated_at": datetime.now(timezone.utc).isoformat()
         }}
     )
-    
-    if result.matched_count == 0:  # matched, not modified — see update_settings
+    if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Settings not found")
 
-    return {"message": "Room categories updated successfully", "categories": categories}
+    return {
+        "message": "Room categories updated successfully",
+        "categories": categories,
+        "rooms_created": created_rooms,
+    }
 
 # ============= RATE SCHEDULE (date-versioned rate changes) =============
 # A booking bills entirely at whichever rate was in effect on its own
-# check-in date (see utils/report_calc.effective_rate_settings) — so a
+# check-in date (see utils/report_calc.effective_category_rate) — so a
 # future rate change can be entered here today without touching any
-# existing or currently-active booking's price. Only rooms/utils/
-# report_calc.rate_components() may read these fields for money; nothing
+# existing or currently-active booking's price. A schedule entry can target
+# any subset of the configured categories (category_rates is sparse), plus
+# an optional Non-Org override. Only rate_components()/effective_category_
+# rate()/effective_non_org_rate() may read these fields for money; nothing
 # here computes a rupee amount itself.
 
 @api_router.get("/settings/rate-schedule")
 async def get_rate_schedule(current_user: dict = Depends(require_admin_role)):
-    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    settings = migrate_legacy_settings(await db.app_settings.find_one({}, {"_id": 0}) or {})
+    today = ist_today_str()
     history = sorted(settings.get("rate_history") or [], key=lambda h: h.get("effective_date", ""))
-    base_rates = {k: settings.get(k) for k in RATE_FIELDS}
     return {
-        "current_base_rates": base_rates,
-        "today_effective_rates": effective_rate_settings(settings, ist_today_str()),
+        "categories": settings.get("room_categories", []),
+        "current_base_rates": {
+            cat["name"]: {"room_rent": cat.get("room_rent"), "license_fee": cat.get("license_fee")}
+            for cat in settings.get("room_categories", [])
+        },
+        "today_effective_rates": {
+            cat["name"]: effective_category_rate(settings, cat["name"], today)
+            for cat in settings.get("room_categories", [])
+        },
+        "today_effective_non_org_rate": effective_non_org_rate(settings, today),
         "scheduled_changes": history,
     }
 
@@ -803,14 +911,30 @@ async def add_rate_schedule_entry(entry: RateScheduleEntry, current_user: dict =
     if effective < today:
         raise HTTPException(status_code=400, detail="effective_date cannot be in the past")
 
-    provided_rates = {k: getattr(entry, k) for k in RATE_FIELDS if getattr(entry, k) is not None}
-    if not provided_rates:
-        raise HTTPException(status_code=400, detail="At least one rate field must be provided")
-    for k, v in provided_rates.items():
-        if v < 0:
-            raise HTTPException(status_code=400, detail=f"{k} cannot be negative")
+    settings = migrate_legacy_settings(await db.app_settings.find_one({}, {"_id": 0}) or {})
+    valid_category_names = {c["name"] for c in settings.get("room_categories", [])}
+    for cat_name in entry.category_rates:
+        if cat_name not in valid_category_names:
+            raise HTTPException(status_code=400, detail=f"'{cat_name}' is not a configured room category")
 
-    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    category_rates = {
+        name: {k: v for k, v in override.model_dump().items() if v is not None}
+        for name, override in entry.category_rates.items()
+    }
+    category_rates = {name: fields for name, fields in category_rates.items() if fields}
+
+    provided_non_org = {k: v for k, v in (
+        ("non_org_room_rent", entry.non_org_room_rent),
+        ("non_org_license_fee", entry.non_org_license_fee),
+    ) if v is not None}
+
+    if not category_rates and not provided_non_org:
+        raise HTTPException(status_code=400, detail="At least one rate field must be provided")
+    for fields in list(category_rates.values()) + [provided_non_org]:
+        for k, v in fields.items():
+            if v < 0:
+                raise HTTPException(status_code=400, detail=f"{k} cannot be negative")
+
     existing_dates = {h.get("effective_date") for h in (settings.get("rate_history") or [])}
     if entry.effective_date in existing_dates:
         raise HTTPException(
@@ -821,7 +945,8 @@ async def add_rate_schedule_entry(entry: RateScheduleEntry, current_user: dict =
     doc = {
         "id": str(uuid.uuid4()),
         "effective_date": entry.effective_date,
-        **provided_rates,
+        "category_rates": category_rates,
+        **provided_non_org,
         "note": entry.note,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": current_user.get("username") or current_user.get("id"),
@@ -1146,10 +1271,10 @@ async def reset_user_password(
 # ============= ROOMS =============
 
 @api_router.get("/rooms", response_model=List[dict])
-async def get_rooms(category: Optional[RoomCategory] = None, status: Optional[RoomStatus] = None, current_user: dict = Depends(get_current_user_with_db)):
+async def get_rooms(category: Optional[str] = None, status: Optional[RoomStatus] = None, current_user: dict = Depends(get_current_user_with_db)):
     query = {}
     if category:
-        query["category"] = category.value
+        query["category"] = category
     if status:
         query["status"] = status.value
     
@@ -1223,11 +1348,30 @@ async def get_room(room_id: str, current_user: dict = Depends(get_current_user_w
         raise HTTPException(status_code=404, detail="Room not found")
     return room
 
+async def _require_valid_category(category_name: str):
+    """A room's category must be one of the categories actually configured
+    in Settings > Room Categories. Category used to be enforced by Pydantic
+    as a fixed 2-value enum; now that categories are admin-configurable
+    (any number of them), this runtime check replaces that guarantee —
+    without it, a typo'd category name would create a room that never
+    resolves to a real rate (see report_calc.get_category, which returns
+    None and falls back to a default rather than crashing, but a room
+    should never be allowed into that state to begin with)."""
+    settings = migrate_legacy_settings(await db.app_settings.find_one({}, {"_id": 0}) or {})
+    valid_names = {c["name"] for c in settings.get("room_categories", [])}
+    if category_name not in valid_names:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{category_name}' is not a configured room category. Add it in Settings > Room Categories first."
+        )
+
 @api_router.post("/rooms")
 async def create_room(room: RoomCreate, current_user: dict = Depends(require_admin_role)):
     existing = await db.rooms.find_one({"room_number": room.room_number}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail=f"Room {room.room_number} already exists")
+
+    await _require_valid_category(room.category)
 
     room_obj = Room(**room.model_dump())
     doc = serialize_doc(room_obj.model_dump())
@@ -1248,6 +1392,9 @@ async def update_room(room_id: str, update: RoomUpdate, current_user: dict = Dep
         )
         if collision:
             raise HTTPException(status_code=400, detail=f"Room {update_data['room_number']} already exists")
+
+    if "category" in update_data:
+        await _require_valid_category(update_data["category"])
 
     result = await db.rooms.update_one({"id": room_id}, {"$set": update_data})
     if result.matched_count == 0:
@@ -2043,8 +2190,7 @@ async def process_room_segments(room_segments: List[dict], check_in_date: str, c
     # Calculate cost for each night
     for segment in room_segments:
         for room_data in segment.get("rooms", []):
-            room_category = RoomCategory(room_data["category"])
-            rate, license_fee = rate_components(settings, is_org, room_category, check_in_date)
+            rate, license_fee = rate_components(settings, is_org, room_data["category"], check_in_date)
             total_amount += rate + license_fee
     
     # Check if rooms change during stay
@@ -2875,10 +3021,6 @@ async def amend_booking(request: AmendBookingRequest, current_user: dict = Depen
         # Get room categories (either new or existing)
         room_categories = amendment_data.get("room_categories", booking.get("room_categories", []))
 
-        # Calculate total for each category
-        cat_i_count = sum(1 for cat in room_categories if cat == "Cat I")
-        cat_ii_count = sum(1 for cat in room_categories if cat == "Cat II")
-
         # Use is_org to determine rates. Rate resolved by `check_in` — the
         # amended date if the amendment moves it, otherwise the booking's
         # existing one — so moving a booking's check-in across a rate
@@ -2886,13 +3028,19 @@ async def amend_booking(request: AmendBookingRequest, current_user: dict = Depen
         # cat_i_rate/cat_ii_rate settings fields (not edited by Settings
         # since the rate split), so amendments silently used stale/default
         # rates instead of the real configured ones.
+        #
+        # Also previously only counted rooms whose category was literally
+        # "Cat I" or "Cat II" — any other category name (a typo, or any
+        # category added after the original two) contributed to NEITHER
+        # count and silently dropped out of the bill entirely. Now sums
+        # each room's own category rate directly, so it works for any
+        # number of configured categories.
         is_org = booking.get("is_org", False)
-        cat_i_rent, cat_i_licence = rate_components(settings, is_org, "Cat I", check_in)
-        cat_ii_rent, cat_ii_licence = rate_components(settings, is_org, "Cat II", check_in)
-        cat_i_rate = cat_i_rent + cat_i_licence
-        cat_ii_rate = cat_ii_rent + cat_ii_licence
+        new_total = 0.0
+        for cat in room_categories:
+            rent, licence = rate_components(settings, is_org, cat, check_in)
+            new_total += (rent + licence) * nights
 
-        new_total = (cat_i_count * cat_i_rate + cat_ii_count * cat_ii_rate) * nights
         old_total = booking.get("total_amount", 0)
 
         amendment_data["total_amount"] = new_total
@@ -3416,13 +3564,29 @@ async def get_occupancy(current_user: dict = Depends(get_current_user_with_db)):
         )
     
     total_rooms = len(rooms)
-    cat_i_rooms = [r for r in rooms if r["category"] == RoomCategory.CAT_I.value]
-    cat_ii_rooms = [r for r in rooms if r["category"] == RoomCategory.CAT_II.value]
-    
     occupied_rooms = [r for r in rooms if is_room_occupied(r)]
-    occupied_cat_i = [r for r in cat_i_rooms if is_room_occupied(r)]
-    occupied_cat_ii = [r for r in cat_ii_rooms if is_room_occupied(r)]
-    
+
+    def category_stats(rooms_in_cat):
+        occ = [r for r in rooms_in_cat if is_room_occupied(r)]
+        total = len(rooms_in_cat)
+        return {
+            "total": total,
+            "occupied": len(occ),
+            "available": total - len(occ),
+            "occupancy_percent": round((len(occ) / total * 100) if total > 0 else 0, 1),
+        }
+
+    # by_category: dynamic, any number of categories (keyed by category
+    # name) — this is what the dashboard should render from going forward.
+    # cat_i/cat_ii are kept alongside it, computed the same way, purely for
+    # backward compatibility with frontend code not yet updated to read
+    # by_category; a 3rd+ category never appears under those two fixed keys.
+    settings = migrate_legacy_settings(await db.app_settings.find_one({}, {"_id": 0}) or {})
+    by_category = {
+        cat["name"]: category_stats([r for r in rooms if r["category"] == cat["name"]])
+        for cat in settings.get("room_categories", [])
+    }
+
     return {
         "version": "v2.2_fixed_occupancy",  # Proof new code is running
         "overall": {
@@ -3431,18 +3595,9 @@ async def get_occupancy(current_user: dict = Depends(get_current_user_with_db)):
             "available": total_rooms - len(occupied_rooms),
             "occupancy_percent": round((len(occupied_rooms) / total_rooms * 100) if total_rooms > 0 else 0, 1)
         },
-        "cat_i": {
-            "total": len(cat_i_rooms),
-            "occupied": len(occupied_cat_i),
-            "available": len(cat_i_rooms) - len(occupied_cat_i),
-            "occupancy_percent": round((len(occupied_cat_i) / len(cat_i_rooms) * 100) if len(cat_i_rooms) > 0 else 0, 1)
-        },
-        "cat_ii": {
-            "total": len(cat_ii_rooms),
-            "occupied": len(occupied_cat_ii),
-            "available": len(cat_ii_rooms) - len(occupied_cat_ii),
-            "occupancy_percent": round((len(occupied_cat_ii) / len(cat_ii_rooms) * 100) if len(cat_ii_rooms) > 0 else 0, 1)
-        }
+        "by_category": by_category,
+        "cat_i": by_category.get("Cat I", category_stats([])),
+        "cat_ii": by_category.get("Cat II", category_stats([])),
     }
 
 @api_router.get("/dashboard/bookings")
@@ -3588,7 +3743,7 @@ async def get_fund_dashboard(
 async def check_room_availability(
     check_in_date: str,
     check_out_date: str,
-    category: Optional[RoomCategory] = None,
+    category: Optional[str] = None,
     current_user: dict = Depends(get_current_user_with_db)
 ):
     """
@@ -3603,7 +3758,7 @@ async def check_room_availability(
     """
     query = {}
     if category:
-        query["category"] = category.value
+        query["category"] = category
     
     all_rooms = await db.rooms.find(query, {"_id": 0}).to_list(100)
     
@@ -3894,7 +4049,7 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         report_booking_query(month_start_str, month_end_str), {"_id": 0}
     ).to_list(2000)
 
-    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    settings = migrate_legacy_settings(await db.app_settings.find_one({}, {"_id": 0}) or {})
 
     all_rooms_list = await db.rooms.find({}, {"_id": 0}).to_list(100)
     room_maps = build_room_maps(all_rooms_list)
@@ -3905,10 +4060,19 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     color_stats["Non-Org"] = {"guests": 0, "days": 0}
     color_stats["Unassigned"] = {"guests": 0, "days": 0}
 
-    org_cat_i_days = 0
-    org_cat_ii_days = 0
     non_org_days = 0
     extra_beds_total = 0
+    # by_category: dynamic, any number of categories — accumulated from
+    # booking_financials()'s own already-correctly-resolved per-room
+    # room_rent/license_fee (rate_history/check-in-date aware) rather than
+    # re-deriving totals from a single flat "today" settings rate the way
+    # this used to. That old approach both hardcoded exactly Cat I/Cat II
+    # (a 3rd category's nights fell into "else" and got billed at Cat II's
+    # rate) AND ignored the rate schedule entirely for a month that spans a
+    # rate change (one flat rate applied to the whole month regardless).
+    by_category = {}
+    non_org_room_rent_total = 0.0
+    non_org_license_fee_total = 0.0
 
     for bk in bookings:
         fin = booking_financials(bk, settings, month_start, month_end, room_maps)
@@ -3932,28 +4096,34 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
 
         for room in fin["rooms"]:
             if is_org:
-                if room["category"] == "Cat I":
-                    org_cat_i_days += room["nights"]
-                else:
-                    org_cat_ii_days += room["nights"]
+                bucket = by_category.setdefault(room["category"], {"days": 0, "room_rent": 0.0, "license_fee": 0.0})
+                bucket["days"] += room["nights"]
+                bucket["room_rent"] += room["room_rent"]
+                bucket["license_fee"] += room["license_fee"]
             else:
                 non_org_days += room["nights"]
+                non_org_room_rent_total += room["room_rent"]
+                non_org_license_fee_total += room["license_fee"]
 
         extra_beds_total += (bk.get("extra_beds", 0) or 0) * nights
-    
+
     s = settings
+    non_org_lf = s.get("non_org_license_fee", 30)
+    non_org_rr = s.get("non_org_room_rent", 570)
+
+    # Backward-compat fields for the two original categories (frontend
+    # report tabs not yet updated to read by_category) — 0 if that category
+    # has no bookings this month, or doesn't exist at all.
+    org_cat_i_days = by_category.get("Cat I", {}).get("days", 0)
+    org_cat_ii_days = by_category.get("Cat II", {}).get("days", 0)
+    lf_org_cat_i = round(by_category.get("Cat I", {}).get("license_fee", 0), 2)
+    lf_org_cat_ii = round(by_category.get("Cat II", {}).get("license_fee", 0), 2)
     cat_i_lf = s.get("cat_i_license_fee", 30)
     cat_ii_lf = s.get("cat_ii_license_fee", 15)
-    non_org_lf = s.get("non_org_license_fee", 30)
-    cat_i_rr = s.get("cat_i_room_rent", 470)
-    cat_ii_rr = s.get("cat_ii_room_rent", 385)
-    non_org_rr = s.get("non_org_room_rent", 570)
-    
-    room_rent_total = round(org_cat_i_days * cat_i_rr + org_cat_ii_days * cat_ii_rr + non_org_days * non_org_rr, 2)
-    lf_org_cat_i = round(org_cat_i_days * cat_i_lf, 2)
-    lf_org_cat_ii = round(org_cat_ii_days * cat_ii_lf, 2)
-    lf_non_org = round(non_org_days * non_org_lf, 2)
-    total_license_fee = round(lf_org_cat_i + lf_org_cat_ii + lf_non_org, 2)
+
+    room_rent_total = round(sum(b["room_rent"] for b in by_category.values()) + non_org_room_rent_total, 2)
+    lf_non_org = round(non_org_license_fee_total, 2)
+    total_license_fee = round(sum(b["license_fee"] for b in by_category.values()) + lf_non_org, 2)
     extra_bed_amount = round(extra_beds_total * 75, 2)
     grand_total = round(room_rent_total + total_license_fee + extra_bed_amount, 2)
     
@@ -3969,7 +4139,7 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         (b.get("actual_check_out") or "")[:7] == f"{year}-{month:02d}"
     ), 2)
     
-    total_rooms = s.get("cat_i_rooms_count", 6) + s.get("cat_ii_rooms_count", 9)
+    total_rooms = sum(c.get("room_count", 0) for c in s.get("room_categories", []))
     total_booked_days = sum(v["days"] for v in color_stats.values())
     avg_occ = round(total_booked_days / (total_rooms * days_in_month) * 100, 2) if total_rooms * days_in_month > 0 else 0
     
@@ -3990,10 +4160,19 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         "total_days": total_booked_days,
         "org_cat_i_days": org_cat_i_days, "org_cat_ii_days": org_cat_ii_days, "non_org_days": non_org_days,
         "extra_beds_total": extra_beds_total,
+        # by_category_days / by_category_license_fees: dynamic, any number
+        # of categories — use these for new report UI. org_cat_i_days /
+        # license_fees.org_cat_i etc. above/below are kept only for
+        # frontend report tabs not yet updated to read the dynamic form.
+        "by_category_days": {name: b["days"] for name, b in by_category.items()},
         "license_fees": {
             "org_cat_i": {"days": org_cat_i_days, "rate": cat_i_lf, "total": lf_org_cat_i},
             "org_cat_ii": {"days": org_cat_ii_days, "rate": cat_ii_lf, "total": lf_org_cat_ii},
-            "non_org": {"days": non_org_days, "rate": non_org_lf, "total": lf_non_org}
+            "non_org": {"days": non_org_days, "rate": non_org_lf, "total": lf_non_org},
+            "by_category": {
+                name: {"days": b["days"], "total": round(b["license_fee"], 2)}
+                for name, b in by_category.items()
+            },
         },
         "room_rent_total": room_rent_total,
         "total_license_fee": total_license_fee,
@@ -4006,8 +4185,14 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         "total_booked_days": total_booked_days,
         "avg_occupancy": avg_occ,
         "rates": {
-            "cat_i_room_rent": cat_i_rr, "cat_ii_room_rent": cat_ii_rr, "non_org_room_rent": non_org_rr,
-            "cat_i_license_fee": cat_i_lf, "cat_ii_license_fee": cat_ii_lf, "non_org_license_fee": non_org_lf
+            "cat_i_room_rent": get_category(s, "Cat I").get("room_rent") if get_category(s, "Cat I") else None,
+            "cat_ii_room_rent": get_category(s, "Cat II").get("room_rent") if get_category(s, "Cat II") else None,
+            "non_org_room_rent": non_org_rr,
+            "cat_i_license_fee": cat_i_lf, "cat_ii_license_fee": cat_ii_lf, "non_org_license_fee": non_org_lf,
+            "by_category": {
+                c["name"]: {"room_rent": c.get("room_rent"), "license_fee": c.get("license_fee")}
+                for c in s.get("room_categories", [])
+            },
         }
     }
 
