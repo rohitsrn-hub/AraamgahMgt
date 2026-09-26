@@ -82,6 +82,7 @@ export default function Bookings() {
   const navigate = useNavigate();
   const { user } = useAuth(); // Get current user for role-based permissions
   const isViewer = user?.role === 'viewer'; // Check if user is viewer
+  const isAdmin = user?.role === 'admin';
   
   const [bookings, setBookings] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -1968,6 +1969,23 @@ export default function Bookings() {
                               className="text-purple-600 border-purple-200 hover:bg-purple-50"
                               title="Download checkout receipt">
                               <FilePdf size={16} className="mr-1" />Receipt
+                            </Button>
+                          )}
+                          {/* TEMP DIAGNOSTIC — Aug 2026 reconciliation (remove after use).
+                              Admin-only: shows this booking's full raw record in a native
+                              dialog so it can be copied/screenshotted without needing
+                              browser dev tools, which are impractical on a phone. */}
+                          {isAdmin && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => window.prompt(
+                                `Raw data for ${booking.booking_number} — select all (or screenshot) and send to Claude:`,
+                                JSON.stringify(booking, null, 2)
+                              )}
+                              className="text-slate-500 border-slate-300 hover:bg-slate-100"
+                              title="Show raw booking data (temporary diagnostic)">
+                              Debug
                             </Button>
                           )}
                           {/* Delete button - available for all statuses */}
