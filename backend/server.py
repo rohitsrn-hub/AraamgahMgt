@@ -3910,6 +3910,21 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     non_org_days = 0
     extra_beds_total = 0
 
+    # Accumulate the ACTUAL resolved money from booking_financials() (rate-
+    # history and check-in-date aware) instead of re-deriving it afterward
+    # from aggregated nights x a single flat "current settings" rate. The
+    # old approach ignored any scheduled rate change entirely — a room's
+    # nights this month could have been billed at more than one rate, and
+    # multiplying total nights by one flat number can't reproduce that. It
+    # also silently disagreed with the Room Occupancy and Guest Details
+    # reports, which already summed real per-booking amounts correctly.
+    cat_i_room_rent_total = 0.0
+    cat_i_license_fee_total = 0.0
+    cat_ii_room_rent_total = 0.0
+    cat_ii_license_fee_total = 0.0
+    non_org_room_rent_total = 0.0
+    non_org_license_fee_total = 0.0
+
     for bk in bookings:
         fin = booking_financials(bk, settings, month_start, month_end, room_maps)
         nights = fin["nights"]
@@ -3934,25 +3949,36 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
             if is_org:
                 if room["category"] == "Cat I":
                     org_cat_i_days += room["nights"]
+                    cat_i_room_rent_total += room["room_rent"]
+                    cat_i_license_fee_total += room["license_fee"]
                 else:
                     org_cat_ii_days += room["nights"]
+                    cat_ii_room_rent_total += room["room_rent"]
+                    cat_ii_license_fee_total += room["license_fee"]
             else:
                 non_org_days += room["nights"]
+                non_org_room_rent_total += room["room_rent"]
+                non_org_license_fee_total += room["license_fee"]
 
         extra_beds_total += (bk.get("extra_beds", 0) or 0) * nights
-    
+
     s = settings
+    # Display-only reference rates (shown alongside the license-fee table) —
+    # today's base setting, not necessarily what every night this month was
+    # actually billed at if a rate change happened mid-month. The totals
+    # below never use these; they're always the true summed amounts from
+    # booking_financials() above.
     cat_i_lf = s.get("cat_i_license_fee", 30)
     cat_ii_lf = s.get("cat_ii_license_fee", 15)
     non_org_lf = s.get("non_org_license_fee", 30)
     cat_i_rr = s.get("cat_i_room_rent", 470)
     cat_ii_rr = s.get("cat_ii_room_rent", 385)
     non_org_rr = s.get("non_org_room_rent", 570)
-    
-    room_rent_total = round(org_cat_i_days * cat_i_rr + org_cat_ii_days * cat_ii_rr + non_org_days * non_org_rr, 2)
-    lf_org_cat_i = round(org_cat_i_days * cat_i_lf, 2)
-    lf_org_cat_ii = round(org_cat_ii_days * cat_ii_lf, 2)
-    lf_non_org = round(non_org_days * non_org_lf, 2)
+
+    room_rent_total = round(cat_i_room_rent_total + cat_ii_room_rent_total + non_org_room_rent_total, 2)
+    lf_org_cat_i = round(cat_i_license_fee_total, 2)
+    lf_org_cat_ii = round(cat_ii_license_fee_total, 2)
+    lf_non_org = round(non_org_license_fee_total, 2)
     total_license_fee = round(lf_org_cat_i + lf_org_cat_ii + lf_non_org, 2)
     extra_bed_amount = round(extra_beds_total * 75, 2)
     grand_total = round(room_rent_total + total_license_fee + extra_bed_amount, 2)
