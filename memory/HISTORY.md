@@ -5,6 +5,32 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-09-26 — August 2026 reconciliation, concluded: accountant's ruling implemented (branch: claude/qa-audit-fixes)
+Owner got a ruling from the accountant on the two questions parked earlier.
+(1) Month-boundary split — a stay crossing months splits its revenue
+per-night between them (e.g. 29 Jul -> 2 Aug bills 3 nights to July, 1 to
+August). Checked this against the existing code and it already does exactly
+this via nights_in_period() — no change needed, just confirmed. (2) An
+early checkout the guest didn't inform staff about must still be billed for
+its full originally-booked nights as a penalty, but the room must show
+vacant from the real departure onward. This DID need a fix: occupancy and
+money had always come from the same "nights" number, so correctly freeing
+the room early was also silently shrinking the penalty to match — this was
+the ₹9,675 gap found earlier. Worse, for a month-crossing booking (BK0630)
+whose penalty nights land in a month it has zero physical nights left in,
+the booking was dropped from that month's report entirely rather than
+undercounted. Fixed in report_calc.py by giving every booking two
+independent night counts: physical nights (unchanged, drives vacancy) and
+billed nights (money basis, uses the original planned checkout for this one
+penalty case, split at month boundaries the same as a normal stay). Updated
+all four reports' inclusion check so a booking can appear in a month solely
+for its billed nights even with zero physical nights there. Extra-bed
+charges are untouched (no ruling covers them). Added 8 unit tests. Next
+time the Aug 2026 Diagnostics button is run, the early-checkout-gap section
+should show ~₹0 vanished (it previously showed ₹9,675) and reconcile's
+total revenue should be about ₹9,675 higher than before, still consistent
+across all four reports.
+
 ## 2026-09-26 — August 2026 reconciliation, continued: stale-confirmed-booking pattern found and fixed (branch: claude/qa-audit-fixes)
 Root-caused the room-overlap issue flagged in the entry below. BK0943 was
 never a code bug: it was entered into the app (via Migration Mode) 27 days
