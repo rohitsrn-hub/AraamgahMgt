@@ -5,6 +5,32 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-09-26 — August 2026 reconciliation: Monthly Report money bug found and fixed (branch: claude/qa-audit-fixes)
+Owner's manual register didn't match the app's August 2026 numbers. Traced
+it by comparing all four reports against each other and the register
+photos: Monthly Report's grand total (Rs 1,76,900) disagreed with Room
+Occupancy and Guest Details (both correctly Rs 2,07,700) by exactly
+Rs 30,800 — Monthly Report was computing room rent as total-nights x
+whatever the settings document holds right now, ignoring rate_history
+entirely, instead of summing each booking's actual resolved charge like
+the other two reports do. Fixed: now sums real booking_financials()
+amounts per category, same as everywhere else. Also found two other real
+issues, not yet resolved: (1) Room Occupancy correctly flags rooms C1-03
+(187%) and C1-04 (106%) occupancy for August — a genuine sign that a
+long-stay booking's date window overlaps with other, separately-registered
+guests in the same room (confirmed one case, BK0943/C1-04, against the
+register); (2) at least one legitimate month-crossover booking (BK0630,
+2 real August nights) is silently missing from every report entirely —
+under investigation, cause not yet confirmed. Also surfaced a genuine
+policy question (deferred to the owner's accountant): a booking spanning
+two months currently splits its revenue per-night across both months'
+reports, which will never match a manual register that attributes the
+whole stay to the check-in month — this was a deliberate earlier fix for
+month-boundary undercounting, not an accident. Added a temporary
+admin-only "Debug" button on the Bookings page (shows a booking's raw
+record for phone-friendly diagnosis without dev tools) — remove once this
+investigation concludes.
+
 ## 2026-08-14 — Date-versioned room rates for the 16 Aug rate revision (branch: claude/qa-audit-fixes)
 Administration is revising room rates effective 16 Aug 2026. Rates weren't
 date-aware at all before this — a single "current rate," applied to every
