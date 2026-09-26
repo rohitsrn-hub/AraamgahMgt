@@ -1425,9 +1425,14 @@ export default function Bookings() {
         `=== STALE CONFIRMED BOOKINGS (all-time, as of ${s.as_of}) ===`,
         `stuck at "confirmed" with checkout already past: ${s.stale_confirmed_count}`,
         `likely backdated entries: ${s.likely_backdated_count}`,
-        ...s.bookings.map(b =>
-          `  - ${b.booking_number} ${b.guest_name} room(s) ${(b.rooms || []).join(",")}: ${b.check_in_date} → ${b.planned_check_out_date}, ${b.days_since_planned_checkout}d past checkout, entered ${b.created_at || "?"}${b.entry_lag_days != null ? ` (${b.entry_lag_days}d after check-in)` : ""}${b.likely_backdated_entry ? " [BACKDATED]" : ""}`
-        ),
+        `actually causing a room-overlap in reports: ${s.causing_report_overlap_count}`,
+        ...s.bookings.map(b => {
+          const line = `  - ${b.booking_number} ${b.guest_name} room(s) ${(b.rooms || []).join(",")}: ${b.check_in_date} → ${b.planned_check_out_date}, ${b.days_since_planned_checkout}d past checkout, entered ${b.created_at || "?"}${b.entry_lag_days != null ? ` (${b.entry_lag_days}d after check-in)` : ""}${b.likely_backdated_entry ? " [BACKDATED]" : ""}`;
+          const overlapLines = (b.overlapping_bookings || []).map(o =>
+            `      overlaps ${o.booking_number} ${o.guest_name} in room(s) ${o.rooms.join(",")} (${o.check_in_date} → ${o.check_out_date})`
+          );
+          return [line, ...overlapLines].join("\n");
+        }),
       ];
       window.prompt("Select all (or screenshot) and send to Claude:", lines.join("\n"));
     } catch (error) {

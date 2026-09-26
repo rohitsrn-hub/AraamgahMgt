@@ -36,7 +36,9 @@ from utils.report_calc import (
     booking_financials,
     rate_components,
     effective_rate_settings,
+    resolve_rooms,
     RATE_FIELDS,
+    REPORT_STATUSES,
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
 
@@ -4655,6 +4657,9 @@ async def stale_confirmed_bookings_report(current_user: dict = Depends(require_a
         "check_out_date": {"$lt": today},
     }, {"_id": 0}).to_list(2000)
 
+    all_rooms_list = await db.rooms.find({}, {"_id": 0}).to_list(200)
+    room_maps = build_room_maps(all_rooms_list)
+
     stale = []
     for bk in candidates:
         check_in = bk.get("check_in_date")
@@ -4675,6 +4680,34 @@ async def stale_confirmed_bookings_report(current_user: dict = Depends(require_a
         days_since_checkout = (date_type.fromisoformat(today) - checkout_date).days
         entry_lag_days = (created_date - checkin_date).days if created_date else None
 
+        # Did a DIFFERENT, still-standing booking share one of these rooms for
+        # an overlapping window? That's what actually inflates a room's
+        # occupancy % in reports (the BK0943/C1-04 mechanism) — a stale
+        # booking with no overlap is a bookkeeping loose end, not a report
+        # distortion.
+        my_rooms = {rn for rn, _cat in resolve_rooms(bk, room_maps)}
+        overlaps = []
+        if my_rooms:
+            others = await db.bookings.find({
+                "status": {"$in": REPORT_STATUSES},
+                "booking_number": {"$ne": bk.get("booking_number")},
+                "check_in_date": {"$lt": check_out},
+                "$or": [
+                    {"check_out_date": {"$gt": check_in}},
+                    {"actual_checkout_date": {"$gt": check_in}},
+                ],
+            }, {"_id": 0}).to_list(2000)
+            for other in others:
+                other_rooms = {rn for rn, _cat in resolve_rooms(other, room_maps)}
+                if my_rooms & other_rooms:
+                    overlaps.append({
+                        "booking_number": other.get("booking_number"),
+                        "guest_name": other.get("guest_name"),
+                        "rooms": sorted(my_rooms & other_rooms),
+                        "check_in_date": other.get("check_in_date"),
+                        "check_out_date": other.get("check_out_date"),
+                    })
+
         rooms = bk.get("room_numbers") or ([bk["room_number"]] if bk.get("room_number") else [])
         stale.append({
             "booking_number": bk.get("booking_number"),
@@ -4686,6 +4719,7 @@ async def stale_confirmed_bookings_report(current_user: dict = Depends(require_a
             "days_since_planned_checkout": days_since_checkout,
             "entry_lag_days": entry_lag_days,
             "likely_backdated_entry": bool(entry_lag_days and entry_lag_days > 3),
+            "overlapping_bookings": overlaps,
         })
 
     stale.sort(key=lambda x: -x["days_since_planned_checkout"])
@@ -4693,6 +4727,7 @@ async def stale_confirmed_bookings_report(current_user: dict = Depends(require_a
         "as_of": today,
         "stale_confirmed_count": len(stale),
         "likely_backdated_count": sum(1 for b in stale if b["likely_backdated_entry"]),
+        "causing_report_overlap_count": sum(1 for b in stale if b["overlapping_bookings"]),
         "bookings": stale,
     }
 
