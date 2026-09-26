@@ -4628,6 +4628,75 @@ async def early_checkout_gap_report(
     }
 
 
+@api_router.get("/reports/stale-confirmed-bookings")
+async def stale_confirmed_bookings_report(current_user: dict = Depends(require_admin_role)):
+    """TEMP diagnostic (Aug 2026 reconciliation) — find every booking stuck at
+    status "confirmed" whose planned check-out date has already passed and
+    that was never actually checked in or out (actual_check_in is null).
+
+    Root cause seen in production (BK0943): a guest's stay is entered into
+    the app well after the fact — sometimes weeks after their own check-in
+    date — and the entry is saved but never run through the real check-in/
+    checkout flow. The booking then sits at "confirmed" forever, still
+    reported as occupying its room for its full original planned window
+    (report_booking_query includes "confirmed"), which can overlap with a
+    different, legitimately-processed guest who was really in that room —
+    inflating that room's occupancy % in the Room Occupancy report with no
+    corresponding real double-booking.
+
+    A large gap between created_at and the booking's own check_in_date is a
+    strong signal of exactly this backdated-entry pattern. Remove this
+    endpoint once the resulting process fix is in place.
+    """
+    today = ist_today_str()
+    candidates = await db.bookings.find({
+        "status": "confirmed",
+        "actual_check_in": None,
+        "check_out_date": {"$lt": today},
+    }, {"_id": 0}).to_list(2000)
+
+    stale = []
+    for bk in candidates:
+        check_in = bk.get("check_in_date")
+        check_out = bk.get("check_out_date")
+        if not check_in or not check_out:
+            continue
+
+        created_at_raw = bk.get("created_at")
+        created_date = None
+        if created_at_raw:
+            try:
+                created_date = date_type.fromisoformat(str(created_at_raw).split("T")[0])
+            except ValueError:
+                created_date = None
+
+        checkin_date = date_type.fromisoformat(check_in)
+        checkout_date = date_type.fromisoformat(check_out)
+        days_since_checkout = (date_type.fromisoformat(today) - checkout_date).days
+        entry_lag_days = (created_date - checkin_date).days if created_date else None
+
+        rooms = bk.get("room_numbers") or ([bk["room_number"]] if bk.get("room_number") else [])
+        stale.append({
+            "booking_number": bk.get("booking_number"),
+            "guest_name": bk.get("guest_name"),
+            "rooms": rooms,
+            "check_in_date": check_in,
+            "planned_check_out_date": check_out,
+            "created_at": str(created_at_raw) if created_at_raw else None,
+            "days_since_planned_checkout": days_since_checkout,
+            "entry_lag_days": entry_lag_days,
+            "likely_backdated_entry": bool(entry_lag_days and entry_lag_days > 3),
+        })
+
+    stale.sort(key=lambda x: -x["days_since_planned_checkout"])
+    return {
+        "as_of": today,
+        "stale_confirmed_count": len(stale),
+        "likely_backdated_count": sum(1 for b in stale if b["likely_backdated_entry"]),
+        "bookings": stale,
+    }
+
+
 @api_router.get("/reports/manual-occupancy-excel")
 async def download_manual_occupancy_excel(
     month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000),

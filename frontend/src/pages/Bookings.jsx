@@ -1398,12 +1398,14 @@ export default function Bookings() {
   // friendly, no dev tools needed — same pattern as the row "Debug" button).
   const handleAug2026Diagnostics = async () => {
     try {
-      const [reconcileRes, gapRes] = await Promise.all([
+      const [reconcileRes, gapRes, staleRes] = await Promise.all([
         axios.get(`${API}/reports/reconcile`, { params: { month: 8, year: 2026 } }),
         axios.get(`${API}/reports/early-checkout-gap`, { params: { month: 8, year: 2026 } }),
+        axios.get(`${API}/reports/stale-confirmed-bookings`),
       ]);
       const r = reconcileRes.data;
       const g = gapRes.data;
+      const s = staleRes.data;
 
       const lines = [
         `=== RECONCILE (Aug 2026) ===`,
@@ -1418,6 +1420,13 @@ export default function Bookings() {
         `total vanished amount: ₹${g.total_vanished_amount}`,
         ...g.bookings.map(b =>
           `  - ${b.booking_number} ${b.guest_name}: billed ₹${b.billed_amount}, shown ₹${b.shown_in_reports}, vanished ₹${b.vanished_amount} (in ${b.check_in_date} → ${b.planned_check_out_date}, actually left ${b.actual_checkout_date})`
+        ),
+        ``,
+        `=== STALE CONFIRMED BOOKINGS (all-time, as of ${s.as_of}) ===`,
+        `stuck at "confirmed" with checkout already past: ${s.stale_confirmed_count}`,
+        `likely backdated entries: ${s.likely_backdated_count}`,
+        ...s.bookings.map(b =>
+          `  - ${b.booking_number} ${b.guest_name} room(s) ${(b.rooms || []).join(",")}: ${b.check_in_date} → ${b.planned_check_out_date}, ${b.days_since_planned_checkout}d past checkout, entered ${b.created_at || "?"}${b.entry_lag_days != null ? ` (${b.entry_lag_days}d after check-in)` : ""}${b.likely_backdated_entry ? " [BACKDATED]" : ""}`
         ),
       ];
       window.prompt("Select all (or screenshot) and send to Claude:", lines.join("\n"));
