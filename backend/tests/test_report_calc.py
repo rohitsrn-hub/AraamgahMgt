@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.report_calc import (
     EXTRA_BED_RATE,
+    billing_nights_in_period,
     booking_financials,
     build_room_maps,
     effective_rate_settings,
@@ -259,3 +260,87 @@ class TestDateVersionedRates:
         )
         assert fin["nights"] == 2
         assert fin["total_amount"] == (500 + 35) * 2  # new rate for all 2 nights
+
+
+class TestEarlyCheckoutPenalty:
+    """2026-09 owner/accountant ruling: an uninformed early checkout is
+    billed for its full ORIGINALLY BOOKED nights as a penalty, but the room
+    must still be reported vacant from the real (early) departure onward.
+    Evidence case BK0630: check-in 31 Jul, planned checkout 3 Aug, actual
+    checkout 1 Aug — previously this dropped ₹2,075 of penalty revenue
+    because it fell entirely in August, a month the booking had zero
+    physical nights left in and was therefore skipped outright."""
+
+    def test_occupancy_uses_actual_departure_not_original_plan(self):
+        bk = booking(
+            check_in_date="2026-07-31", check_out_date="2026-08-03",
+            actual_checkout_date="2026-08-01", charge_reason="early_checkout_not_informed",
+        )
+        assert nights_in_period(bk, date(2026, 8, 1), date(2026, 8, 31)) == 0
+
+    def test_billing_uses_original_plan_not_actual_departure(self):
+        bk = booking(
+            check_in_date="2026-07-31", check_out_date="2026-08-03",
+            actual_checkout_date="2026-08-01", charge_reason="early_checkout_not_informed",
+        )
+        assert billing_nights_in_period(bk, date(2026, 8, 1), date(2026, 8, 31)) == 2
+
+    def test_penalty_nights_split_at_month_boundary_like_a_normal_stay(self):
+        bk = booking(
+            check_in_date="2026-07-31", check_out_date="2026-08-03",
+            actual_checkout_date="2026-08-01", charge_reason="early_checkout_not_informed",
+        )
+        july = billing_nights_in_period(bk, date(2026, 7, 1), date(2026, 7, 31))
+        august = billing_nights_in_period(bk, date(2026, 8, 1), date(2026, 8, 31))
+        assert (july, august) == (1, 2)
+        assert july + august == 3  # the full original 31 Jul -> 3 Aug stay
+
+    def test_booking_appears_in_a_month_it_has_zero_physical_nights_in(self):
+        # This is the exact bug: a room-vacant month must not make the
+        # booking (and its penalty revenue) disappear from that report.
+        bk = booking(
+            check_in_date="2026-07-31", check_out_date="2026-08-03",
+            actual_checkout_date="2026-08-01", charge_reason="early_checkout_not_informed",
+        )
+        fin = booking_financials(bk, SETTINGS, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS)
+        assert fin["nights"] == 0          # room correctly shown vacant in August
+        assert fin["billed_nights"] == 2   # penalty revenue still recognized in August
+        assert fin["rooms"] != []
+        assert fin["total_amount"] == (470 + 30) * 2
+
+    def test_full_penalty_recovered_across_both_months_combined(self):
+        bk = booking(
+            check_in_date="2026-07-31", check_out_date="2026-08-03",
+            actual_checkout_date="2026-08-01", charge_reason="early_checkout_not_informed",
+        )
+        july = booking_financials(bk, SETTINGS, date(2026, 7, 1), date(2026, 7, 31), ROOM_MAPS)
+        august = booking_financials(bk, SETTINGS, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS)
+        assert july["total_amount"] + august["total_amount"] == (470 + 30) * 3
+
+    def test_informed_early_checkout_is_not_a_penalty(self):
+        # Guest informed at check-in -> bills actual nights only, no penalty.
+        bk = booking(
+            check_in_date="2026-08-05", check_out_date="2026-08-10",
+            actual_checkout_date="2026-08-07", charge_reason="early_checkout_informed",
+        )
+        fin = booking_financials(bk, SETTINGS, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS)
+        assert fin["nights"] == fin["billed_nights"] == 2
+
+    def test_confirmed_or_checked_in_booking_unaffected(self):
+        # charge_reason only ever applies to a checked_out booking; a booking
+        # still in progress must never get the penalty treatment.
+        bk = booking(status="checked_in", charge_reason="early_checkout_not_informed",
+                     check_in_date="2026-08-05", check_out_date="2026-08-10")
+        fin = booking_financials(bk, SETTINGS, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS)
+        assert fin["nights"] == fin["billed_nights"] == 5
+
+    def test_extra_bed_charge_unaffected_by_penalty_basis(self):
+        # No ruling covers extra beds for this penalty — they stay on the
+        # physical (occupancy) nights, unlike room rent and license fee.
+        bk = booking(
+            check_in_date="2026-07-31", check_out_date="2026-08-03",
+            actual_checkout_date="2026-08-01", charge_reason="early_checkout_not_informed",
+            extra_beds=1,
+        )
+        fin = booking_financials(bk, SETTINGS, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS)
+        assert fin["extra_bed_charge"] == 0.0  # zero physical nights in August

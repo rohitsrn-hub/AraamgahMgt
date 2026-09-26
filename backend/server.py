@@ -4025,7 +4025,10 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     for bk in bookings:
         fin = booking_financials(bk, settings, month_start, month_end, room_maps)
         nights = fin["nights"]
-        if nights == 0 or not fin["rooms"]:
+        # Not "nights == 0": an uninformed early checkout can be a real 0-night
+        # occupant of this month while still owing penalty (billed_nights)
+        # revenue here — fin["rooms"] is empty only when truly neither applies.
+        if not fin["rooms"]:
             continue
 
         is_org = bk.get("is_org", False)
@@ -4214,7 +4217,10 @@ async def get_room_occupancy_report(
     included_bookings = 0
     for bk in bookings:
         fin = booking_financials(bk, settings, start_dt, end_dt, room_maps)
-        if fin["nights"] == 0 or not fin["rooms"]:
+        # Not "nights == 0": an uninformed early checkout can be a real 0-night
+        # occupant of this period while still owing penalty (billed_nights)
+        # revenue here — fin["rooms"] is empty only when truly neither applies.
+        if not fin["rooms"]:
             continue
         included_bookings += 1
 
@@ -4373,7 +4379,10 @@ async def get_room_allotment_report(
     for bk in bookings:
         fin = booking_financials(bk, settings, period_start, period_end, room_maps)
         nights = fin["nights"]
-        if nights == 0 or not fin["rooms"]:
+        # Not "nights == 0": an uninformed early checkout can be a real 0-night
+        # occupant of this period while still owing penalty (billed_nights)
+        # revenue here — fin["rooms"] is empty only when truly neither applies.
+        if not fin["rooms"]:
             continue
         total_amount = fin["total_amount"]
         total_revenue += total_amount
@@ -4507,7 +4516,10 @@ async def get_guest_details_report(
     for bk in bookings:
         fin = booking_financials(bk, settings, period_start, period_end, room_maps)
         nights = fin["nights"]
-        if nights == 0 or not fin["rooms"]:
+        # Not "nights == 0": an uninformed early checkout can be a real 0-night
+        # occupant of this period while still owing penalty (billed_nights)
+        # revenue here — fin["rooms"] is empty only when truly neither applies.
+        if not fin["rooms"]:
             continue
         total_bookings += 1
         total_nights += nights

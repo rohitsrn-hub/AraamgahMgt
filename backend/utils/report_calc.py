@@ -8,16 +8,27 @@ charges dropped, month-boundary bookings excluded, booking-nights vs room-nights
 mixed within one report). Keeping the logic here makes divergence impossible.
 
 Conventions (applied identically in all reports):
-- A booking belongs to period P iff at least one of its nights falls inside P.
+- A booking belongs to period P iff it has nights OR billed nights inside P
+  (see below — these can differ for one specific case).
 - Effective stay = check_in_date .. actual_checkout_date (when checked out and
-  recorded) or planned check_out_date otherwise. Actual stay is what was billed.
+  recorded) or planned check_out_date otherwise. Physical occupancy — what
+  vacancy/occupancy% uses — always follows this.
 - Statuses counted: confirmed, checked_in, checked_out. Cancelled never counts.
-- Money = per-room (room_rent + license_fee) x nights-in-period
+- Money = per-room (room_rent + license_fee) x billed-nights-in-period
           + extra_beds x EXTRA_BED_RATE x nights-in-period.
   Rates come from the room's own category (a Cat II room in a mixed booking is
   billed at Cat II, not at the booking's "first" category).
-- Nights are clipped to the report period, so a booking spanning a month
-  boundary contributes each night to exactly one month (no double counting).
+- billed-nights-in-period is identical to nights-in-period, EXCEPT for a
+  checked-out booking with charge_reason "early_checkout_not_informed": that
+  is billed for its full ORIGINALLY BOOKED nights as a penalty (owner/
+  accountant ruling, 2026-09) even though the room is vacated — and correctly
+  reported as vacant — from the real departure onward. Occupancy and money
+  are deliberately two different numbers in that one case; everywhere else
+  they're identical.
+- Nights (of either kind) are clipped to the report period, so a booking
+  spanning a month boundary contributes each night to exactly one month (no
+  double counting) — including a penalty's nights, split by the ORIGINAL
+  planned dates the same way a normal stay's nights are.
 """
 from datetime import date, timedelta
 from typing import Optional
@@ -65,15 +76,38 @@ def effective_stay(bk: dict):
     return checkin, checkout
 
 
-def nights_in_period(bk: dict, period_start: date, period_end: date) -> int:
-    """Nights of this booking's effective stay that fall within [start, end]
-    (inclusive dates; a 'night' is the night starting on that date)."""
-    checkin, checkout = effective_stay(bk)
+def _clip_nights(checkin: Optional[date], checkout: Optional[date],
+                  period_start: date, period_end: date) -> int:
     if checkin is None or checkout is None:
         return 0
     eff_in = max(checkin, period_start)
     eff_out = min(checkout, period_end + timedelta(days=1))
     return max(0, (eff_out - eff_in).days)
+
+
+def nights_in_period(bk: dict, period_start: date, period_end: date) -> int:
+    """PHYSICAL nights of this booking's effective stay that fall within
+    [start, end] (inclusive dates; a 'night' is the night starting on that
+    date). This is what occupancy/vacancy must use — see billing_nights_in_period
+    for the (usually identical) money-only version."""
+    checkin, checkout = effective_stay(bk)
+    return _clip_nights(checkin, checkout, period_start, period_end)
+
+
+def billing_nights_in_period(bk: dict, period_start: date, period_end: date) -> int:
+    """Nights to CHARGE for, inside the period. Identical to nights_in_period()
+    for every booking except one deliberate case: a checked-out booking whose
+    early checkout was not informed in advance bills for its full ORIGINALLY
+    BOOKED nights as a penalty (owner/accountant ruling), even though the room
+    is vacated — and correctly shown as vacant in occupancy — from the real
+    departure onward. The penalty is split across a month boundary using the
+    ORIGINAL planned check_out_date, the same way a normal stay's nights are."""
+    if bk.get("status") == "checked_out" and bk.get("charge_reason") == "early_checkout_not_informed":
+        checkin = _parse_date(bk.get("check_in_date"))
+        checkout = _parse_date(bk.get("check_out_date"))
+    else:
+        checkin, checkout = effective_stay(bk)
+    return _clip_nights(checkin, checkout, period_start, period_end)
 
 
 def build_room_maps(all_rooms: list) -> dict:
@@ -209,19 +243,29 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
     """The one calculation every report must use for a booking's money.
 
     Returns:
-        nights            booking-level nights inside the period
-        rooms             [{room_number, category, nights, rate_per_night,
-                            room_rent, license_fee, revenue}]
+        nights            booking-level PHYSICAL nights inside the period —
+                          what occupancy/vacancy must use.
+        billed_nights     booking-level nights CHARGED for inside the period.
+                          Equal to nights for every booking except an
+                          uninformed early checkout, which is billed for its
+                          full original term as a penalty even though the
+                          room is (correctly) vacant from the real departure
+                          onward — see billing_nights_in_period().
+        rooms             [{room_number, category, nights, billed_nights,
+                            rate_per_night, room_rent, license_fee, revenue}]
                           revenue includes this room's share of money;
                           the extra-bed charge is carried on the first room so
                           per-room revenues always sum to total_amount.
-        room_rent         sum of room-rent across rooms
-        license_fee       sum of license fees across rooms
-        extra_bed_charge  extra_beds x EXTRA_BED_RATE x nights
+        room_rent         sum of room-rent across rooms (billed_nights basis)
+        license_fee       sum of license fees across rooms (billed_nights basis)
+        extra_bed_charge  extra_beds x EXTRA_BED_RATE x nights (physical basis
+                          — no ruling covers extra beds for an early-checkout
+                          penalty, so this is unaffected by billed_nights)
         total_amount      room_rent + license_fee + extra_bed_charge
     """
     is_org = bk.get("is_org", False)
     nights = nights_in_period(bk, period_start, period_end)
+    billed_nights = billing_nights_in_period(bk, period_start, period_end)
 
     rooms_out = []
     room_rent_total = 0.0
@@ -232,23 +276,27 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
         for rn, (rm_nights, cat) in seg_rooms.items():
             rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
             rooms_out.append({
-                "room_number": rn, "category": cat, "nights": rm_nights,
+                "room_number": rn, "category": cat, "nights": rm_nights, "billed_nights": rm_nights,
                 "rate_per_night": rent + lf,
                 "room_rent": rent * rm_nights, "license_fee": lf * rm_nights,
             })
             room_rent_total += rent * rm_nights
             license_total += lf * rm_nights
     else:
-        if nights > 0:
+        # OR, not AND: an uninformed early checkout can have zero physical
+        # nights left in a period (room already vacant) while still owing
+        # penalty nights there — that booking must still appear with rooms,
+        # or its penalty revenue silently drops out of that period entirely.
+        if nights > 0 or billed_nights > 0:
             for rn, cat in resolve_rooms(bk, room_maps):
                 rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
                 rooms_out.append({
-                    "room_number": rn, "category": cat, "nights": nights,
+                    "room_number": rn, "category": cat, "nights": nights, "billed_nights": billed_nights,
                     "rate_per_night": rent + lf,
-                    "room_rent": rent * nights, "license_fee": lf * nights,
+                    "room_rent": rent * billed_nights, "license_fee": lf * billed_nights,
                 })
-                room_rent_total += rent * nights
-                license_total += lf * nights
+                room_rent_total += rent * billed_nights
+                license_total += lf * billed_nights
 
     extra_bed_charge = (bk.get("extra_beds", 0) or 0) * EXTRA_BED_RATE * nights
 
@@ -259,6 +307,7 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
 
     return {
         "nights": nights,
+        "billed_nights": billed_nights,
         "rooms": rooms_out,
         "room_rent": round(room_rent_total, 2),
         "license_fee": round(license_total, 2),
