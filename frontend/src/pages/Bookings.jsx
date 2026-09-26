@@ -1392,6 +1392,40 @@ export default function Bookings() {
     });
   };
 
+  // TEMP diagnostic for the August 2026 reconciliation — remove after use.
+  // Runs the existing /reports/reconcile cross-check plus the new
+  // early-checkout-gap scan and shows both in one native dialog (phone-
+  // friendly, no dev tools needed — same pattern as the row "Debug" button).
+  const handleAug2026Diagnostics = async () => {
+    try {
+      const [reconcileRes, gapRes] = await Promise.all([
+        axios.get(`${API}/reports/reconcile`, { params: { month: 8, year: 2026 } }),
+        axios.get(`${API}/reports/early-checkout-gap`, { params: { month: 8, year: 2026 } }),
+      ]);
+      const r = reconcileRes.data;
+      const g = gapRes.data;
+
+      const lines = [
+        `=== RECONCILE (Aug 2026) ===`,
+        `consistent: ${r.consistent}`,
+        r.mismatches.length > 0
+          ? `mismatches:\n${r.mismatches.map(m => `  - ${m.check}: ${m.left} vs ${m.right}`).join("\n")}`
+          : `mismatches: none`,
+        `revenue — allotment: ${r.totals.revenue.room_allotment}, guest_details: ${r.totals.revenue.guest_details}, occupancy: ${r.totals.revenue.room_occupancy}, monthly: ${r.totals.revenue.monthly_grand_total}`,
+        ``,
+        `=== EARLY-CHECKOUT GAP (Aug 2026) ===`,
+        `affected bookings: ${g.affected_bookings_count}`,
+        `total vanished amount: ₹${g.total_vanished_amount}`,
+        ...g.bookings.map(b =>
+          `  - ${b.booking_number} ${b.guest_name}: billed ₹${b.billed_amount}, shown ₹${b.shown_in_reports}, vanished ₹${b.vanished_amount} (in ${b.check_in_date} → ${b.planned_check_out_date}, actually left ${b.actual_checkout_date})`
+        ),
+      ];
+      window.prompt("Select all (or screenshot) and send to Claude:", lines.join("\n"));
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Diagnostics failed");
+    }
+  };
+
   // Stay Extension handlers
   const openExtendDialog = (booking) => {
     setSelectedBooking(booking);
@@ -1786,6 +1820,16 @@ export default function Bookings() {
             <FilePdf size={20} />
             Print Booking Slips
           </Button>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              onClick={handleAug2026Diagnostics}
+              className="flex items-center gap-2 text-slate-600 border-slate-300 hover:bg-slate-100"
+              title="TEMP diagnostic for the August 2026 reconciliation — remove after use"
+            >
+              Aug 2026 Diagnostics
+            </Button>
+          )}
           <Button
             onClick={() => setShowNewBooking(true)}
             className="earms-btn-primary flex items-center gap-2"
