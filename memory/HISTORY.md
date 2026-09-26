@@ -5,6 +5,36 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-09-26 — August 2026 reconciliation, continued: stale-confirmed-booking pattern found and fixed (branch: claude/qa-audit-fixes)
+Root-caused the room-overlap issue flagged in the entry below. BK0943 was
+never a code bug: it was entered into the app (via Migration Mode) 27 days
+after its own check-in date and left at status "confirmed" forever, since
+no one ever ran it through the real Check-In/Check-Out flow. A confirmed
+booking counts as occupying its room in every report using its original
+planned dates no matter how stale it gets, so when a different, real guest
+was later placed in the same room, both were counted at once — that's what
+inflated C1-04's occupancy to 106%+ for August (BK0943 alone overlapped 5
+separate real guests across one week). A scan for the same pattern found 7
+such bookings dating back to April 2026, of which 3 (BK0112, BK0356,
+BK0943) actually caused this same room-overlap; the other 4 haven't yet
+collided with anyone but remain latent risks. Only 2 of the 7 were
+backdated entries — the rest were entered on time and simply never
+followed up on, so "backdated data entry" was the wrong thing to fix in
+isolation. Shipped a permanent fix: a "needs attention" banner on the
+Bookings page listing every confirmed booking whose checkout date has
+passed with no check-in ever recorded, a one-tap "Mark departed" action to
+close one out with its real departure date (money is untouched — reports
+already compute money from status + actual_checkout_date, never from the
+stored total, so fixing those two fields alone fixes every report), and a
+toast reminder right when a Migration-Mode entry is saved for an
+already-over stay. The early-checkout-penalty revenue gap (Rs 9,675 across
+4 August bookings) and the month-boundary revenue-split question both
+remain parked for the owner's accountant, unchanged from below. The
+temporary admin-only diagnostic endpoints/buttons from this investigation
+(Debug button, Aug 2026 Diagnostics button, /reports/early-checkout-gap,
+/reports/stale-confirmed-bookings) are still in place for now — remove
+once the owner confirms no further use is needed.
+
 ## 2026-09-26 — August 2026 reconciliation: Monthly Report money bug found and fixed (branch: claude/qa-audit-fixes)
 Owner's manual register didn't match the app's August 2026 numbers. Traced
 it by comparing all four reports against each other and the register
