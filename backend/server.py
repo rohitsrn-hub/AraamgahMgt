@@ -4542,6 +4542,92 @@ async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Qu
     }
 
 
+@api_router.get("/reports/early-checkout-gap")
+async def early_checkout_gap_report(
+    month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000),
+    current_user: dict = Depends(require_admin_role)
+):
+    """TEMP diagnostic (Aug 2026 reconciliation) — quantify revenue that
+    never appears in ANY monthly report because of how uninformed early
+    checkouts are billed.
+
+    Every report derives money from actual nights physically occupied
+    (booking_financials -> nights_in_period, which correctly uses a
+    checked-out booking's real actual_checkout_date). An early checkout
+    marked "not informed in advance" is deliberately billed for the FULL
+    originally-booked nights as a penalty — a real, collected (or owed)
+    amount that has nothing to do with nights actually occupied. Since no
+    report ever reads total_amount directly, that penalty portion is
+    invisible everywhere: not misattributed to the wrong month, just
+    absent from every month's numbers.
+
+    This does not decide policy (which period, if any, should show it) —
+    it only measures how much money is at stake so that decision (parked
+    with the owner's accountant, same question as month-boundary splits)
+    can be made with real numbers. Remove this endpoint once resolved.
+    """
+    import calendar as cal_mod
+    days_in_month = cal_mod.monthrange(year, month)[1]
+    month_start_str = f"{year}-{month:02d}-01"
+    month_end_str = f"{year}-{month:02d}-{days_in_month:02d}"
+
+    # Cast the net on the booking's ORIGINAL plan, not its shortened actual
+    # stay — an early checkout can pull the actual stay entirely out of the
+    # month its penalty was meant to cover.
+    candidates = await db.bookings.find({
+        "status": "checked_out",
+        "charge_reason": "early_checkout_not_informed",
+        "check_in_date": {"$lte": month_end_str},
+        "check_out_date": {"$gt": month_start_str},
+    }, {"_id": 0}).to_list(2000)
+
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    all_rooms_list = await db.rooms.find({}, {"_id": 0}).to_list(200)
+    room_maps = build_room_maps(all_rooms_list)
+
+    affected = []
+    total_gap = 0.0
+    for bk in candidates:
+        orig_check_in = bk.get("check_in_date")
+        orig_check_out = bk.get("check_out_date")
+        if not orig_check_in or not orig_check_out:
+            continue
+
+        # "Shown in reports" = what booking_financials actually attributes
+        # to this booking's real (shortened) stay. A window comfortably
+        # wider than the original booking safely captures the whole real
+        # stay regardless of which month it landed in.
+        wide_start = date_type.fromisoformat(orig_check_in) - timedelta(days=2)
+        wide_end = date_type.fromisoformat(orig_check_out) + timedelta(days=2)
+        fin_actual = booking_financials(bk, settings, wide_start, wide_end, room_maps)
+        shown_amount = fin_actual["total_amount"]
+
+        billed_amount = bk.get("total_amount", 0) or 0
+        gap = round(billed_amount - shown_amount, 2)
+        if gap <= 0:
+            continue
+
+        affected.append({
+            "booking_number": bk.get("booking_number"),
+            "guest_name": bk.get("guest_name"),
+            "check_in_date": orig_check_in,
+            "planned_check_out_date": orig_check_out,
+            "actual_checkout_date": bk.get("actual_checkout_date"),
+            "billed_amount": billed_amount,
+            "shown_in_reports": round(shown_amount, 2),
+            "vanished_amount": gap,
+        })
+        total_gap += gap
+
+    affected.sort(key=lambda x: -x["vanished_amount"])
+    return {
+        "month": month, "year": year,
+        "affected_bookings_count": len(affected),
+        "total_vanished_amount": round(total_gap, 2),
+        "bookings": affected,
+    }
+
+
 @api_router.get("/reports/manual-occupancy-excel")
 async def download_manual_occupancy_excel(
     month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000),
