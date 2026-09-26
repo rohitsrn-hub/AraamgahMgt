@@ -469,6 +469,10 @@ class CancelBookingRequest(BaseModel):
     reason: Optional[str] = None
     refund_amount: Optional[float] = 0.0
 
+class CloseStaleBookingRequest(BaseModel):
+    staff_id: str
+    actual_checkout_date: Optional[str] = None  # YYYY-MM-DD; defaults to the booking's own planned check-out
+
 class AmendBookingRequest(BaseModel):
     booking_id: str
     # Amendable fields
@@ -2680,6 +2684,97 @@ async def cancel_booking(request: CancelBookingRequest, current_user: dict = Dep
         await db.refunds.insert_one(serialize_doc(refund.model_dump()))
     
     return {"message": "Booking cancelled successfully", "booking_id": request.booking_id}
+
+@api_router.get("/bookings/stale-confirmed")
+async def list_stale_confirmed_bookings(current_user: dict = Depends(require_staff_or_admin_role)):
+    """Confirmed bookings whose planned checkout has already passed and that
+    were never actually checked in — the entry was made (often via Migration
+    Mode, for a stay already over) but no one ran it through the real
+    check-in/checkout flow. Left alone, these sit at "confirmed" forever and
+    still count as occupying their room for their full original window in
+    every report, which can overlap a different, real guest later placed in
+    that same room and inflate that room's occupancy numbers.
+
+    Powers the "needs attention" banner on the Bookings page so staff see
+    this on every visit instead of it only surfacing during an audit.
+    """
+    today = ist_today_str()
+    candidates = await db.bookings.find({
+        "status": "confirmed",
+        "actual_check_in": None,
+        "check_out_date": {"$lt": today},
+    }, {"_id": 0}).sort("check_out_date", 1).to_list(200)
+
+    result = []
+    for bk in candidates:
+        checkout_date = date_type.fromisoformat(bk["check_out_date"])
+        result.append({
+            "id": bk.get("id"),
+            "booking_number": bk.get("booking_number"),
+            "guest_name": bk.get("guest_name"),
+            "rooms": bk.get("room_numbers") or ([bk["room_number"]] if bk.get("room_number") else []),
+            "check_in_date": bk.get("check_in_date"),
+            "check_out_date": bk.get("check_out_date"),
+            "days_since_planned_checkout": (date_type.fromisoformat(today) - checkout_date).days,
+        })
+    return {"as_of": today, "count": len(result), "bookings": result}
+
+@api_router.post("/bookings/{booking_id}/close-stale")
+async def close_stale_booking(
+    booking_id: str, request: CloseStaleBookingRequest,
+    current_user: dict = Depends(require_staff_or_admin_role)
+):
+    """Close out a stale confirmed booking (see list_stale_confirmed_bookings)
+    as an actual, completed stay — for when the guest really did come and go,
+    just never got clicked through Check In / Check Out at the time.
+
+    Deliberately does NOT recompute total_amount/room_rent_total/
+    license_fee_total/balance_amount: every report derives its own money from
+    booking_financials() using status + actual_checkout_date (never from
+    these stored totals), so fixing those two fields alone already corrects
+    every report. The stored amount stays exactly what was originally quoted
+    for this booking, since this action carries no new payment information —
+    a real billing correction belongs in Amend, not here.
+    """
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    today = ist_today_str()
+    if (booking.get("status") != BookingStatus.CONFIRMED.value
+            or booking.get("actual_check_in") is not None
+            or booking.get("check_out_date", "9999-99-99") >= today):
+        raise HTTPException(status_code=400, detail="This booking is not a stale confirmed booking")
+
+    actual_checkout_date = request.actual_checkout_date or booking["check_out_date"]
+    try:
+        checkout_dt = date_type.fromisoformat(actual_checkout_date)
+        checkin_dt = date_type.fromisoformat(booking["check_in_date"])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, expected YYYY-MM-DD")
+    if checkout_dt <= checkin_dt:
+        raise HTTPException(status_code=400, detail="Departure date must be after the check-in date")
+
+    now = datetime.now(timezone.utc).isoformat()
+    closing_note = f"Closed out as a stale confirmed booking on {today} by {request.staff_id} (never processed through check-in/checkout)."
+    notes = f"{booking.get('notes', '') or ''} | {closing_note}".strip(" |")
+
+    await db.bookings.update_one(
+        {"id": booking_id},
+        {"$set": {
+            "status": BookingStatus.CHECKED_OUT.value,
+            "actual_check_in": checkin_moment(booking["check_in_date"]).astimezone(timezone.utc).isoformat(),
+            "actual_check_out": now,
+            "actual_checkout_date": actual_checkout_date,
+            "checked_in_by": request.staff_id,
+            "checked_out_by": request.staff_id,
+            "notes": notes,
+            "updated_at": now,
+        }}
+    )
+
+    updated_booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    return {"message": "Booking closed out", "booking": updated_booking}
 
 @api_router.delete("/bookings/{booking_id}")
 async def delete_booking(booking_id: str, current_user: dict = Depends(require_admin_role)):

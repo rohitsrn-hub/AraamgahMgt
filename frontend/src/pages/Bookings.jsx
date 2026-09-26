@@ -90,6 +90,8 @@ export default function Bookings() {
   const [staff, setStaff] = useState([]);
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [staleConfirmed, setStaleConfirmed] = useState([]);
+  const [staleBannerOpen, setStaleBannerOpen] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [loadingRooms, setLoadingRooms] = useState(false);
@@ -390,6 +392,38 @@ export default function Bookings() {
     }
   }, []);
 
+  // Confirmed bookings whose checkout date has already passed with no actual
+  // check-in ever recorded — surfaced as a standing banner so staff see it on
+  // every visit instead of it only turning up during an audit.
+  const fetchStaleConfirmed = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/bookings/stale-confirmed`);
+      setStaleConfirmed(res.data.bookings || []);
+    } catch (error) {
+      // Non-critical background check — don't interrupt the page with a toast
+      console.error("Error fetching stale confirmed bookings:", error);
+    }
+  }, []);
+
+  const handleMarkDeparted = async (bk) => {
+    const input = window.prompt(
+      `Confirm ${bk.guest_name} (${bk.booking_number}) actually departed on (YYYY-MM-DD):`,
+      bk.check_out_date
+    );
+    if (!input) return;
+    try {
+      await axios.post(`${API}/bookings/${bk.id}/close-stale`, {
+        staff_id: user?.id || user?.username || "unknown",
+        actual_checkout_date: input,
+      });
+      toast.success(`${bk.booking_number} closed out`);
+      fetchStaleConfirmed();
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to close out booking");
+    }
+  };
+
   const fetchPendingRefunds = useCallback(async () => {
     try {
       const res = await axios.get(`${API}/refunds`, { params: { status: "pending" } });
@@ -451,6 +485,7 @@ export default function Bookings() {
   }, [bookingForm.check_in_date, bookingForm.check_out_date, fetchAvailableRooms]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchStaleConfirmed(); }, [fetchStaleConfirmed]);
 
   const filteredBookings = bookings.filter(booking => {
     const roomNums = (booking.room_numbers || [booking.room_number || ""]).join(", ");
@@ -654,8 +689,21 @@ export default function Bookings() {
       };
       const response = await axios.post(`${API}/bookings`, payload);
       const createdBooking = response.data;
-      
+
       toast.success(`Booking created for ${formData.num_rooms} room(s)!`);
+
+      // A backdated entry (Migration Mode) whose whole stay is already in the
+      // past is exactly how a booking gets stuck at "confirmed" forever if no
+      // one follows through — this is the pattern behind BK0943 and others
+      // found in the Aug 2026 reconciliation. Nudge right when it happens.
+      const todayStr = format(new Date(), "yyyy-MM-dd");
+      if (payload.check_out_date < todayStr) {
+        toast.warning(
+          "This is a backdated entry for a stay that's already over — please also process Check-In and Check-Out for it now, or it will stay stuck as \"Confirmed\" and can throw off occupancy reports.",
+          { duration: 10000 }
+        );
+      }
+
       setShowNewBooking(false);
       setShowNightConfirmation(false);
       setPendingBookingData(null);
@@ -1856,6 +1904,50 @@ export default function Bookings() {
           </Button>
         </div>
       </div>
+
+      {/* Stale confirmed bookings — checkout date already passed, never checked in/out */}
+      {staleConfirmed.length > 0 && staleBannerOpen && (
+        <Card className="earms-card border-2 border-amber-300 bg-amber-50">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <Warning size={22} className="text-amber-600 mt-0.5 flex-shrink-0" weight="fill" />
+                <div>
+                  <p className="font-semibold text-amber-900">
+                    {staleConfirmed.length} booking{staleConfirmed.length > 1 ? "s" : ""} need{staleConfirmed.length === 1 ? "s" : ""} attention
+                  </p>
+                  <p className="text-sm text-amber-800 mt-0.5">
+                    Still "Confirmed" but the planned checkout date has passed and the guest was never checked in/out.
+                    If they really stayed, mark when they left below. If it never happened, cancel it from the booking's row.
+                  </p>
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setStaleBannerOpen(false)} className="text-amber-700 flex-shrink-0">
+                <X size={18} />
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {staleConfirmed.map((bk) => (
+                <div key={bk.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-white rounded-lg border border-amber-200 p-3">
+                  <div className="text-sm text-slate-700">
+                    <span className="font-medium">{bk.booking_number}</span> — {bk.guest_name} — room(s) {(bk.rooms || []).join(", ")}
+                    <br className="sm:hidden" />
+                    <span className="text-slate-500"> · {bk.check_in_date} → {bk.check_out_date} · {bk.days_since_planned_checkout}d past checkout</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleMarkDeparted(bk)}
+                    className="text-amber-700 border-amber-400 hover:bg-amber-100 flex-shrink-0"
+                  >
+                    Mark departed
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card className="earms-card">
