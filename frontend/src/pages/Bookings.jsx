@@ -1482,7 +1482,17 @@ export default function Bookings() {
           return [line, ...overlapLines].join("\n");
         }),
       ];
-      window.prompt("Select all (or screenshot) and send to Claude:", lines.join("\n"));
+      const fullText = lines.join("\n");
+      // window.prompt() silently truncates long text on some mobile browsers
+      // once the data grows (more stale bookings, more overlap detail) —
+      // copy to the clipboard instead so nothing gets cut off, falling back
+      // to the prompt only if the clipboard API is unavailable/denied.
+      try {
+        await navigator.clipboard.writeText(fullText);
+        toast.success("Diagnostics copied to clipboard — paste it to Claude", { duration: 6000 });
+      } catch (clipboardError) {
+        window.prompt("Select all (or screenshot) and send to Claude:", fullText);
+      }
     } catch (error) {
       toast.error(error.response?.data?.detail || "Diagnostics failed");
     }
