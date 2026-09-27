@@ -221,6 +221,24 @@ def rate_components(settings: dict, is_org: bool, category: str, check_in_date):
     )
 
 
+def _room_charge_categories(bk: dict) -> dict:
+    """{room_number: charge_category} for any room with an explicit per-room
+    billing override in room_guest_mapping. A room can be billed at the
+    Non-Org rate regardless of the booking's overall is_org flag (a real,
+    deliberate feature exercised at check-in/checkout — see check_in() and
+    check_out() in server.py, which this must match exactly). Evidence case
+    BK0754: booking is_org=True but its one room was charged Non-Org, which
+    every report had always billed at the Org rate instead — report_calc
+    never read room_guest_mapping at all until now."""
+    overrides = {}
+    for room in bk.get("room_guest_mapping") or []:
+        rn = room.get("room_number")
+        cc = room.get("charge_category")
+        if rn and cc:
+            overrides[rn] = cc
+    return overrides
+
+
 def _segment_room_nights(bk: dict, period_start: date, period_end: date, room_maps: dict) -> dict:
     """For segmented bookings: {room_number: (nights_in_period, category)}."""
     per_room = {}
@@ -252,20 +270,43 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
                           room is (correctly) vacant from the real departure
                           onward — see billing_nights_in_period().
         rooms             [{room_number, category, nights, billed_nights,
-                            rate_per_night, room_rent, license_fee, revenue}]
+                            rate_per_night, room_rent, license_fee, revenue,
+                            is_org}]
                           revenue includes this room's share of money;
                           the extra-bed charge is carried on the first room so
                           per-room revenues always sum to total_amount.
+                          is_org is the booking's is_org UNLESS this room has
+                          its own charge_category override in
+                          room_guest_mapping — callers bucketing money by
+                          Org/Non-Org (e.g. the monthly category tables) must
+                          use this, not the booking-level is_org, or an
+                          overridden room lands in the wrong bucket even
+                          though its money is now correct.
         room_rent         sum of room-rent across rooms (billed_nights basis)
         license_fee       sum of license fees across rooms (billed_nights basis)
-        extra_bed_charge  extra_beds x EXTRA_BED_RATE x nights (physical basis
-                          — no ruling covers extra beds for an early-checkout
-                          penalty, so this is unaffected by billed_nights)
+        extra_bed_charge  extra_beds x EXTRA_BED_RATE x nights, PLUS any extra
+                          bed added at checkout (extra_bed_charge_checkout —
+                          a flat amount with no stored date range, so counted
+                          entirely in whichever period contains the actual
+                          checkout date, the one date it's really tied to).
+                          Physical basis; no ruling covers extra beds for an
+                          early-checkout penalty, so unaffected by billed_nights.
         total_amount      room_rent + license_fee + extra_bed_charge
     """
     is_org = bk.get("is_org", False)
     nights = nights_in_period(bk, period_start, period_end)
     billed_nights = billing_nights_in_period(bk, period_start, period_end)
+    charge_categories = _room_charge_categories(bk)
+
+    # An extra bed added at checkout (separate from extra_beds, set at booking
+    # time) is settled as one flat amount with no stored date range — the
+    # only date it's really tied to is the actual checkout, so it counts
+    # entirely in whichever period contains that date.
+    checkout_extra_bed_charge = 0.0
+    if bk.get("status") == "checked_out":
+        actual_checkout = _parse_date(bk.get("actual_checkout_date"))
+        if actual_checkout and period_start <= actual_checkout <= period_end:
+            checkout_extra_bed_charge = bk.get("extra_bed_charge_checkout", 0) or 0
 
     rooms_out = []
     room_rent_total = 0.0
@@ -277,7 +318,7 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
             rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
             rooms_out.append({
                 "room_number": rn, "category": cat, "nights": rm_nights, "billed_nights": rm_nights,
-                "rate_per_night": rent + lf,
+                "rate_per_night": rent + lf, "is_org": is_org,
                 "room_rent": rent * rm_nights, "license_fee": lf * rm_nights,
             })
             room_rent_total += rent * rm_nights
@@ -285,20 +326,23 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
     else:
         # OR, not AND: an uninformed early checkout can have zero physical
         # nights left in a period (room already vacant) while still owing
-        # penalty nights there — that booking must still appear with rooms,
-        # or its penalty revenue silently drops out of that period entirely.
-        if nights > 0 or billed_nights > 0:
+        # penalty nights, or a checkout-added extra bed, there — that booking
+        # must still appear with rooms, or that revenue silently drops out of
+        # this period entirely.
+        if nights > 0 or billed_nights > 0 or checkout_extra_bed_charge > 0:
             for rn, cat in resolve_rooms(bk, room_maps):
-                rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
+                charge_category = charge_categories.get(rn)
+                is_org_room = is_org if charge_category is None else (charge_category != "Non-Org")
+                rent, lf = rate_components(settings, is_org_room, cat, bk.get("check_in_date"))
                 rooms_out.append({
                     "room_number": rn, "category": cat, "nights": nights, "billed_nights": billed_nights,
-                    "rate_per_night": rent + lf,
+                    "rate_per_night": rent + lf, "is_org": is_org_room,
                     "room_rent": rent * billed_nights, "license_fee": lf * billed_nights,
                 })
                 room_rent_total += rent * billed_nights
                 license_total += lf * billed_nights
 
-    extra_bed_charge = (bk.get("extra_beds", 0) or 0) * EXTRA_BED_RATE * nights
+    extra_bed_charge = (bk.get("extra_beds", 0) or 0) * EXTRA_BED_RATE * nights + checkout_extra_bed_charge
 
     for i, room in enumerate(rooms_out):
         room["revenue"] = round(

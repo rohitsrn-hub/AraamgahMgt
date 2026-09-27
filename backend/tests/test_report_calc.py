@@ -344,3 +344,133 @@ class TestEarlyCheckoutPenalty:
         )
         fin = booking_financials(bk, SETTINGS, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS)
         assert fin["extra_bed_charge"] == 0.0  # zero physical nights in August
+
+
+class TestPerRoomChargeCategoryOverride:
+    """2026-09 Aug reconciliation, round 2 — Evidence case BK0754: an Org
+    booking (is_org=True) with one room explicitly billed Non-Org via
+    room_guest_mapping's charge_category. Every report had always used the
+    booking-level is_org for every room, so this room was billed Non-Org in
+    reality (₹600/night combined) but reported at the Org Cat II rate
+    (₹400/night) — a ₹1,000 gap over 5 nights that had nothing to do with
+    early checkout. This must match check_in()/check_out() in server.py,
+    which already honor this override when actually charging the guest."""
+
+    def test_non_org_override_on_org_booking(self):
+        bk = booking(
+            is_org=True, room_numbers=["C2-15"], room_categories=["Cat II"],
+            check_out_date="2026-05-15",  # 5 nights
+            room_guest_mapping=[
+                {"room_number": "C2-15", "room_category": "Cat II", "charge_category": "Non-Org"},
+            ],
+        )
+        fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        assert fin["total_amount"] == (570 + 30) * 5  # Non-Org rate, not Cat II
+
+    def test_no_mapping_falls_back_to_booking_level_is_org(self):
+        # No room_guest_mapping at all — must behave exactly as before.
+        bk = booking(is_org=True, room_numbers=["C2-15"], room_categories=["Cat II"],
+                     check_out_date="2026-05-15")
+        fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        assert fin["total_amount"] == (385 + 15) * 5  # Org Cat II rate
+
+    def test_mapping_present_without_override_falls_back_too(self):
+        # charge_category omitted (or equal to room_category) -> no override.
+        bk = booking(
+            is_org=True, room_numbers=["C2-15"], room_categories=["Cat II"],
+            check_out_date="2026-05-15",
+            room_guest_mapping=[{"room_number": "C2-15", "room_category": "Cat II"}],
+        )
+        fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        assert fin["total_amount"] == (385 + 15) * 5
+
+    def test_override_applies_only_to_its_own_room_in_multi_room_booking(self):
+        bk = booking(
+            is_org=True, room_numbers=["C1-01", "C2-08"], room_categories=["Cat I", "Cat II"],
+            check_out_date="2026-05-15",  # 5 nights
+            room_guest_mapping=[
+                {"room_number": "C1-01", "room_category": "Cat I", "charge_category": "Non-Org"},
+                {"room_number": "C2-08", "room_category": "Cat II", "charge_category": "Cat II"},
+            ],
+        )
+        fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        by_room = {r["room_number"]: r for r in fin["rooms"]}
+        assert by_room["C1-01"]["room_rent"] + by_room["C1-01"]["license_fee"] == (570 + 30) * 5
+        assert by_room["C2-08"]["room_rent"] + by_room["C2-08"]["license_fee"] == (385 + 15) * 5
+
+    def test_room_carries_its_own_resolved_is_org_not_the_booking_level_flag(self):
+        # Callers that bucket money by Org/Non-Org (e.g. the monthly category
+        # tables) must read this per room, or an overridden room's now-correct
+        # money still lands in the wrong bucket.
+        bk = booking(
+            is_org=True, room_numbers=["C1-01", "C2-08"], room_categories=["Cat I", "Cat II"],
+            check_out_date="2026-05-15",
+            room_guest_mapping=[
+                {"room_number": "C1-01", "room_category": "Cat I", "charge_category": "Non-Org"},
+                {"room_number": "C2-08", "room_category": "Cat II", "charge_category": "Cat II"},
+            ],
+        )
+        fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        by_room = {r["room_number"]: r for r in fin["rooms"]}
+        assert by_room["C1-01"]["is_org"] is False
+        assert by_room["C2-08"]["is_org"] is True
+
+
+class TestExtraBedAddedAtCheckout:
+    """2026-09 Aug reconciliation, round 2 — Evidence case BK0630: a bed
+    added AT CHECKOUT (extra_beds_checkout/extra_bed_days, settled as
+    extra_bed_charge_checkout) is real, collected money that report_calc had
+    never read at all — separate from extra_beds, which is set at booking
+    time. It has no stored date range, so it's counted entirely in whichever
+    period contains the actual checkout date."""
+
+    def test_checkout_extra_bed_counted_in_the_checkout_month(self):
+        bk = booking(
+            check_in_date="2026-07-31", check_out_date="2026-08-03",
+            actual_checkout_date="2026-08-01", charge_reason="early_checkout_not_informed",
+            room_numbers=["C1-05", "C1-06"], room_categories=["Cat I", "Cat I"],
+            extra_bed_charge_checkout=75,
+        )
+        july = booking_financials(bk, SETTINGS, date(2026, 7, 1), date(2026, 7, 31), ROOM_MAPS)
+        august = booking_financials(bk, SETTINGS, date(2026, 8, 1), date(2026, 8, 31), ROOM_MAPS)
+        assert july["extra_bed_charge"] == 0.0
+        assert august["extra_bed_charge"] == 75.0
+        assert july["total_amount"] + august["total_amount"] == (470 + 30) * 2 * 3 + 75
+
+    def test_absent_for_a_booking_still_in_progress(self):
+        bk = booking(status="checked_in", check_in_date="2026-05-05", check_out_date="2026-05-10")
+        fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        assert fin["extra_bed_charge"] == 0.0
+
+    def test_adds_to_not_replaces_booking_time_extra_beds(self):
+        bk = booking(
+            check_in_date="2026-05-10", check_out_date="2026-05-12",
+            actual_checkout_date="2026-05-12", extra_beds=1,
+            extra_bed_charge_checkout=150,
+        )
+        fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        assert fin["extra_bed_charge"] == (1 * 75.0 * 2) + 150
+
+    def test_a_booking_with_zero_nights_here_still_appears_for_its_checkout_extra_bed(self):
+        # Guards the fin["rooms"] gate: a checkout-only charge in a period
+        # with zero physical/billed nights must not vanish along with it.
+        bk = booking(
+            check_in_date="2026-04-25", check_out_date="2026-04-30",
+            actual_checkout_date="2026-04-30", extra_beds=0,
+            extra_bed_charge_checkout=150,
+        )
+        # actual_checkout_date is in April, so May must see nothing at all —
+        # this only guards against the room list going empty while a charge
+        # is still expected in the SAME period as the checkout.
+        may_fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        assert may_fin["extra_bed_charge"] == 0.0
+        assert may_fin["rooms"] == []
+
+        bk_boundary = booking(
+            check_in_date="2026-04-25", check_out_date="2026-04-30",
+            actual_checkout_date="2026-05-01", extra_beds=0,
+            extra_bed_charge_checkout=150,
+        )
+        may_boundary_fin = booking_financials(bk_boundary, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
+        assert may_boundary_fin["extra_bed_charge"] == 150.0
+        assert may_boundary_fin["rooms"] != []

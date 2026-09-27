@@ -4005,7 +4005,8 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     org_cat_i_days = 0
     org_cat_ii_days = 0
     non_org_days = 0
-    extra_beds_total = 0
+    extra_beds_total = 0      # bed-nights count, for display only
+    extra_bed_money_total = 0.0  # actual money — from fin["extra_bed_charge"], not extra_beds_total x 75
 
     # Accumulate the ACTUAL resolved money from booking_financials() (rate-
     # history and check-in-date aware) instead of re-deriving it afterward
@@ -4046,7 +4047,13 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
             color_stats[color_key]["days"] += booking_room_days
 
         for room in fin["rooms"]:
-            if is_org:
+            # A room's OWN resolved org status (honors a per-room Non-Org
+            # charge_category override) — not the booking-level is_org above,
+            # which is for the guest's colour classification only. Using the
+            # booking-level flag here would put a Non-Org-overridden room's
+            # now-correct money into the wrong category bucket.
+            room_is_org = room.get("is_org", is_org)
+            if room_is_org:
                 if room["category"] == "Cat I":
                     org_cat_i_days += room["nights"]
                     cat_i_room_rent_total += room["room_rent"]
@@ -4061,6 +4068,12 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
                 non_org_license_fee_total += room["license_fee"]
 
         extra_beds_total += (bk.get("extra_beds", 0) or 0) * nights
+        # fin["extra_bed_charge"] also carries a bed added at checkout
+        # (extra_bed_charge_checkout), which extra_beds_total above can't
+        # represent as a night count — money must come from here, not from
+        # extra_beds_total x 75, or a checkout-added bed would agree with the
+        # other three reports' totals but silently disagree with this one.
+        extra_bed_money_total += fin["extra_bed_charge"]
 
     s = settings
     # Display-only reference rates (shown alongside the license-fee table) —
@@ -4080,7 +4093,7 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     lf_org_cat_ii = round(cat_ii_license_fee_total, 2)
     lf_non_org = round(non_org_license_fee_total, 2)
     total_license_fee = round(lf_org_cat_i + lf_org_cat_ii + lf_non_org, 2)
-    extra_bed_amount = round(extra_beds_total * 75, 2)
+    extra_bed_amount = round(extra_bed_money_total, 2)
     grand_total = round(room_rent_total + total_license_fee + extra_bed_amount, 2)
     
     # Advance received for bookings made/checked-in this month
