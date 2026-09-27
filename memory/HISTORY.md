@@ -5,6 +5,26 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-09-27 — August 2026 reconciliation, truly concluded: two more revenue gaps found and fixed (branch: claude/qa-audit-fixes)
+After the early-checkout-penalty fix recovered ₹7,800 of the ₹9,675 gap,
+₹1,875 still didn't reconcile on BK0754/BK0689/BK0630. Pulled their raw
+records and found two more real, pre-existing bugs — neither related to
+early checkout, both silently affecting every report for any booking that
+ever used them, not just these three: (1) a per-room "Non-Org" billing
+override (room_guest_mapping's charge_category) was honored when actually
+charging a guest at check-in/check-out, but no report ever read it — every
+report always billed every room at the booking's overall Org/Non-Org status
+instead. BK0754 (Org booking, one room deliberately billed Non-Org) showed
+₹1,000 less revenue than was actually collected. (2) An extra bed added at
+CHECKOUT time (separate from one set at booking time) was real, collected
+money that no report ever counted — BK0630's ₹75 was exactly one such
+bed-night. Both fixed in report_calc.py, the shared engine every report
+must use; also had to fix the Monthly Report's extra-bed money, which
+computed itself independently and would have quietly stopped matching the
+other three reports the moment a booking had a checkout-added bed. 17 new
+unit tests added this round (26 total for the week's reconciliation work).
+All three flagged bookings now compute their exact real billed amount.
+
 ## 2026-09-26 — August 2026 reconciliation, concluded: accountant's ruling implemented (branch: claude/qa-audit-fixes)
 Owner got a ruling from the accountant on the two questions parked earlier.
 (1) Month-boundary split — a stay crossing months splits its revenue
