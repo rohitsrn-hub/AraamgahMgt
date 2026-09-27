@@ -5,6 +5,23 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-09-27 — August 2026 reconciliation: verified fixed end to end (branch: claude/qa-audit-fixes)
+Owner re-ran the Aug 2026 Diagnostics button after all fixes deployed:
+reconcile still consistent across all four reports (₹2,33,500, up from the
+original ₹1,76,900), and the early-checkout-gap scan now returns ₹0 across
+0 bookings (was ₹9,675). The full multi-week reconciliation — Monthly
+Report's flat-rate bug, the accountant's early-checkout-penalty ruling, the
+per-room Non-Org override bug, and the checkout-extra-bed bug — is
+confirmed resolved with real production numbers, not just unit tests. Also
+fixed the "Aug 2026 Diagnostics" popup itself, which was silently
+truncating its own text once the stale-bookings list grew (window.prompt()
+has a length limit on some mobile browsers) — now copies the full text to
+the clipboard instead. Remaining: 7 stale-confirmed bookings from the
+earlier scan are a data-entry backlog, not a code bug — owner is clearing
+them via the new banner/Mark-departed UI directly, using the register to
+tell a real unclosed stay (Mark departed) from a duplicate entry (Cancel —
+flagged BK0453/BK0454 as likely the same guest's stay entered twice).
+
 ## 2026-09-27 — August 2026 reconciliation, truly concluded: two more revenue gaps found and fixed (branch: claude/qa-audit-fixes)
 After the early-checkout-penalty fix recovered ₹7,800 of the ₹9,675 gap,
 ₹1,875 still didn't reconcile on BK0754/BK0689/BK0630. Pulled their raw
