@@ -1498,6 +1498,69 @@ export default function Bookings() {
     }
   };
 
+  // TEMP, ONE-OFF: cancel the 7 stale-confirmed bookings the owner confirmed
+  // against the physical register ("DETAILS OF ECSAG QUERY") are either staff
+  // double-entries or no-shows no one ever cancelled — none are real unclosed
+  // stays. Calls the SAME POST /bookings/cancel the Bookings page's own
+  // Cancel button uses, so this has the exact same effect (status, notes,
+  // room status, refund-queue logic) as cancelling each one by hand in the
+  // UI. Remove this handler/button once run.
+  const STALE_BOOKINGS_TO_CANCEL = [
+    { booking_number: "BK0453", reason: "Double entry by staff — BK0454 is the correct booking for this stay (register-confirmed)" },
+    { booking_number: "BK0331", reason: "Double entry by staff (register-confirmed)" },
+    { booking_number: "BK0943", reason: "Room was cancelled; staff forgot to cancel this booking record (register-confirmed)" },
+    { booking_number: "BK0112", reason: "Double entry by staff (register-confirmed)" },
+    { booking_number: "BK0356", reason: "Guest never arrived; staff forgot to cancel the booking (register-confirmed)" },
+    { booking_number: "BK0601", reason: "Guest never arrived; staff forgot to cancel the booking (register-confirmed)" },
+    { booking_number: "BK0929", reason: "Guest never arrived; staff forgot to cancel the booking (register-confirmed)" },
+  ];
+
+  const handleCancelFlaggedBookings = async () => {
+    const confirmed = window.confirm(
+      `This will CANCEL ${STALE_BOOKINGS_TO_CANCEL.length} bookings confirmed as mistakes/no-shows against the register:\n\n` +
+      STALE_BOOKINGS_TO_CANCEL.map(b => `${b.booking_number}: ${b.reason}`).join("\n") +
+      `\n\nUses the normal Cancel action (same as the Bookings page) — no refund is auto-created. Proceed?`
+    );
+    if (!confirmed) return;
+
+    try {
+      const staleRes = await axios.get(`${API}/bookings/stale-confirmed`);
+      const idByNumber = {};
+      (staleRes.data.bookings || []).forEach(b => { idByNumber[b.booking_number] = b.id; });
+
+      const results = [];
+      for (const target of STALE_BOOKINGS_TO_CANCEL) {
+        const id = idByNumber[target.booking_number];
+        if (!id) {
+          results.push(`${target.booking_number}: SKIPPED — not found in the stale-confirmed list (already resolved?)`);
+          continue;
+        }
+        try {
+          await axios.post(`${API}/bookings/cancel`, {
+            booking_id: id,
+            reason: target.reason,
+            refund_amount: 0,
+          });
+          results.push(`${target.booking_number}: cancelled`);
+        } catch (err) {
+          results.push(`${target.booking_number}: FAILED — ${err.response?.data?.detail || err.message}`);
+        }
+      }
+
+      const summary = results.join("\n");
+      try {
+        await navigator.clipboard.writeText(summary);
+        toast.success("Cancellation results copied to clipboard — paste it to Claude", { duration: 8000 });
+      } catch (clipboardError) {
+        window.prompt("Results — select all and send to Claude:", summary);
+      }
+      fetchStaleConfirmed();
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || "Failed to run batch cancellation");
+    }
+  };
+
   // Stay Extension handlers
   const openExtendDialog = (booking) => {
     setSelectedBooking(booking);
@@ -1900,6 +1963,16 @@ export default function Bookings() {
               title="TEMP diagnostic for the August 2026 reconciliation — remove after use"
             >
               Aug 2026 Diagnostics
+            </Button>
+          )}
+          {isAdmin && (
+            <Button
+              variant="outline"
+              onClick={handleCancelFlaggedBookings}
+              className="flex items-center gap-2 text-red-600 border-red-300 hover:bg-red-50"
+              title="TEMP, one-off: cancel the 7 register-confirmed mistaken/no-show bookings — remove after use"
+            >
+              Cancel 7 Flagged Bookings
             </Button>
           )}
           <Button
