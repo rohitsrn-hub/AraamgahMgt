@@ -15,8 +15,9 @@
 - New feature or any multi-file change: present a plan first, let me amend it,
   and write code only after my explicit approval. Small fixes I directly asked
   for may proceed — state the fix in one line before starting.
-- Any action costing more than $2 in API credits: estimate it and ask first.
-  Always pick the cheapest way to test. Budget isn't tight, but be efficient.
+- Always ask before starting any action that spends usage credits — API calls,
+  model runs, anything metered — regardless of estimated cost. State the
+  estimate, wait for a yes. Always pick the cheapest way to test.
 - Deleting or overwriting anything I created (files, data, records): ask first.
 
 ## Definition of done
@@ -26,6 +27,10 @@
   never present partial work as complete.
 - Every finished piece of work ends with: what changed in app terms, proof
   (screenshot/output), and what I need to do to see it live.
+
+## When rules disagree
+- Testing: the ECC testing rules win for new features and real logic. Ponytail's "trivial changes need no test" covers only one-line fixes and text/copy changes.
+- How replies end: the Definition of done ending comes first (what changed, proof, what I need to do). Ponytail's "what I skipped / risks" line goes underneath it. Caveman mode shortens wording but never drops the plain product-terms rule.
 
 ## Project memory
 - Every project keeps a running history file (named in that project's

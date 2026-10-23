@@ -5,6 +5,11 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-10-23 — Computer-level CLAUDE.md copy brought up to date
+Synced docs/computer-level-CLAUDE.md with the live machine copy: the stricter
+"always ask before anything that uses credits" rule and the new "When rules
+disagree" section (testing and reply-ending precedence).
+
 ## 2026-07-06 — Standing-instructions rewrite
 Rewrote project CLAUDE.md as pure standing instructions (was a mixed session
 log), created this history file, and added a copy of the computer-level
