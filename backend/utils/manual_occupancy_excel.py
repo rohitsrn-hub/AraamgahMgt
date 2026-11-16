@@ -63,16 +63,26 @@ async def build_manual_occupancy_workbook(db, month: int, year: int) -> BytesIO:
     rows = []  # one entry per room per booking, in booking order then room order
     for bk in bookings:
         fin = booking_financials(bk, settings, period_start, period_end, room_maps)
-        if fin["nights"] == 0 or not fin["rooms"]:
+        # Same inclusion rule as the four on-screen reports: fin["rooms"] is
+        # empty only when the booking has neither physical nights nor billed
+        # money in this month. (This used to also skip fin["nights"] == 0,
+        # which dropped a booking that owes only penalty nights or a
+        # checkout-added extra bed here — the reports kept it, this sheet
+        # didn't, and the two totals silently disagreed for that month.)
+        if not fin["rooms"]:
             continue
-        is_org = bk.get("is_org", False)
-        for room in fin["rooms"]:
+        booking_is_org = bk.get("is_org", False)
+        for idx, room in enumerate(fin["rooms"]):
             rows.append({
                 "name": bk.get("guest_name", ""),
                 "mobile_no": bk.get("guest_contact") or "",
-                "org_status": "Org" if is_org else "Non-Org",
+                # The room's own billing status (honours a per-room Non-Org
+                # override), so the label matches the rate on the same row.
+                "org_status": "Org" if room.get("is_org", booking_is_org) else "Non-Org",
                 "days": room["nights"],
-                "advance_amt": bk.get("advance_paid", 0) or 0,
+                # One advance per booking: shown on its first room row only,
+                # so the column total isn't multiplied by the room count.
+                "advance_amt": (bk.get("advance_paid", 0) or 0) if idx == 0 else 0,
                 "room_rent": room["room_rent"],
                 "licence_chg": room["license_fee"],
                 "extra_bed": (room["revenue"] - room["room_rent"] - room["license_fee"]),

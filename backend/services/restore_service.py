@@ -107,8 +107,11 @@ async def restore_full(backup_id: str, db) -> Dict:
                     "error": str(e)
                 }
         
-        # Save restore log
-        await db.restore_logs.insert_one(restore_stats)
+        # Save restore log. Insert a COPY: insert_one() adds a Mongo "_id"
+        # (an ObjectId) to the dict it is given, and the API then failed to
+        # turn that into JSON — so every restore that had just SUCCEEDED was
+        # reported to the admin as "Restore failed".
+        await db.restore_logs.insert_one(dict(restore_stats))
         
         return restore_stats
         
@@ -136,12 +139,20 @@ async def restore_by_date_range(start_date: datetime, end_date: datetime, db) ->
     Restore all backups within a date range using MERGE strategy
     """
     try:
-        # Find all backups in range
+        # Find all backups in range. Timestamps are stored as UTC ISO
+        # strings; a datetime bound never matches a string field in Mongo, so
+        # this used to find nothing and every date-range restore failed with
+        # "No successful backups found". Compare like with like.
+        def _utc_iso(dt: datetime) -> str:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).isoformat()
+
         backups = await db.backup_metadata.find(
             {
                 "timestamp": {
-                    "$gte": start_date,
-                    "$lte": end_date
+                    "$gte": _utc_iso(start_date),
+                    "$lte": _utc_iso(end_date)
                 },
                 "status": "SUCCESS"
             },

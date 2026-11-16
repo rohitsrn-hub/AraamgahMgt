@@ -94,6 +94,18 @@ def nights_in_period(bk: dict, period_start: date, period_end: date) -> int:
     return _clip_nights(checkin, checkout, period_start, period_end)
 
 
+def billing_stay(bk: dict):
+    """(check_in, check_out) of the window this booking is CHARGED for.
+    Identical to effective_stay() for every booking except one deliberate
+    case: a checked-out booking whose early checkout was not informed in
+    advance is billed for its full ORIGINALLY BOOKED nights as a penalty
+    (owner/accountant ruling), so its billing window runs to the ORIGINAL
+    planned check_out_date rather than the real departure."""
+    if bk.get("status") == "checked_out" and bk.get("charge_reason") == "early_checkout_not_informed":
+        return _parse_date(bk.get("check_in_date")), _parse_date(bk.get("check_out_date"))
+    return effective_stay(bk)
+
+
 def billing_nights_in_period(bk: dict, period_start: date, period_end: date) -> int:
     """Nights to CHARGE for, inside the period. Identical to nights_in_period()
     for every booking except one deliberate case: a checked-out booking whose
@@ -102,11 +114,7 @@ def billing_nights_in_period(bk: dict, period_start: date, period_end: date) -> 
     is vacated — and correctly shown as vacant in occupancy — from the real
     departure onward. The penalty is split across a month boundary using the
     ORIGINAL planned check_out_date, the same way a normal stay's nights are."""
-    if bk.get("status") == "checked_out" and bk.get("charge_reason") == "early_checkout_not_informed":
-        checkin = _parse_date(bk.get("check_in_date"))
-        checkout = _parse_date(bk.get("check_out_date"))
-    else:
-        checkin, checkout = effective_stay(bk)
+    checkin, checkout = billing_stay(bk)
     return _clip_nights(checkin, checkout, period_start, period_end)
 
 
@@ -240,19 +248,37 @@ def _room_charge_categories(bk: dict) -> dict:
 
 
 def _segment_room_nights(bk: dict, period_start: date, period_end: date, room_maps: dict) -> dict:
-    """For segmented bookings: {room_number: (nights_in_period, category)}."""
+    """For segmented (mix & match) bookings:
+    {room_number: (physical_nights, billed_nights, category)} inside the period.
+
+    A segment is one planned night in one set of rooms. It only counts as
+    PHYSICALLY occupied if that night falls inside the booking's effective
+    stay, and only counts as BILLED if it falls inside its billing window —
+    the same two windows the non-segmented path uses. Before the Nov 2026
+    audit this counted every planned segment unconditionally, so a segmented
+    booking that left early kept occupying, and being billed for, nights
+    after its real departure (and an uninformed early checkout couldn't show
+    its rooms as vacant while still billing the penalty). Segments dated
+    outside the booking's own dates altogether (left behind by a date
+    change) are ignored for the same reason."""
+    phys_in, phys_out = effective_stay(bk)
+    bill_in, bill_out = billing_stay(bk)
     per_room = {}
     for seg in bk.get("room_segments") or []:
         night_dt = _parse_date(seg.get("night_date"))
         if night_dt is None or not (period_start <= night_dt <= period_end):
+            continue
+        physical = bool(phys_in and phys_out and phys_in <= night_dt < phys_out)
+        billed = bool(bill_in and bill_out and bill_in <= night_dt < bill_out)
+        if not (physical or billed):
             continue
         for room_data in seg.get("rooms", []):
             rn = room_data.get("room_number")
             if not rn:
                 continue
             cat = room_data.get("category") or room_maps["by_number"].get(rn, "Cat I")
-            nights, _ = per_room.get(rn, (0, cat))
-            per_room[rn] = (nights + 1, cat)
+            nights, billed_nights, _ = per_room.get(rn, (0, 0, cat))
+            per_room[rn] = (nights + (1 if physical else 0), billed_nights + (1 if billed else 0), cat)
     return per_room
 
 
@@ -314,15 +340,30 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
 
     if bk.get("room_segments"):
         seg_rooms = _segment_room_nights(bk, period_start, period_end, room_maps)
-        for rn, (rm_nights, cat) in seg_rooms.items():
-            rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
+        for rn, (rm_nights, rm_billed, cat) in seg_rooms.items():
+            # Same per-room override rule as the non-segmented branch below.
+            charge_category = charge_categories.get(rn)
+            is_org_room = is_org if charge_category is None else (charge_category != "Non-Org")
+            rent, lf = rate_components(settings, is_org_room, cat, bk.get("check_in_date"))
             rooms_out.append({
-                "room_number": rn, "category": cat, "nights": rm_nights, "billed_nights": rm_nights,
-                "rate_per_night": rent + lf, "is_org": is_org,
-                "room_rent": rent * rm_nights, "license_fee": lf * rm_nights,
+                "room_number": rn, "category": cat, "nights": rm_nights, "billed_nights": rm_billed,
+                "rate_per_night": rent + lf, "is_org": is_org_room,
+                "room_rent": rent * rm_billed, "license_fee": lf * rm_billed,
             })
-            room_rent_total += rent * rm_nights
-            license_total += lf * rm_nights
+            room_rent_total += rent * rm_billed
+            license_total += lf * rm_billed
+        # A checkout-added extra bed can fall in a period with no segment
+        # nights at all (same-day checkout on the 1st of a month). The money
+        # is carried on rooms[0], so the booking needs at least one room row
+        # or that charge would vanish from this period.
+        if not rooms_out and checkout_extra_bed_charge > 0:
+            for rn, cat in resolve_rooms(bk, room_maps)[:1]:
+                rent, lf = rate_components(settings, is_org, cat, bk.get("check_in_date"))
+                rooms_out.append({
+                    "room_number": rn, "category": cat, "nights": 0, "billed_nights": 0,
+                    "rate_per_night": rent + lf, "is_org": is_org,
+                    "room_rent": 0.0, "license_fee": 0.0,
+                })
     else:
         # OR, not AND: an uninformed early checkout can have zero physical
         # nights left in a period (room already vacant) while still owing
@@ -357,4 +398,92 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
         "license_fee": round(license_total, 2),
         "extra_bed_charge": round(extra_bed_charge, 2),
         "total_amount": round(room_rent_total + license_total + extra_bed_charge, 2),
+    }
+
+
+def stay_charges(bk: dict, settings: dict, room_maps: dict, charged_nights: Optional[int] = None) -> dict:
+    """Room rent + licence fee for this booking's ROOMS, for the first
+    `charged_nights` nights from its check-in date (default: its full planned
+    stay) — the price check-in, check-out and stay-extension must all charge.
+
+    This is booking_financials() asked one specific question, so the amount a
+    guest is actually billed can't drift from what every report later says
+    was billed: same room resolution, same per-room Non-Org override, same
+    check-in-date rate, same per-night handling of mix & match segments.
+    Those three call sites each used to carry their own copy of that
+    arithmetic and each had drifted (check-in billed a mix & match stay for
+    every room on every night; check-out's fallback divided a pre-extension
+    total by post-extension nights; extension ignored the per-room override).
+
+    Deliberately ignores status, the actual departure date and extra beds —
+    the caller decides how many nights to charge and adds extra beds itself.
+
+    Returns {"room_rent", "license_fee", "total", "rooms"}.
+    """
+    checkin = _parse_date(bk.get("check_in_date"))
+    checkout = _parse_date(bk.get("check_out_date"))
+    if checkin is None or checkout is None:
+        return {"room_rent": 0.0, "license_fee": 0.0, "total": 0.0, "rooms": []}
+    if charged_nights is not None:
+        checkout = checkin + timedelta(days=max(0, int(charged_nights)))
+    if checkout <= checkin:
+        return {"room_rent": 0.0, "license_fee": 0.0, "total": 0.0, "rooms": []}
+
+    probe = dict(bk)
+    probe.update({
+        "status": "confirmed",
+        "check_out_date": checkout.isoformat(),
+        "extra_beds": 0,
+        "extra_bed_charge_checkout": 0,
+    })
+    fin = booking_financials(probe, settings, checkin, checkout - timedelta(days=1), room_maps)
+    return {
+        "room_rent": fin["room_rent"],
+        "license_fee": fin["license_fee"],
+        "total": round(fin["room_rent"] + fin["license_fee"], 2),
+        "rooms": fin["rooms"],
+    }
+
+
+DEFAULT_CANCELLATION_POLICY = [
+    {"hours_before": 96, "charge_percent": 0},
+    {"hours_before": 48, "charge_percent": 50},
+    {"hours_before": 0, "charge_percent": 100},
+]
+
+
+def cancellation_refund(advance_paid, hours_until_checkin: float, policy: Optional[list] = None) -> dict:
+    """Refund owed when a booking is cancelled `hours_until_checkin` hours
+    before its check-in moment, under the configured cancellation slabs.
+
+    Each slab is {"hours_before" (or legacy "days_before"), "charge_percent"}:
+    the slab with the LARGEST threshold the cancellation still clears applies.
+    Cancelling after check-in time (negative hours) clears no slab and is
+    charged in full. The refund can never exceed the advance actually paid
+    nor go below zero, whatever the slabs say.
+
+    Lives here, with the rest of the money rules, so the "how much will be
+    refunded?" preview and the cancellation itself can't use two different
+    calculations.
+    """
+    slabs = policy if policy else DEFAULT_CANCELLATION_POLICY
+
+    def threshold(slab: dict) -> float:
+        if slab.get("hours_before") is not None:
+            return float(slab["hours_before"])
+        return float(slab.get("days_before", 0) or 0) * 24
+
+    charge_percent = 100.0
+    for slab in sorted(slabs, key=threshold, reverse=True):
+        if hours_until_checkin >= threshold(slab):
+            charge_percent = float(slab.get("charge_percent", 100))
+            break
+    charge_percent = min(100.0, max(0.0, charge_percent))
+
+    advance = max(0.0, float(advance_paid or 0))
+    cancellation_charge = round(advance * charge_percent / 100, 2)
+    return {
+        "charge_percent": charge_percent,
+        "cancellation_charge": cancellation_charge,
+        "refund_amount": round(max(0.0, advance - cancellation_charge), 2),
     }

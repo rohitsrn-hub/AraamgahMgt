@@ -1,0 +1,12 @@
+# Test-only dependencies. NOT installed on Render (which uses requirements.txt).
+#
+#   cd backend
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python3 -m pytest tests/test_report_calc.py tests/test_manual_occupancy_excel.py tests/test_audit_*.py -q
+#
+# mongomock-motor is an in-memory stand-in for MongoDB, so the endpoint tests
+# in tests/test_audit_endpoints.py run the real FastAPI app with no database
+# and no server (see tests/inprocess.py).
+pytest
+httpx
+mongomock-motor

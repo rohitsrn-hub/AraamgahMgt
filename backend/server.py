@@ -36,6 +36,8 @@ from utils.report_calc import (
     booking_financials,
     rate_components,
     effective_rate_settings,
+    stay_charges,
+    cancellation_refund,
     RATE_FIELDS,
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
@@ -465,7 +467,11 @@ class CheckOutRequest(BaseModel):
 class CancelBookingRequest(BaseModel):
     booking_id: str
     reason: Optional[str] = None
-    refund_amount: Optional[float] = 0.0
+    # None (omitted) = "apply the cancellation policy" — the server works the
+    # refund out itself. This used to default to 0, so a client that failed
+    # to load the refund preview cancelled the booking with NO refund queued
+    # for a guest who was owed one, and nothing on screen said so.
+    refund_amount: Optional[float] = None
 
 class CloseStaleBookingRequest(BaseModel):
     staff_id: str
@@ -685,6 +691,10 @@ async def complete_setup(request: SetupRequest, current_user: dict = Depends(req
         cat_ii_license_fee=request.cat_ii_license_fee,
         def_civ_room_rent=request.def_civ_room_rent,
         def_civ_license_fee=request.def_civ_license_fee,
+        # These two were never passed through, so whatever Non-Org rate the
+        # setup wizard collected was silently replaced by the 570/30 default.
+        non_org_room_rent=request.non_org_room_rent,
+        non_org_license_fee=request.non_org_license_fee,
         cat_i_rooms_count=request.cat_i_rooms_count,
         cat_ii_rooms_count=request.cat_ii_rooms_count,
         default_advance_amount=request.default_advance_amount,
@@ -1496,28 +1506,113 @@ async def find_optimal_room_combination(
 
 # ============= STAY EXTENSION =============
 
-def _extension_cost(settings: dict, room_categories: list, nights: int, is_org: bool, booking_check_in_date) -> float:
-    """Shared cost calculation for stay-extension nights.
+def _last_night_rooms(b: dict, room_maps: dict) -> list:
+    """[{id, room_number, category}] for the rooms the guest occupies on the
+    LAST booked night — the rooms an extension continues in. For a plain
+    booking that is simply all of its rooms; for a mix & match booking it is
+    the final segment's rooms, not every room used at any point in the stay
+    (extending a guest who moved from A to B must extend B only)."""
+    segments = sorted((b.get("room_segments") or []), key=lambda seg: seg.get("night_date") or "")
+    if segments and segments[-1].get("rooms"):
+        return [
+            {"id": r.get("id"), "room_number": r.get("room_number"), "category": r.get("category")}
+            for r in segments[-1]["rooms"]
+        ]
+    ids = b.get("room_ids") or ([b["room_id"]] if b.get("room_id") else [])
+    numbers = b.get("room_numbers") or []
+    categories = b.get("room_categories") or []
+    rooms = []
+    for i, rid in enumerate(ids):
+        number = numbers[i] if i < len(numbers) else room_maps["id_to_number"].get(rid)
+        category = categories[i] if i < len(categories) else room_maps["id_to_category"].get(rid)
+        rooms.append({"id": rid, "room_number": number, "category": category})
+    return rooms
 
-    Uses the same split rate fields (report_calc.rate_components) as every
-    report and the check-in billing path, instead of the legacy flat
-    cat_i_rate/cat_ii_rate fields this used to read — those aren't edited by
-    the Settings screen anymore, so extension pricing could silently drift
-    from every other financial surface in the app the moment an admin
-    changed a rate. plan_extension and confirm_extension both call this so
-    the price shown for approval and the price actually charged can't differ.
 
-    booking_check_in_date is always the booking's ORIGINAL check-in date, not
-    the extension window — an Extend keeps the rate that was locked in when
-    the guest checked in, even if the extra nights fall after a rate change.
-    """
-    if nights <= 0:
-        return 0.0
-    total = 0.0
-    for cat in room_categories:
-        rent, licence = rate_components(settings, is_org, cat, booking_check_in_date)
-        total += (rent + licence) * nights
-    return total
+def _booking_with_extension(b: dict, new_check_out: str, room_maps: dict, extension_rooms: Optional[list] = None) -> dict:
+    """A copy of booking `b` exactly as it will be stored once extended to
+    new_check_out — in the same rooms (extension_rooms=None) or in different
+    ones. plan-extension prices this copy and confirm-extension saves it, so
+    the quoted price, the saved booking and every later report all come from
+    one description of the stay."""
+    old_out = date_type.fromisoformat(b["check_out_date"])
+    new_out = date_type.fromisoformat(new_check_out)
+    extension_nights = [(old_out + timedelta(days=i)).isoformat() for i in range(max(0, (new_out - old_out).days))]
+
+    after = dict(b)
+    after["check_out_date"] = new_check_out
+    segments = list(b.get("room_segments") or [])
+    current_rooms = _last_night_rooms(b, room_maps)
+
+    if extension_rooms is None:
+        # A mix & match booking's reports are driven by its nightly
+        # segments, so the new nights need segments too — without them the
+        # extension was charged to the guest but never reached any report.
+        if segments:
+            after["room_segments"] = segments + [{"night_date": n, "rooms": current_rooms} for n in extension_nights]
+        return after
+
+    if not segments:
+        check_in = date_type.fromisoformat(b["check_in_date"])
+        segments = [
+            {"night_date": (check_in + timedelta(days=i)).isoformat(), "rooms": current_rooms}
+            for i in range((old_out - check_in).days)
+        ]
+    after["room_segments"] = segments + [{"night_date": n, "rooms": extension_rooms} for n in extension_nights]
+    after["has_room_changes"] = True
+
+    # room_ids / room_numbers / room_categories are parallel lists read by
+    # position everywhere else. Keep them aligned, in order of first use.
+    # (These were built from three separate set()s, which both scrambled the
+    # order and collapsed two rooms of the same category into one entry.)
+    ordered = {}
+    existing_ids = b.get("room_ids") or []
+    existing_numbers = b.get("room_numbers") or []
+    existing_categories = b.get("room_categories") or []
+    for i, rid in enumerate(existing_ids):
+        ordered.setdefault(rid, {
+            "id": rid,
+            "room_number": existing_numbers[i] if i < len(existing_numbers) else room_maps["id_to_number"].get(rid),
+            "category": existing_categories[i] if i < len(existing_categories) else room_maps["id_to_category"].get(rid),
+        })
+    for r in extension_rooms:
+        ordered.setdefault(r["id"], r)
+    after["room_ids"] = list(ordered.keys())
+    after["room_numbers"] = [r["room_number"] for r in ordered.values()]
+    after["room_categories"] = [r["category"] for r in ordered.values()]
+    return after
+
+
+def _extension_charge(settings: dict, room_maps: dict, before: dict, after: dict) -> float:
+    """Price of an extension = room charges of the extended stay minus room
+    charges of the stay as it stands, both from report_calc.stay_charges() —
+    so the extra nights are priced per room exactly as check-in, check-out
+    and the reports price them: the rate locked in at the ORIGINAL check-in
+    date (an Extend never re-prices), the per-room Non-Org override, and the
+    nightly room plan of a mix & match stay. plan_extension and
+    confirm_extension both call this so the price shown for approval and the
+    price actually charged can't differ."""
+    return round(
+        stay_charges(after, settings, room_maps)["total"] - stay_charges(before, settings, room_maps)["total"], 2
+    )
+
+
+def _booking_in_rooms(b: dict, rooms: list) -> dict:
+    """A copy of booking `b` moved into `rooms` for its whole stay."""
+    moved = dict(b)
+    moved["room_ids"] = [r["id"] for r in rooms]
+    moved["room_numbers"] = [r["room_number"] for r in rooms]
+    moved["room_categories"] = [r["category"] for r in rooms]
+    moved["room_segments"] = None
+    moved["has_room_changes"] = False
+    # Carry any per-room billing override across to the replacement room in
+    # the same position, so a room billed Non-Org stays billed Non-Org.
+    mapping = [dict(m) for m in (b.get("room_guest_mapping") or [])]
+    if mapping and len(mapping) == len(rooms):
+        for m, r in zip(mapping, rooms):
+            m["room_id"], m["room_number"], m["room_category"] = r["id"], r["room_number"], r["category"]
+        moved["room_guest_mapping"] = mapping
+    return moved
 
 
 @api_router.post("/bookings/{booking_id}/plan-extension")
@@ -1533,23 +1628,28 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
     extension_start = booking["check_out_date"]
     extension_end = new_check_out_date
 
+    try:
+        date_type.fromisoformat(extension_end)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="New checkout date must be a valid YYYY-MM-DD date")
     if extension_end <= extension_start:
         raise HTTPException(status_code=400, detail="New checkout date must be after current checkout date")
 
-    current_room_ids = booking.get("room_ids", [])
-    current_room_numbers = booking.get("room_numbers", [])
-    current_room_categories = booking.get("room_categories", [])
-    num_rooms = booking.get("num_rooms", len(current_room_ids))
-    is_org = booking.get("is_org", False)
-
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    room_maps = build_room_maps(await db.rooms.find({}, {"_id": 0}).to_list(500))
 
-    def calc_cost(room_cats, check_in_s, check_out_s, is_org_flag):
-        nights = (date_type.fromisoformat(check_out_s) - date_type.fromisoformat(check_in_s)).days
-        return _extension_cost(settings, room_cats, nights, is_org_flag, booking["check_in_date"])
+    # The rooms the guest is in on their last booked night — the ones the
+    # extension continues in (for a mix & match stay, NOT every room used).
+    current_rooms = _last_night_rooms(booking, room_maps)
+    current_room_ids = [r["id"] for r in current_rooms]
+    current_room_numbers = [r["room_number"] for r in current_rooms]
+    current_room_categories = [r["category"] for r in current_rooms]
+    num_rooms = len(current_rooms) or booking.get("num_rooms", 1)
 
     old_total = booking.get("total_amount", 0.0)
-    ext_cost = calc_cost(current_room_categories, extension_start, extension_end, is_org)
+    ext_cost = _extension_charge(
+        settings, room_maps, booking, _booking_with_extension(booking, extension_end, room_maps)
+    )
     new_total_main = round(old_total + ext_cost, 2)
 
     main_amendment = {
@@ -1661,7 +1761,7 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
             chosen_ids = [r["id"] for r in chosen]
             chosen_nums = [r["room_number"] for r in chosen]
             chosen_cats = [r["category"] for r in chosen]
-            new_cost_cb = round(calc_cost(chosen_cats, cb["check_in_date"], cb["check_out_date"], cb.get("is_org", False)), 2)
+            new_cost_cb = stay_charges(_booking_in_rooms(cb, chosen), settings, room_maps)["total"]
             proposed_shifts.append({
                 "booking_id": cb["id"],
                 "booking_number": cb["booking_number"],
@@ -1710,7 +1810,11 @@ async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., d
         alt_room_numbers = [r["room_number"] for r in alt_rooms]
         alt_room_cats = [r["category"] for r in alt_rooms]
 
-        ext_cost_alt = round(calc_cost(alt_room_cats, extension_start, extension_end, is_org), 2)
+        alt_rooms_seg = [{"id": r["id"], "room_number": r["room_number"], "category": r["category"]} for r in alt_rooms]
+        ext_cost_alt = _extension_charge(
+            settings, room_maps, booking,
+            _booking_with_extension(booking, extension_end, room_maps, alt_rooms_seg),
+        )
         new_total_alt = round(old_total + ext_cost_alt, 2)
 
         p3_amendment = {
@@ -1747,6 +1851,34 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
 
     now = datetime.now(timezone.utc)
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    room_maps = build_room_maps(await db.rooms.find({}, {"_id": 0}).to_list(500))
+
+    def _validated_new_check_out(amendment: dict, old_check_out: str) -> str:
+        new_check_out = amendment.get("new_check_out")
+        try:
+            date_type.fromisoformat(new_check_out)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Extension has an invalid new checkout date")
+        if new_check_out <= old_check_out:
+            raise HTTPException(status_code=400, detail="New checkout date must be after current checkout date")
+        return new_check_out
+
+    def _money_update(before: dict, after: dict) -> tuple:
+        """(extension charge, fields to store) for a booking going from
+        `before` to `after`. The stored room/licence totals are refreshed too
+        so nothing downstream ever sees a pre-extension figure."""
+        ext_cost = _extension_charge(settings, room_maps, before, after)
+        after_charges = stay_charges(after, settings, room_maps)
+        new_total = round((before.get("total_amount", 0.0) or 0.0) + ext_cost, 2)
+        return ext_cost, {
+            "total_amount": new_total,
+            # Add the extension to the existing balance instead of rebuilding
+            # it as total - advance: the balance also carries the check-in
+            # extra-bed charge, which the rebuild silently dropped.
+            "balance_amount": round((before.get("balance_amount", 0.0) or 0.0) + ext_cost, 2),
+            "room_rent_total": after_charges["room_rent"],
+            "license_fee_total": after_charges["license_fee"],
+        }
 
     # The amendments were computed by plan-extension against room availability
     # at that moment; a booking made by someone else in the gap between plan and
@@ -1811,26 +1943,27 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
         changes = []
 
         if change_type == "extension":
-            # New nights added on the same rooms. Old checkout and room
-            # categories come from the booking itself (b), not the amendment,
-            # so the charge can't be manipulated by a tampered request.
+            # New nights added in the rooms the guest is already in. Old
+            # checkout and rooms come from the booking itself (b), not the
+            # amendment, so the charge can't be manipulated by a tampered
+            # request.
             old_check_out = b["check_out_date"]
-            new_check_out = amendment["new_check_out"]
+            new_check_out = _validated_new_check_out(amendment, old_check_out)
             await _extension_conflict(
-                b.get("room_ids", []) or ([b["room_id"]] if b.get("room_id") else []),
+                [r["id"] for r in _last_night_rooms(b, room_maps)],
                 old_check_out, new_check_out,
             )
-            nights = (date_type.fromisoformat(new_check_out) - date_type.fromisoformat(old_check_out)).days
+            after = _booking_with_extension(b, new_check_out, room_maps)
             old_total = b.get("total_amount", 0.0)
-            ext_cost = _extension_cost(settings, b.get("room_categories", []), nights, b.get("is_org", False), b.get("check_in_date"))
-            new_total = round(old_total + ext_cost, 2)
+            ext_cost, money = _money_update(b, after)
 
             update["check_out_date"] = new_check_out
-            update["total_amount"] = new_total
-            update["balance_amount"] = round(new_total - b.get("advance_paid", 0), 2)
+            update.update(money)
+            if after.get("room_segments"):
+                update["room_segments"] = after["room_segments"]
             changes = [
                 f"Stay extended: checkout {old_check_out} → {new_check_out}",
-                f"Amount: ₹{old_total:.0f} → ₹{new_total:.0f}",
+                f"Amount: ₹{old_total:.0f} → ₹{money['total_amount']:.0f}",
             ]
 
         elif change_type == "room_reassignment":
@@ -1841,99 +1974,85 @@ async def confirm_extension(booking_id: str, request: ConfirmExtensionRequest, c
 
             old_room_ids = b.get("room_ids", []) or ([b["room_id"]] if b.get("room_id") else [])
             new_rooms_by_id = await _rooms_by_id(new_room_ids)
-            new_room_numbers = [new_rooms_by_id[rid]["room_number"] for rid in new_room_ids]
-            new_room_categories = [new_rooms_by_id[rid]["category"] for rid in new_room_ids]
+            moved = _booking_in_rooms(b, [
+                {"id": rid, "room_number": new_rooms_by_id[rid]["room_number"], "category": new_rooms_by_id[rid]["category"]}
+                for rid in new_room_ids
+            ])
+            new_room_numbers = moved["room_numbers"]
 
-            nights = (date_type.fromisoformat(b["check_out_date"]) - date_type.fromisoformat(b["check_in_date"])).days
             old_total = b.get("total_amount", 0.0)
-            new_total = round(_extension_cost(settings, new_room_categories, nights, b.get("is_org", False), b.get("check_in_date")), 2)
+            moved_charges = stay_charges(moved, settings, room_maps)
+            new_total = moved_charges["total"]
 
-            update["room_ids"] = new_room_ids
-            update["room_numbers"] = new_room_numbers
-            update["room_categories"] = new_room_categories
+            update["room_ids"] = moved["room_ids"]
+            update["room_numbers"] = moved["room_numbers"]
+            update["room_categories"] = moved["room_categories"]
+            update["room_segments"] = None
+            update["has_room_changes"] = False
+            if moved.get("room_guest_mapping"):
+                update["room_guest_mapping"] = moved["room_guest_mapping"]
             update["total_amount"] = new_total
-            update["balance_amount"] = round(new_total - b.get("advance_paid", 0), 2)
+            update["balance_amount"] = round((b.get("balance_amount", 0.0) or 0.0) + (new_total - old_total), 2)
+            update["room_rent_total"] = moved_charges["room_rent"]
+            update["license_fee_total"] = moved_charges["license_fee"]
             changes = [
                 f"Room reassigned: {', '.join(b.get('room_numbers', []))} → {', '.join(new_room_numbers)}",
                 f"Amount: ₹{old_total:.0f} → ₹{new_total:.0f}",
             ]
 
-            # The guest is moving rooms right now (this booking is checked in),
-            # so reflect that immediately: free the old rooms (only if no other
-            # active booking still holds them) and occupy the new ones. This
-            # was previously left stale — the old room stayed "occupied" and
-            # the new room stayed whatever it was before.
-            for rid in old_room_ids:
-                await _release_room_if_unclaimed(rid, bid)
-            for rid in new_room_ids:
-                await db.rooms.update_one({"id": rid}, {"$set": {"status": RoomStatus.OCCUPIED.value}})
+            # Only touch the rooms' live "occupied" flag if THIS guest is
+            # actually in the building. The booking being moved here is the
+            # one that was in the extending guest's way — almost always a
+            # future, not-yet-arrived (confirmed) booking — and this used to
+            # mark its new rooms "occupied" on the spot regardless, so an
+            # empty room showed as occupied until someone noticed.
+            if b.get("status") == BookingStatus.CHECKED_IN.value:
+                for rid in old_room_ids:
+                    await _release_room_if_unclaimed(rid, bid)
+                for rid in new_room_ids:
+                    await db.rooms.update_one({"id": rid}, {"$set": {"status": RoomStatus.OCCUPIED.value}})
 
         elif change_type == "extension_room_change":
             # Extension nights are served by DIFFERENT rooms → those extension
             # rooms must be free for the extension window (excluding co-moved set).
             extension_room_ids = amendment["extension_room_ids"]
             old_check_out = b["check_out_date"]
-            new_check_out = amendment["new_check_out"]
+            new_check_out = _validated_new_check_out(amendment, old_check_out)
             await _extension_conflict(extension_room_ids, old_check_out, new_check_out)
 
             ext_rooms_by_id = await _rooms_by_id(extension_room_ids)
-
-            # Build room_segments: original period in current rooms, extension in new rooms
-            orig_check_in = date_type.fromisoformat(b["check_in_date"])
-            orig_check_out = date_type.fromisoformat(old_check_out)
-            ext_start = orig_check_out
-            ext_end = date_type.fromisoformat(new_check_out)
-
-            orig_rooms_seg = [
-                {"id": rid, "room_number": rnum, "category": rcat}
-                for rid, rnum, rcat in zip(
-                    b.get("room_ids", []), b.get("room_numbers", []), b.get("room_categories", [])
-                )
-            ]
             ext_rooms_seg = [
                 {"id": rid, "room_number": ext_rooms_by_id[rid]["room_number"], "category": ext_rooms_by_id[rid]["category"]}
                 for rid in extension_room_ids
             ]
 
-            segments = []
-            for i in range((orig_check_out - orig_check_in).days):
-                night = (orig_check_in + timedelta(days=i)).strftime("%Y-%m-%d")
-                segments.append({"night_date": night, "rooms": orig_rooms_seg})
-            for i in range((ext_end - ext_start).days):
-                night = (ext_start + timedelta(days=i)).strftime("%Y-%m-%d")
-                segments.append({"night_date": night, "rooms": ext_rooms_seg})
-
-            all_room_ids = list(set(b.get("room_ids", []) + extension_room_ids))
-            all_room_numbers = list({r["room_number"] for r in orig_rooms_seg + ext_rooms_seg})
-            all_room_cats = list({r["category"] for r in orig_rooms_seg + ext_rooms_seg})
-
-            ext_nights = (ext_end - ext_start).days
-            ext_categories = [ext_rooms_by_id[rid]["category"] for rid in extension_room_ids]
+            # Original period stays in the current rooms, extension nights
+            # go in the new rooms — recorded as nightly room_segments.
+            after = _booking_with_extension(b, new_check_out, room_maps, ext_rooms_seg)
             old_total = b.get("total_amount", 0.0)
-            ext_cost = _extension_cost(settings, ext_categories, ext_nights, b.get("is_org", False), b.get("check_in_date"))
-            new_total = round(old_total + ext_cost, 2)
+            ext_cost, money = _money_update(b, after)
 
             update["check_out_date"] = new_check_out
-            update["room_segments"] = segments
+            update["room_segments"] = after["room_segments"]
             update["has_room_changes"] = True
-            update["room_ids"] = all_room_ids
-            update["room_numbers"] = all_room_numbers
-            update["room_categories"] = all_room_cats
-            update["total_amount"] = new_total
-            update["balance_amount"] = round(new_total - b.get("advance_paid", 0), 2)
+            update["room_ids"] = after["room_ids"]
+            update["room_numbers"] = after["room_numbers"]
+            update["room_categories"] = after["room_categories"]
+            update.update(money)
             changes = [
                 f"Stay extended: checkout {old_check_out} → {new_check_out}",
                 f"Extension rooms: {', '.join(r['room_number'] for r in ext_rooms_seg)} (different from original {', '.join(b.get('room_numbers', []))})",
-                f"Amount: ₹{old_total:.0f} → ₹{new_total:.0f}",
+                f"Amount: ₹{old_total:.0f} → ₹{money['total_amount']:.0f}",
             ]
-            # Note: the extension rooms only take over from ext_start (a future
-            # date relative to "now" in the common case), and room.status has
-            # no time dimension — it's a single current-state flag. Flipping
-            # extension_room_ids to "occupied" immediately would incorrectly
-            # mark them occupied before the guest has actually moved in. Room
-            # status for segmented stays is intentionally left to check-in/
-            # check-out to manage; room_segments already tracks the true
-            # night-by-night assignment for reports and billing.
+            # Note: the extension rooms only take over from the old checkout
+            # date (a future date relative to "now" in the common case), and
+            # room.status has no time dimension — it's a single current-state
+            # flag. Flipping extension_room_ids to "occupied" immediately
+            # would incorrectly mark them occupied before the guest has
+            # actually moved in. Room status for segmented stays is
+            # intentionally left to check-in/check-out to manage;
+            # room_segments already tracks the true night-by-night assignment
+            # for reports and billing.
         else:
             continue
 
@@ -2305,38 +2424,34 @@ async def check_in(request: CheckInRequest, current_user: dict = Depends(require
     # Get settings for rate calculation
     settings = await db.app_settings.find_one({}, {"_id": 0})
     
-    # Recalculate room charges. Rent and licence fee are summed SEPARATELY,
-    # both from the same split-rate settings the reports use
-    # (cat_i_room_rent/cat_i_license_fee, etc.) via report_calc.rate_components —
-    # so the stored total_amount can never drift from what the reports compute.
-    # (Previously this read the legacy cat_i_rate/cat_ii_rate fields, which the
-    # Settings screen no longer edits, and then added license_fee_total on top,
-    # double-counting the licence portion.)
-    check_in_date = datetime.fromisoformat(booking["check_in_date"].replace('Z', '+00:00'))
-    check_out_date = datetime.fromisoformat(booking["check_out_date"].replace('Z', '+00:00'))
-    nights = (check_out_date - check_in_date).days
+    # Recalculate room charges through report_calc.stay_charges() — the same
+    # calculation every report uses — so the stored total_amount can never
+    # drift from what the reports compute. (History: this first read legacy
+    # cat_i_rate fields and double-counted the licence fee; then it carried
+    # its own copy of the per-room arithmetic, which billed a mix & match
+    # booking for EVERY room it ever uses on EVERY night of the stay instead
+    # of the night-by-night plan it was quoted at.)
+    room_guest_mapping = [dict(r) for r in (request.room_guest_mapping or [])]
+    if not booking.get("is_org", False):
+        # A Non-Org booking pays the Non-Org rate for every room. The
+        # check-in screen only recalculated a room's charge category once a
+        # guest was assigned to it, so a room left unassigned in a multi-room
+        # Non-Org booking arrived here still labelled "Cat I"/"Cat II" and
+        # was billed at the cheaper Org rate.
+        for room in room_guest_mapping:
+            room["charge_category"] = "Non-Org"
 
-    new_room_rent_total = 0.0
-    new_license_fee_total = 0.0
-    if request.room_guest_mapping and len(request.room_guest_mapping) > 0:
-        for room in request.room_guest_mapping:
-            room_category = room.get("room_category", "Cat I")
-            charge_category = room.get("charge_category", room_category)
-            # A per-room "Non-Org" charge overrides the booking's org status
-            # for that room (a room in an Org booking can be billed Non-Org).
-            is_org_room = charge_category != "Non-Org"
-            rent, licence = rate_components(settings or {}, is_org_room, room_category, booking["check_in_date"])
-            new_room_rent_total += rent * nights
-            new_license_fee_total += licence * nights
-    else:
-        # No per-room mapping: recompute from the booking's own rooms and its
-        # org status (never trust a stored room_rent_total — create_booking
-        # doesn't set it, so the old fallback zeroed the bill).
-        is_org_booking = booking.get("is_org", False)
-        for cat in (booking.get("room_categories") or ["Cat I"]):
-            rent, licence = rate_components(settings or {}, is_org_booking, cat, booking["check_in_date"])
-            new_room_rent_total += rent * nights
-            new_license_fee_total += licence * nights
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(500)
+    priced_booking = {**booking, "room_guest_mapping": room_guest_mapping or booking.get("room_guest_mapping") or []}
+    charges = stay_charges(priced_booking, settings or {}, build_room_maps(all_rooms))
+    if not charges["rooms"]:
+        # Never silently store a Rs 0 bill (this has happened before).
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot work out this booking's room charges — its rooms could not be found. Re-assign the rooms and try again."
+        )
+    new_room_rent_total = charges["room_rent"]
+    new_license_fee_total = charges["license_fee"]
 
     # Calculate extra bed charge
     extra_bed_charge = request.extra_beds * 75.0
@@ -2378,8 +2493,8 @@ async def check_in(request: CheckInRequest, current_user: dict = Depends(require
         update_fields["family_members"] = request.family_members
     if request.alt_contacts:
         update_fields["alt_contacts"] = request.alt_contacts
-    if request.room_guest_mapping:
-        update_fields["room_guest_mapping"] = request.room_guest_mapping  # Store the mapping (NEW STRUCTURE)
+    if room_guest_mapping:
+        update_fields["room_guest_mapping"] = room_guest_mapping  # Store the (normalised) mapping
     if request.notes:
         update_fields["notes"] = request.notes
 
@@ -2490,7 +2605,11 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
     # Parse dates
     check_in_dt = datetime.fromisoformat(original_check_in.replace('Z', '+00:00')).date() if isinstance(original_check_in, str) else original_check_in
     original_checkout_dt = datetime.fromisoformat(original_check_out.replace('Z', '+00:00')).date() if isinstance(original_check_out, str) else original_check_out
-    actual_checkout_dt = datetime.strptime(actual_checkout_date, "%Y-%m-%d").date()
+    try:
+        actual_checkout_dt = datetime.strptime(actual_checkout_date, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        # Was an unhandled 500 ("Check-out failed") with no usable message.
+        raise HTTPException(status_code=400, detail="Checkout date must be a valid YYYY-MM-DD date")
     
     # Determine which nights to charge
     if actual_checkout_dt < original_checkout_dt:
@@ -2508,34 +2627,29 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
         charged_nights = (original_checkout_dt - check_in_dt).days
         charge_reason = "normal"
     
-    # Recalculate room charges for charged nights
-    room_rent_recalculated = 0.0
-    room_guest_mapping = booking.get("room_guest_mapping", [])
-    
-    if room_guest_mapping and len(room_guest_mapping) > 0:
-        for room in room_guest_mapping:
-            room_category = room.get("room_category", "Cat I")
-            charge_category = room.get("charge_category", room_category)
-            is_org_room = charge_category != "Non-Org"
-            # Rate resolved by the booking's own check-in date, not "today" —
-            # a stay checked in before a rate change keeps the old rate for
-            # its whole stay, even if checkout happens after the change.
-            rent, licence = rate_components(settings or {}, is_org_room, room_category, original_check_in)
-            rate_per_night = rent + licence
-
-            room_rent_recalculated += rate_per_night * charged_nights
+    # Room charges for the charged nights, from report_calc.stay_charges() —
+    # the same per-room calculation check-in and every report use (honours
+    # the per-room Non-Org override, the check-in-date rate, and mix & match
+    # segments). This replaces two hand-rolled copies: one that re-derived
+    # rates from room_guest_mapping, and a fallback for bookings without a
+    # mapping that divided the room total STORED AT CHECK-IN by the CURRENT
+    # number of booked nights — after a stay extension that total was stale,
+    # so the guest's whole extension came out free.
+    charged_nights = max(0, charged_nights)
+    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(500)
+    charges = stay_charges(booking, settings or {}, build_room_maps(all_rooms), charged_nights)
+    if charges["rooms"] or charged_nights == 0:
+        room_rent_only = charges["room_rent"]
+        license_fee_only = charges["license_fee"]
     else:
-        # Fallback to original calculation if no mapping. room_rent_recalculated
-        # represents rent + licence combined, so include both stored parts
-        # (room_rent_total is rent-only since the check-in split).
-        stored_room_and_licence = booking.get("room_rent_total", 0) + booking.get("license_fee_total", 0)
+        # Rooms can't be resolved at all (e.g. deleted since): fall back to
+        # what check-in stored rather than bill Rs 0.
         original_nights = (original_checkout_dt - check_in_dt).days
-        if original_nights > 0:
-            per_night_rate = stored_room_and_licence / original_nights
-            room_rent_recalculated = per_night_rate * charged_nights
-        else:
-            room_rent_recalculated = stored_room_and_licence
-    
+        factor = (charged_nights / original_nights) if original_nights > 0 else 1
+        room_rent_only = (booking.get("room_rent_total", 0) or 0) * factor
+        license_fee_only = (booking.get("license_fee_total", 0) or 0) * factor
+    room_rent_recalculated = room_rent_only + license_fee_only
+
     # Calculate extra bed charges
     extra_bed_charge_checkout = (request.extra_beds_checkout or 0) * (request.extra_bed_days or 0) * 75
     
@@ -2554,7 +2668,8 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
         "actual_checkout_date": actual_checkout_date,
         "charged_nights": charged_nights,
         "charge_reason": charge_reason,
-        "room_rent_total": room_rent_recalculated,
+        "room_rent_total": room_rent_only,       # rent only, as at check-in
+        "license_fee_total": license_fee_only,
         "extra_beds_checkout": request.extra_beds_checkout,
         "extra_bed_days": request.extra_bed_days,
         "extra_bed_charge_checkout": extra_bed_charge_checkout,
@@ -2631,33 +2746,17 @@ async def calculate_refund(booking_id: str, current_user: dict = Depends(get_cur
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
-    settings = await db.app_settings.find_one({}, {"_id": 0})
-    cancellation_policy = settings.get("cancellation_policy", [
-        {"hours_before": 96, "charge_percent": 0},
-        {"hours_before": 48, "charge_percent": 50},
-        {"hours_before": 0, "charge_percent": 100}
-    ])
-    
-    # Calculate hours until check-in (13:00 IST on the check-in date)
-    check_in_moment = checkin_moment(booking["check_in_date"])
-    now = datetime.now(IST)
-    hours_until_checkin = (check_in_moment - now).total_seconds() / 3600
-    
-    # Find applicable charge percent
-    # Support both hours_before and days_before formats
-    charge_percent = 100  # Default: no refund
-    for slab in sorted(cancellation_policy, key=lambda x: x.get("hours_before", x.get("days_before", 0) * 24), reverse=True):
-        # Convert days to hours if needed
-        threshold_hours = slab.get("hours_before") if "hours_before" in slab else slab.get("days_before", 0) * 24
-        
-        if hours_until_checkin >= threshold_hours:
-            charge_percent = slab["charge_percent"]
-            break
-    
-    advance_paid = booking.get("advance_paid", 0)
-    cancellation_charge = (advance_paid * charge_percent) / 100
-    refund_amount = advance_paid - cancellation_charge
-    
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+
+    # Hours until check-in (13:00 IST on the check-in date)
+    hours_until_checkin = (checkin_moment(booking["check_in_date"]) - datetime.now(IST)).total_seconds() / 3600
+
+    advance_paid = booking.get("advance_paid", 0) or 0
+    refund = cancellation_refund(advance_paid, hours_until_checkin, settings.get("cancellation_policy"))
+    charge_percent = refund["charge_percent"]
+    cancellation_charge = refund["cancellation_charge"]
+    refund_amount = refund["refund_amount"]
+
     return {
         "booking_id": booking_id,
         "booking_number": booking["booking_number"],
@@ -2680,17 +2779,22 @@ async def cancel_booking(request: CancelBookingRequest, current_user: dict = Dep
         raise HTTPException(status_code=400, detail="Booking cannot be cancelled")
     
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Update booking
-    await db.bookings.update_one(
-        {"id": request.booking_id},
+
+    # Atomically claim the cancellation: only flip if the booking is still in
+    # the status we just read. Two simultaneous submissions (double-click,
+    # retry on a slow connection) both passed the check above and BOTH went
+    # on to queue a refund for the same advance.
+    claim = await db.bookings.update_one(
+        {"id": request.booking_id, "status": booking["status"]},
         {"$set": {
             "status": BookingStatus.CANCELLED.value,
             "notes": f"{booking.get('notes', '') or ''} | Cancelled: {request.reason or 'No reason provided'}",
             "updated_at": now
         }}
     )
-    
+    if claim.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Booking is already being cancelled or has changed; refresh and try again")
+
     # Update room status if was occupied (checked_in)
     if booking["status"] == BookingStatus.CHECKED_IN.value:
         room_ids = booking.get("room_ids", [])
@@ -2706,7 +2810,17 @@ async def cancel_booking(request: CancelBookingRequest, current_user: dict = Dep
     # paid in advance — the client sends refund_amount and nothing else stops a
     # typo (or a forged request) from queueing a ₹99,999 refund on a ₹400 advance.
     advance_paid = booking.get("advance_paid", 0) or 0
-    refund_amount = min(max(request.refund_amount, 0), advance_paid)
+    if request.refund_amount is None:
+        # No amount supplied: apply the cancellation policy here, with the
+        # same function the refund preview uses.
+        settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+        hours_until_checkin = (checkin_moment(booking["check_in_date"]) - datetime.now(IST)).total_seconds() / 3600
+        requested_refund = cancellation_refund(
+            advance_paid, hours_until_checkin, settings.get("cancellation_policy")
+        )["refund_amount"]
+    else:
+        requested_refund = request.refund_amount
+    refund_amount = min(max(requested_refund, 0), advance_paid)
     if refund_amount > 0:
         refund = Refund(
             booking_id=booking["id"],
@@ -2723,7 +2837,7 @@ async def cancel_booking(request: CancelBookingRequest, current_user: dict = Dep
         )
         await db.refunds.insert_one(serialize_doc(refund.model_dump()))
     
-    return {"message": "Booking cancelled successfully", "booking_id": request.booking_id}
+    return {"message": "Booking cancelled successfully", "booking_id": request.booking_id, "refund_amount": refund_amount}
 
 @api_router.post("/bookings/{booking_id}/close-stale")
 async def close_stale_booking(
@@ -2971,31 +3085,24 @@ async def amend_booking(request: AmendBookingRequest, current_user: dict = Depen
         if not settings:
             settings = {}
 
-        check_in = date_type.fromisoformat(amendment_data.get("check_in_date", booking["check_in_date"]))
-        check_out = date_type.fromisoformat(amendment_data.get("check_out_date", booking["check_out_date"]))
-        nights = (check_out - check_in).days
+        # A mix & match booking's nightly room plan (room_segments) is tied
+        # to its original dates and rooms. Amend has no way to re-plan it, so
+        # once dates or rooms change the booking becomes a plain one: its
+        # rooms for the whole amended stay — which is exactly what the
+        # availability check above reserved and what is priced below. Left
+        # in place, the stale plan kept driving every report with the OLD
+        # nights while the guest was billed for the new ones.
+        if booking.get("room_segments"):
+            amendment_data["room_segments"] = None
+            amendment_data["has_room_changes"] = False
+            changes.append("Mix & match room plan replaced by the same rooms for the whole stay")
 
-        # Get room categories (either new or existing)
-        room_categories = amendment_data.get("room_categories", booking.get("room_categories", []))
-
-        # Calculate total for each category
-        cat_i_count = sum(1 for cat in room_categories if cat == "Cat I")
-        cat_ii_count = sum(1 for cat in room_categories if cat == "Cat II")
-
-        # Use is_org to determine rates. Rate resolved by `check_in` — the
-        # amended date if the amendment moves it, otherwise the booking's
-        # existing one — so moving a booking's check-in across a rate
-        # change correctly re-prices it. Previously this read the legacy
-        # cat_i_rate/cat_ii_rate settings fields (not edited by Settings
-        # since the rate split), so amendments silently used stale/default
-        # rates instead of the real configured ones.
-        is_org = booking.get("is_org", False)
-        cat_i_rent, cat_i_licence = rate_components(settings, is_org, "Cat I", check_in)
-        cat_ii_rent, cat_ii_licence = rate_components(settings, is_org, "Cat II", check_in)
-        cat_i_rate = cat_i_rent + cat_i_licence
-        cat_ii_rate = cat_ii_rent + cat_ii_licence
-
-        new_total = (cat_i_count * cat_i_rate + cat_ii_count * cat_ii_rate) * nights
+        # Price the amended booking with report_calc.stay_charges() — the
+        # same calculation check-in, check-out and every report use. Rate is
+        # resolved by the (possibly amended) check-in date, so moving a
+        # booking's check-in across a rate change correctly re-prices it.
+        all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(500)
+        new_total = stay_charges({**booking, **amendment_data}, settings, build_room_maps(all_rooms))["total"]
         old_total = booking.get("total_amount", 0)
 
         amendment_data["total_amount"] = new_total
@@ -3038,25 +3145,29 @@ async def amend_booking(request: AmendBookingRequest, current_user: dict = Depen
                 changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Additional ₹{additional_required} will be collected at checkout)")
         
         elif new_total < old_total:
-            # Decreased cost - refund scenario
-            refund_due = old_total - new_total
-            
-            # Keep advance_paid as is - the refund will be processed at checkout
-            # Mark this booking as having a pending refund
-            amendment_data["refund_due"] = refund_due
-            amendment_data["refund_reason"] = "Booking amended - cost reduced"
-            
-            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (Refund due: ₹{refund_due} - will be processed at checkout)")
-        
+            changes.append(f"Amount: ₹{old_total} → ₹{new_total} (reduced by ₹{old_total - new_total})")
+
         else:
             # No cost change
             changes.append(f"Booking details updated (Amount unchanged: ₹{new_total})")
-        
-        # Recalculate balance amount
-        # Balance = New Total - Advance Paid + Any Refund Due
+
+        # A refund is owed only for money the guest has actually PAID beyond
+        # the new total — i.e. advance minus new total, when that is
+        # positive. This used to be set to (old total - new total) whenever
+        # the price dropped, regardless of how much had been paid: shortening
+        # a Rs 1,500 booking with a Rs 400 advance to Rs 1,000 recorded a
+        # Rs 500 "refund due", which the check-out screen then deducted from
+        # the bill — the guest was asked for Rs 100 instead of Rs 600.
         current_advance = amendment_data.get("advance_paid", old_advance)
-        refund_due = amendment_data.get("refund_due", 0)
-        amendment_data["balance_amount"] = new_total - current_advance + refund_due
+        refund_due = round(max(0.0, current_advance - new_total), 2)
+        amendment_data["refund_due"] = refund_due
+        amendment_data["refund_reason"] = "Booking amended - advance exceeds new total" if refund_due > 0 else None
+        if refund_due > 0:
+            changes.append(f"Refund due to guest: ₹{refund_due} (advance paid exceeds the new total)")
+
+        # Balance still to collect (never negative — an overpayment is the
+        # refund_due above, not a negative balance).
+        amendment_data["balance_amount"] = round(max(0.0, new_total - current_advance), 2)
     
     # Add amendment log
     amendment_log = booking.get("amendment_log", [])
@@ -3072,12 +3183,28 @@ async def amend_booking(request: AmendBookingRequest, current_user: dict = Depen
     notes += f"\n[AMENDED {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}]: {'; '.join(changes)}"
     amendment_data["notes"] = notes.strip()
     
-    # Update booking
-    await db.bookings.update_one(
-        {"id": request.booking_id},
+    # Update booking — only if it is still CONFIRMED (a check-in or
+    # cancellation landing in between must not be overwritten).
+    result = await db.bookings.update_one(
+        {"id": request.booking_id, "status": BookingStatus.CONFIRMED.value},
         {"$set": amendment_data}
     )
-    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=409, detail="Booking changed while it was being amended; refresh and try again")
+
+    # Record the additional advance in the payments ledger, like every other
+    # payment. It was only ever added to the booking's advance_paid, so the
+    # money never appeared in the Dashboard's fund figures.
+    if amendment_data.get("advance_paid", 0) > (booking.get("advance_paid", 0) or 0):
+        payment = Payment(
+            booking_id=booking["id"],
+            booking_number=booking["booking_number"],
+            amount=round(amendment_data["advance_paid"] - (booking.get("advance_paid", 0) or 0), 2),
+            payment_type="advance",
+            payment_mode=request.payment_mode
+        )
+        await db.payments.insert_one(serialize_doc(payment.model_dump()))
+
     # Fetch updated booking
     updated_booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
     
@@ -4670,6 +4797,134 @@ async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Qu
     }
 
 
+# ============= TEMP — Nov 2026 audit diagnostic (REMOVE when the audit is closed) =============
+# TEMP: read-only, admin-only. Built for the Nov 2026 full-codebase audit to
+# answer, against the live database, the questions that audit could only
+# reason about from code. Changes nothing. Paired with the "TEMP: Audit
+# check" button on the Reports page. Delete both once the owner has pasted
+# the result back and the open questions are settled.
+@api_router.get("/reports/temp-audit-2026-11")
+async def temp_audit_2026_11(current_user: dict = Depends(require_admin_role)):
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    room_maps = build_room_maps(await db.rooms.find({}, {"_id": 0}).to_list(500))
+    bookings = await db.bookings.find({}, {"_id": 0}).to_list(20000)
+    wide_start, wide_end = date_type(2000, 1, 1), date_type(2100, 1, 1)
+
+    # 1. Do the four reports agree with each other, for EVERY month on record?
+    months = []
+    check_ins = sorted(b["check_in_date"][:7] for b in bookings if b.get("check_in_date"))
+    if check_ins:
+        year, month = int(check_ins[0][:4]), int(check_ins[0][5:7])
+        today = ist_today_str()
+        while f"{year}-{month:02d}" <= today[:7]:
+            try:
+                rec = await reconcile_reports(month=month, year=year)
+                months.append({
+                    "month": f"{year}-{month:02d}",
+                    "consistent": rec["consistent"],
+                    "revenue": rec["totals"]["revenue"]["room_allotment"],
+                    "mismatches": rec["mismatches"],
+                })
+            except Exception as e:  # report the failure, don't hide it
+                months.append({"month": f"{year}-{month:02d}", "consistent": False, "error": str(e)})
+            month += 1
+            if month == 13:
+                year, month = year + 1, 1
+
+    # 2. Do the reports agree with what each guest was actually billed and paid?
+    def ist_date(iso_ts):
+        try:
+            return datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00")).astimezone(IST).date().isoformat()
+        except (ValueError, TypeError):
+            return None
+
+    drift, tag_totals = [], {}
+    uncollected_count, uncollected_sum = 0, 0.0
+    for b in bookings:
+        if b.get("status") != BookingStatus.CHECKED_OUT.value:
+            continue
+        reported = booking_financials(b, settings, wide_start, wide_end, room_maps)["total_amount"]
+        billed = round(b.get("total_amount", 0) or 0, 2)
+        collected = round((b.get("advance_paid", 0) or 0) + (b.get("final_payment", 0) or 0), 2)
+        if "charged_nights" in b and abs(collected - billed) > 0.5:
+            uncollected_count += 1
+            uncollected_sum += billed - collected
+        if abs(reported - billed) <= 0.5:
+            continue
+        tags = []
+        if (b.get("actual_checkout_date") or "") > (b.get("check_out_date") or ""):
+            tags.append("late_checkout")
+        if (b.get("extra_beds", 0) or 0) > 0:
+            tags.append("checkin_extra_bed")
+        if b.get("room_segments"):
+            tags.append("mix_match")
+        if b.get("is_amended"):
+            tags.append("extended")
+        if "charged_nights" not in b:
+            tags.append("never_checked_out_in_app")
+        if b.get("charge_reason") == "early_checkout_not_informed":
+            tags.append("penalty")
+        tag = "+".join(tags) or "unexplained"
+        t = tag_totals.setdefault(tag, {"bookings": 0, "reported_minus_billed": 0.0})
+        t["bookings"] += 1
+        t["reported_minus_billed"] = round(t["reported_minus_billed"] + reported - billed, 2)
+        drift.append({
+            "bk": b.get("booking_number"), "out": b.get("actual_checkout_date") or b.get("check_out_date"),
+            "reported": reported, "billed": billed, "collected": collected, "why": tag,
+        })
+    drift.sort(key=lambda d: abs(d["reported"] - d["billed"]), reverse=True)
+
+    # 3. How exposed is live data to the issues found?
+    active = [b for b in bookings if b.get("status") in ("confirmed", "checked_in")]
+    wrong_refund_due = [
+        {"bk": b.get("booking_number"), "status": b.get("status"), "stored_refund_due": b.get("refund_due"),
+         "correct": round(max(0.0, (b.get("advance_paid", 0) or 0) - (b.get("total_amount", 0) or 0)), 2)}
+        for b in active
+        if abs((b.get("refund_due") or 0) - max(0.0, (b.get("advance_paid", 0) or 0) - (b.get("total_amount", 0) or 0))) > 0.5
+    ]
+    early_check_ins = [
+        b.get("booking_number") for b in bookings
+        if b.get("actual_check_in") and "charged_nights" in b
+        and (ist_date(b["actual_check_in"]) or "9999") < (b.get("check_in_date") or "")
+    ]
+    exposure = {
+        "bookings_total": len(bookings),
+        "mix_match_bookings": sum(1 for b in bookings if b.get("room_segments")),
+        "mix_match_active_now": [b.get("booking_number") for b in active if b.get("room_segments")],
+        "extended_bookings": sum(1 for b in bookings if b.get("is_amended")),
+        "bookings_with_checkin_extra_bed": sum(1 for b in bookings if (b.get("extra_beds", 0) or 0) > 0),
+        "of_those_also_extra_bed_at_checkout": sum(
+            1 for b in bookings if (b.get("extra_beds", 0) or 0) > 0 and (b.get("extra_bed_charge_checkout", 0) or 0) > 0),
+        "late_checkouts": sum(
+            1 for b in bookings if b.get("status") == "checked_out"
+            and (b.get("actual_checkout_date") or "") > (b.get("check_out_date") or "")),
+        "uninformed_early_checkouts": sum(1 for b in bookings if b.get("charge_reason") == "early_checkout_not_informed"),
+        "non_org_bookings_with_an_org_rate_room": [
+            b.get("booking_number") for b in bookings if not b.get("is_org")
+            and any((m.get("charge_category") or "Non-Org") != "Non-Org" for m in (b.get("room_guest_mapping") or []))],
+        "cancelled_after_check_in": [
+            b.get("booking_number") for b in bookings if b.get("status") == "cancelled" and b.get("actual_check_in")],
+        "checked_in_before_booked_date": early_check_ins[:40],
+        "active_bookings_with_wrong_refund_due": wrong_refund_due,
+        "checked_out_with_unpaid_balance": {"bookings": uncollected_count, "rupees": round(uncollected_sum, 2)},
+        "payments_rows": await db.payments.count_documents({}),
+        "last_successful_backup": (await db.backup_metadata.find_one(
+            {"status": "SUCCESS"}, {"_id": 0, "timestamp": 1, "backup_type": 1}, sort=[("timestamp", -1)])),
+    }
+
+    return {
+        "as_of": ist_today_str(),
+        "months": months,
+        "all_months_consistent": all(m["consistent"] for m in months),
+        "reported_vs_billed": {
+            "checked_out_bookings_that_differ": len(drift),
+            "by_cause": tag_totals,
+            "largest": drift[:40],
+        },
+        "exposure": exposure,
+    }
+
+
 @api_router.get("/reports/manual-occupancy-excel")
 async def download_manual_occupancy_excel(
     month: int = Query(..., ge=1, le=12), year: int = Query(..., ge=2000),
@@ -4880,6 +5135,10 @@ async def restore_date_range(request: DateRangeRestore, current_user: dict = Dep
     try:
         start = datetime.fromisoformat(request.start_date.replace('Z', '+00:00'))
         end = datetime.fromisoformat(request.end_date.replace('Z', '+00:00'))
+        # A bare end DATE means "through the end of that day", not its first
+        # instant — otherwise backups taken on the end date are left out.
+        if len(request.end_date.strip()) <= 10:
+            end = end + timedelta(days=1) - timedelta(microseconds=1)
         
         result = await restore_service.restore_by_date_range(start, end, db)
         return {

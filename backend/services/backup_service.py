@@ -35,14 +35,27 @@ def _json_default(obj):
 BACKUP_DIR = Path(__file__).parent.parent / "backups"  # backend/backups
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)  # Create parent dirs if needed
 
-# Collections to backup
+# Collections to backup.
+# Every collection that holds data the guesthouse cannot recreate. Until the
+# Nov 2026 audit this listed only bookings/rooms/staff/refunds/app_settings
+# (plus "settings", a collection the app has never written to) — so a restore
+# after losing the database would have brought back the bookings but none of
+# the payments ledger, guests, user logins, feedback or toiletry stock.
+# Each of these documents carries its own "id", which is what restore merges
+# on. (counters is deliberately absent: it has no "id" and re-seeds itself
+# from the latest booking number.)
 COLLECTIONS_TO_BACKUP = [
     "bookings",
     "rooms",
-    "settings",
     "staff",
     "refunds",
-    "app_settings"  # Include app settings
+    "app_settings",
+    "payments",
+    "guests",
+    "users",
+    "feedbacks",
+    "toiletry_inventory",
+    "toiletry_transactions",
 ]
 
 
@@ -252,9 +265,16 @@ async def cleanup_old_backups(db, retention_days: int = 90):
         cutoff_date = datetime.now(timezone.utc).timestamp() - (retention_days * 24 * 60 * 60)
         cutoff_datetime = datetime.fromtimestamp(cutoff_date, tz=timezone.utc)
         
-        # Find old backups
+        # Find old backups. Backup timestamps are stored as ISO strings, and
+        # Mongo never matches a string field against a datetime bound — so
+        # comparing with the datetime alone matched nothing and this cleanup
+        # had never deleted a single backup. Compare both representations
+        # (the scheduler's failure records do store a real datetime).
         old_backups = await db.backup_metadata.find(
-            {"timestamp": {"$lt": cutoff_datetime}},
+            {"$or": [
+                {"timestamp": {"$lt": cutoff_datetime.isoformat()}},
+                {"timestamp": {"$lt": cutoff_datetime}},
+            ]},
             {"_id": 0, "backup_id": 1, "file_path": 1}
         ).to_list(None)
         
