@@ -4797,14 +4797,18 @@ async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Qu
     }
 
 
-# ============= TEMP — Nov 2026 audit diagnostic (REMOVE when the audit is closed) =============
-# TEMP: read-only, admin-only. Built for the Nov 2026 full-codebase audit to
-# answer, against the live database, the questions that audit could only
-# reason about from code. Changes nothing. Paired with the "TEMP: Audit
-# check" button on the Reports page. Delete both once the owner has pasted
-# the result back and the open questions are settled.
-@api_router.get("/reports/temp-audit-2026-11")
-async def temp_audit_2026_11(current_user: dict = Depends(require_admin_role)):
+# ============= AUDIT CHECK (month-end reconciliation) =============
+# Read-only, admin-only. The one place that answers, against the live
+# database, the three month-end questions: do the four reports agree with
+# each other (every month on record), do they agree with what each guest was
+# actually billed, and was what was billed collected. Changes nothing.
+# Paired with the "Audit check" button on the Reports page; the month-end
+# procedure that reads its output is docs/month-end-reconciliation-agent.md.
+# Started life as temporary tooling for the Nov 2026 audit and was kept
+# because /reports/reconcile alone only proves the reports agree with EACH
+# OTHER, not with the money.
+@api_router.get("/reports/audit-check")
+async def audit_check(current_user: dict = Depends(require_admin_role)):
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
     room_maps = build_room_maps(await db.rooms.find({}, {"_id": 0}).to_list(500))
     bookings = await db.bookings.find({}, {"_id": 0}).to_list(20000)

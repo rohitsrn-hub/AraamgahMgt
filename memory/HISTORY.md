@@ -5,6 +5,15 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-16 — Audit check button made permanent; month-end procedure written (branch: claude/qa-audit-fixes)
+The admin-only "Audit check" button on the Reports page is no longer
+temporary — owner's decision. It is the data source for a monthly routine:
+it shows, for every month, whether the four reports agree, which checked-out
+bookings are reported at a different amount than they were billed (and why),
+and unpaid balances. The written procedure for a Claude session to run that
+check at each month end is docs/month-end-reconciliation-agent.md. (The
+entry below still calls the button TEMP — that is superseded by this one.)
+
 ## 2026-11-16 — Full-codebase audit: 15 fixes, 9 questions for the owner (branch: claude/qa-audit-fixes)
 First systematic read of the whole app rather than one symptom's path. Fixed,
 each with a test that failed before: mix & match bookings were mis-reported

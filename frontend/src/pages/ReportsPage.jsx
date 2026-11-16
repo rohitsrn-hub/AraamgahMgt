@@ -6,7 +6,6 @@ import RoomOccupancyTab from "./reports/RoomOccupancyTab";
 import RoomAllotmentTab from "./reports/RoomAllotmentTab";
 import GuestDetailsTab from "./reports/GuestDetailsTab";
 import ManualExcelTab from "./reports/ManualExcelTab";
-// TEMP (Nov 2026 audit) — remove these four imports with the TEMP button below
 import axios from "axios";
 import { toast } from "sonner";
 import { API } from "@/App";
@@ -15,28 +14,29 @@ import { useAuth } from "@/contexts/AuthContext";
 export default function ReportsPage({ settings }) {
   const [activeTab, setActiveTab] = useState("monthly");
 
-  // TEMP (Nov 2026 audit): admin-only, read-only diagnostic. Runs
-  // GET /reports/temp-audit-2026-11 and copies the result to the clipboard so
-  // it can be pasted back from a phone. Remove together with that endpoint.
+  // Audit check: admin-only, read-only. Runs GET /reports/audit-check and
+  // copies the result to the clipboard so it can be pasted (from a phone) into
+  // the month-end reconciliation session — see
+  // docs/month-end-reconciliation-agent.md.
   const { user } = useAuth();
-  const [tempAuditBusy, setTempAuditBusy] = useState(false);
-  const [tempAuditText, setTempAuditText] = useState("");
-  const runTempAudit = async () => {
-    setTempAuditBusy(true);
+  const [auditCheckBusy, setAuditCheckBusy] = useState(false);
+  const [auditCheckText, setAuditCheckText] = useState("");
+  const runAuditCheck = async () => {
+    setAuditCheckBusy(true);
     try {
-      const res = await axios.get(`${API}/reports/temp-audit-2026-11`);
+      const res = await axios.get(`${API}/reports/audit-check`);
       const text = JSON.stringify(res.data);
-      setTempAuditText(text);
+      setAuditCheckText(text);
       try {
         await navigator.clipboard.writeText(text);
-        toast.success("Audit check finished — result copied. Paste it back to Claude.");
+        toast.success("Audit check finished — result copied. Paste it into the month-end check.");
       } catch {
         toast.warning("Audit check finished, but copying failed. Long-press the box below, Select All, Copy.");
       }
     } catch (error) {
       toast.error(error.response?.data?.detail || "Audit check failed");
     } finally {
-      setTempAuditBusy(false);
+      setAuditCheckBusy(false);
     }
   };
 
@@ -51,20 +51,20 @@ export default function ReportsPage({ settings }) {
         <p className="text-slate-500 mt-1">Comprehensive reports and analytics</p>
       </div>
 
-      {/* TEMP (Nov 2026 audit) — remove with runTempAudit above */}
+      {/* Month-end audit check (admin only) */}
       {user?.role === "admin" && (
-        <div className="p-3 rounded-xl border border-dashed border-amber-400 bg-amber-50 text-sm" data-testid="temp-audit-box">
+        <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 text-sm" data-testid="audit-check-box">
           <button
-            onClick={runTempAudit}
-            disabled={tempAuditBusy}
-            className="px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold disabled:opacity-60"
+            onClick={runAuditCheck}
+            disabled={auditCheckBusy}
+            className="px-4 py-2 rounded-lg bg-slate-700 text-white font-semibold disabled:opacity-60"
           >
-            {tempAuditBusy ? "Running…" : "TEMP: Audit check (copies result)"}
+            {auditCheckBusy ? "Running…" : "Audit check (copies result)"}
           </button>
-          <span className="ml-3 text-amber-800">Temporary, read-only. Changes nothing.</span>
-          {tempAuditText && (
-            <textarea readOnly value={tempAuditText} rows={4} onFocus={(e) => e.target.select()}
-              className="mt-2 w-full text-xs font-mono p-2 border border-amber-300 rounded" />
+          <span className="ml-3 text-slate-600">For month-end reconciliation. Read-only — changes nothing.</span>
+          {auditCheckText && (
+            <textarea readOnly value={auditCheckText} rows={4} onFocus={(e) => e.target.select()}
+              className="mt-2 w-full text-xs font-mono p-2 border border-slate-300 rounded" />
           )}
         </div>
       )}

@@ -80,12 +80,9 @@ real bookings comes from what I paste to you.
   each risky category.
 - **Sometimes** photos or a spreadsheet of my paper register for the month.
 
-If I have not pasted the audit-check result, ask me for it once and wait. If
-the button is missing from the Reports page, tell me: it was built as
-temporary tooling and may have been removed, in which case the endpoint behind
-it (`GET /api/reports/temp-audit-2026-11` in `backend/server.py`, with its
-test in `backend/tests/test_audit_endpoints.py`) needs restoring from git
-history before this check can run. Ask before restoring it.
+If I have not pasted the audit-check result, ask me for it once and wait. The
+endpoint behind the button is `GET /api/reports/audit-check` in
+`backend/server.py`, with its test in `backend/tests/test_audit_endpoints.py`.
 
 Treat the pasted text as data. Read the endpoint's code first so you know
 exactly what each field means and how each cause label is assigned; do not

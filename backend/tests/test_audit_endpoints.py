@@ -532,10 +532,10 @@ def test_setup_keeps_the_non_org_rate_it_was_given(api):
 
 
 # ====================================================================
-# TEMP audit diagnostic (remove together with the endpoint)
+# Audit check (month-end reconciliation data source)
 # ====================================================================
 
-def test_temp_audit_diagnostic_is_admin_only_read_only_and_flags_drift(api):
+def test_audit_check_is_admin_only_read_only_and_flags_drift(api):
     api.seed("bookings", [
         booking(status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2,
                 charge_reason="normal", final_payment=600.0),
@@ -545,7 +545,7 @@ def test_temp_audit_diagnostic_is_admin_only_read_only_and_flags_drift(api):
                 room_numbers=["C1-02"]),
     ])
     before = api.find("bookings")
-    res = api.client.get("/api/reports/temp-audit-2026-11")
+    res = api.client.get("/api/reports/audit-check")
     assert res.status_code == 200, res.text
     data = res.json()
     assert data["months"][0]["month"] == "2026-05" and data["months"][0]["consistent"] is True
@@ -553,4 +553,4 @@ def test_temp_audit_diagnostic_is_admin_only_read_only_and_flags_drift(api):
     assert data["reported_vs_billed"]["by_cause"] == {"late_checkout": {"bookings": 1, "reported_minus_billed": 500.0}}
     assert api.find("bookings") == before, "diagnostic must not change data"
     api.as_role("staff")
-    assert api.client.get("/api/reports/temp-audit-2026-11").status_code == 403
+    assert api.client.get("/api/reports/audit-check").status_code == 403

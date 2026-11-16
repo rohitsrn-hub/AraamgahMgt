@@ -41,6 +41,6 @@ How to run the tests (no database or server needed):
 - **B8 Existing bookings may hold a wrong stored "refund due"** from past amendments (harmless now that the screen ignores it; correcting the stored values is a live-data change).
 - **B9 Smaller items:** cancelling a checked-in booking removes its stayed nights from all reports; Monthly Report takes its room count from Settings while Room Occupancy counts actual rooms; staff can rename a room or change its category; `PUT /users/{id}` accepts a password of any length; no login rate limiting; `Dashboard.jsx` carries an unreachable second check-in/check-out form; the backup time set in the UI resets to 02:00 on every restart; legacy `def_civ_*` setting names and display-only `guest_rank`/`guest_unit` references remain; the 15 older API test files need a live server and send no login token.
 
-## C. Temporary tooling (remove when done)
+## C. Audit check (kept permanently)
 
-`GET /api/reports/temp-audit-2026-11` (admin-only, read-only) and the "TEMP: Audit check" button on the Reports page.
+`GET /api/reports/audit-check` (admin-only, read-only) and the "Audit check" button on the Reports page. Built as temporary tooling for this audit; made permanent on the owner's instruction as the data source for the month-end check in `docs/month-end-reconciliation-agent.md`.
