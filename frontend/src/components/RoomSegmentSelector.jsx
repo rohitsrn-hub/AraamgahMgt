@@ -7,6 +7,7 @@ import { Badge } from './ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { CalendarBlank, CheckCircle, ArrowRight, Pencil } from '@phosphor-icons/react';
 import { fmtINR } from "@/utils/formatters";
+import { getRoomRate } from "@/utils/rateUtils";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -108,6 +109,7 @@ const RoomSegmentSelector = ({
       setAvailableRoomsPerNight(roomsPerNight);
     } catch (error) {
       console.error('Error fetching available rooms per night:', error);
+      toast.error("Could not load room availability for these nights. Please try again.");
     }
   };
 
@@ -132,16 +134,13 @@ const RoomSegmentSelector = ({
     
     segments.forEach(segment => {
       segment.rooms.forEach(room => {
-        const isNonOrg = !isOrg;
-        let rate;
-        if (isNonOrg) {
-          rate = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
-        } else if (room.category === 'Cat I') {
-          rate = settings?.cat_i_rate;
-        } else {
-          rate = settings?.cat_ii_rate;
-        }
-        total += rate || 0;
+        // Same rate lookup as every other preview and as the backend
+        // (rate in force on the check-in date). This used to read the
+        // legacy cat_i_rate / cat_ii_rate settings fields, which the
+        // Settings screen stopped editing long ago — so the mix & match
+        // price shown here ignored every rate change since.
+        const { rent, licenseFee } = getRoomRate(settings, checkInDate, isOrg, room.category);
+        total += rent + licenseFee;
       });
     });
     

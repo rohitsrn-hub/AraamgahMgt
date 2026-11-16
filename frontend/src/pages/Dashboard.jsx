@@ -175,6 +175,7 @@ export default function Dashboard() {
       setFeedbackAnalysis(fbRes.data);
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
+      toast.error("Dashboard data could not be loaded — figures shown may be blank or out of date. Please refresh.");
     } finally {
       setLoading(false);
     }
@@ -297,6 +298,7 @@ export default function Dashboard() {
     } catch (error) {
       console.error("Error calculating refund:", error);
       setRefundInfo(null);
+      toast.error("Could not calculate the refund for this booking. Close this window and try again.");
     }
   };
 

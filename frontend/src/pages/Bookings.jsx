@@ -399,8 +399,11 @@ export default function Bookings() {
       const res = await axios.get(`${API}/bookings/stale-confirmed`);
       setStaleConfirmed(res.data.bookings || []);
     } catch (error) {
-      // Non-critical background check — don't interrupt the page with a toast
+      // This check failing SILENTLY is exactly how the "needs attention"
+      // banner stayed broken for weeks without anyone knowing. Say so —
+      // once (fixed id), not on every refresh.
       console.error("Error fetching stale confirmed bookings:", error);
+      toast.warning("Could not check for old bookings that were never checked in. The \"needs attention\" list may be incomplete.", { id: "stale-confirmed-failed" });
     }
   }, []);
 
@@ -839,7 +842,7 @@ export default function Bookings() {
     if (!roomMapping.has_self && roomMapping.family_members.length === 0) {
       return {
         ...roomMapping,
-        charge_category: roomMapping.room_category
+        charge_category: selectedBooking?.is_org ? roomMapping.room_category : "Non-Org"
       };
     }
     
@@ -880,18 +883,28 @@ export default function Bookings() {
       (new Date(selectedBooking.check_out_date) - new Date(selectedBooking.check_in_date)) / 86400000
     );
 
+    // A mix & match booking uses each room only on some nights (its
+    // room_segments). Bill each room for ITS nights — the same thing the
+    // backend and the reports do — not every room for the whole stay.
+    const segments = selectedBooking.room_segments || [];
+    const nightsForRoom = (roomNumber) => segments.length === 0
+      ? nights
+      : segments.filter(seg => (seg.rooms || []).some(r => r.room_number === roomNumber)).length;
+
     let roomChargesTotal = 0;
     const roomChargesBreakdown = roomGuestMapping.map(room => {
       const isOrgRoom = room.charge_category !== "Non-Org";
       const roomRate = getRoomRate(settings, selectedBooking.check_in_date, isOrgRoom, room.room_category);
       const ratePerNight = roomRate.rent + roomRate.licenseFee;
-      const roomTotal = ratePerNight * nights;
+      const roomNights = nightsForRoom(room.room_number);
+      const roomTotal = ratePerNight * roomNights;
       roomChargesTotal += roomTotal;
       return {
         room_number: room.room_number,
         room_category: room.room_category,
         charge_category: room.charge_category,
         rate_per_night: ratePerNight,
+        nights: roomNights,
         total: roomTotal,
       };
     });
@@ -1060,6 +1073,7 @@ export default function Bookings() {
             toast.info(`📄 Org Data Form: ${filename} downloaded. Print and fill manually.`, { duration: 10000 });
           } catch (err) {
             console.error("Org Data Form generation failed:", err);
+            toast.error("Check-in is saved, but the Org Data Form PDF could not be generated. Please tell the administrator.");
           }
         }, 500);
       }
@@ -1185,6 +1199,7 @@ export default function Bookings() {
       setActionForm(prev => ({ ...prev, refund_amount: res.data.refund_amount }));
     } catch (err) {
       console.error("Failed to calculate refund:", err);
+      toast.error("Could not load the refund amount. If you cancel now, the refund will be worked out automatically from the cancellation policy.");
     }
   };
 
@@ -1253,7 +1268,11 @@ export default function Bookings() {
       room_category: roomCategories[index] || "Cat I",
       has_self: false,  // Whether Self is assigned to this room
       family_members: [],  // Family members directly in this room
-      charge_category: roomCategories[index] || "Cat I" // Will be recalculated
+      // A Non-Org booking pays Non-Org for every room from the start. This
+      // used to begin at the room's own category for everyone and was only
+      // corrected once a guest was assigned to that room — so a room left
+      // unassigned in a multi-room Non-Org booking was billed at the Org rate.
+      charge_category: booking.is_org ? (roomCategories[index] || "Cat I") : "Non-Org"
     }));
     
     setRoomGuestMapping(initialMapping);
@@ -1365,12 +1384,15 @@ export default function Bookings() {
 
   const handleCancel = async () => {
     try {
-      await axios.post(`${API}/bookings/cancel`, {
+      // If the refund preview never loaded, send NO amount — the server then
+      // applies the cancellation policy itself. (This used to send 0, which
+      // cancelled the booking with no refund queued for the guest.)
+      const res = await axios.post(`${API}/bookings/cancel`, {
         booking_id: selectedBooking.id,
         reason: actionForm.reason,
-        refund_amount: refundInfo?.refund_amount ?? 0
+        refund_amount: refundInfo ? refundInfo.refund_amount : undefined
       });
-      toast.success(`Booking cancelled. Refund: ${fmtINR(refundInfo?.refund_amount ?? 0, 0)}`);
+      toast.success(`Booking cancelled. Refund: ${fmtINR(res.data?.refund_amount ?? refundInfo?.refund_amount ?? 0, 0)}`);
       setShowCancel(false);
       setSelectedBooking(null);
       setRefundInfo(null);
@@ -3112,7 +3134,7 @@ export default function Bookings() {
                                 <span className="text-slate-600">
                                   Room {rc.room_number} ({rc.room_category})
                                   {rc.charge_category === "Non-Org" && <span className="text-red-600 font-bold ml-1">→ Non-Org</span>}
-                                  : {fmtINR(rc.rate_per_night, 0)} × {nights}
+                                  : {fmtINR(rc.rate_per_night, 0)} × {rc.nights}
                                 </span>
                                 <span className="font-medium">{fmtINR(rc.total, 2)}</span>
                               </div>
@@ -3393,15 +3415,19 @@ export default function Bookings() {
                       // Advance paid (to be subtracted)
                       const advancePaid = selectedBooking.advance_paid || 0;
                       
-                      // Refund due from amendment (if booking was reduced)
-                      const refundDue = selectedBooking.refund_due || 0;
+                      // "Refund due" recorded by an amendment is NOT subtracted
+                      // here. Room charges minus advance already yields a
+                      // negative amount (= refund) whenever the guest has
+                      // overpaid; subtracting refund_due as well counted the
+                      // same money twice — and older amendments stored the
+                      // whole price drop there, not an actual overpayment,
+                      // which took real money off the bill.
                       
                       // ONLY use checkout extra bed charges (actual usage)
                       const extraBedActual = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
                       
-                      // Final calculation: Room Charges - Advance + Extra Beds - Refund Due
-                      // If refund_due exists, it means customer overpaid and needs money back
-                      const amountDue = totalRoomCharges - advancePaid + extraBedActual - refundDue;
+                      // Final calculation: Room Charges - Advance + Extra Beds
+                      const amountDue = totalRoomCharges - advancePaid + extraBedActual;
                       
                       return (
                         <>
@@ -3413,12 +3439,6 @@ export default function Bookings() {
                             <div className="flex justify-between text-sm text-orange-600">
                               <span>Less: Advance Paid:</span>
                               <span className="font-medium">-{fmtINR(advancePaid, 0)}</span>
-                            </div>
-                          )}
-                          {refundDue > 0 && (
-                            <div className="flex justify-between text-sm text-green-600">
-                              <span>Less: Refund Due (from amendment):</span>
-                              <span className="font-medium">-{fmtINR(refundDue, 0)}</span>
                             </div>
                           )}
                           {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (

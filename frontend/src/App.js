@@ -81,7 +81,11 @@ function AppContent() {
     try {
       // Fetch backup history instead of status to avoid stale cache
       const historyResponse = await axios.get(`${API}/backups/history`);
-      const backups = historyResponse.data || [];
+      // The endpoint returns { backups: [...], count } — this used to treat
+      // the whole object as the list, so the code below threw on it, the
+      // catch swallowed the error, and the "backup overdue" warning never
+      // appeared for anyone. Only successful backups count as a backup.
+      const backups = (historyResponse.data?.backups || []).filter(b => b.status === "SUCCESS");
       
       if (backups.length === 0) {
         // No backups exist

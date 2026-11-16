@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
+import { getRoomRate } from "./rateUtils";
 
 // Indian number system formatter: 1,23,45,678.00
 export function fmtINR(amount, decimals = 2) {
@@ -111,55 +112,35 @@ export function generateCheckoutReceipt(booking, settings) {
   
   // Calculate room charges based on room_guest_mapping if available (accurate per-room rates)
   const roomGuestMapping = booking.room_guest_mapping || [];
-  
+
+  // Rates resolved by the booking's OWN check-in date via getRoomRate() —
+  // the rule every other price in the app follows. This used to read
+  // settings.cat_i_room_rent etc. directly, i.e. whatever rate is in force
+  // TODAY: a receipt printed (or re-downloaded later with the Receipt
+  // button) after a rate revision showed the new rate for a stay that was
+  // billed at the old one.
+  const ratePerNightFor = (isOrgRoom, category) => {
+    const { rent, licenseFee } = getRoomRate(settings, booking.check_in_date, isOrgRoom, category);
+    return rent + licenseFee;
+  };
+
   if (roomGuestMapping.length > 0) {
     // Use room-guest mapping for accurate calculation (considers org cards per room)
     roomGuestMapping.forEach(room => {
       const category = room.room_category || "Cat I";
       const chargeCategory = room.charge_category || category;
-      
-      let ratePerNight;
-      if (chargeCategory === "Non-Org") {
-        // Non-Org rate (same for all categories)
-        ratePerNight = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
-      } else {
-        // Organization rate
-        if (category === "Cat I") {
-          ratePerNight = (settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30);
-        } else {
-          ratePerNight = (settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15);
-        }
-      }
-      
-      totalRoomCharges += ratePerNight * nights;
+      totalRoomCharges += ratePerNightFor(chargeCategory !== "Non-Org", category) * nights;
     });
   } else if (roomCategories.length > 0) {
     // Fallback: Use room categories (less accurate - assumes all same guest type)
     roomCategories.forEach(category => {
-      let ratePerNight;
-      
-      if (isNonOrg) {
-        // Non-Org rate
-        ratePerNight = (settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30);
-      } else {
-        // Organization rate
-        if (category === "Cat I") {
-          ratePerNight = (settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30);
-        } else {
-          ratePerNight = (settings?.cat_ii_room_rent || 385) + (settings?.cat_ii_license_fee || 15);
-        }
-      }
-      
-      totalRoomCharges += ratePerNight * nights;
+      totalRoomCharges += ratePerNightFor(!isNonOrg, category) * nights;
     });
   } else {
     // Last resort fallback
-    const ratePerNight = isNonOrg 
-      ? ((settings?.non_org_room_rent || 570) + (settings?.non_org_license_fee || 30))
-      : ((settings?.cat_i_room_rent || 470) + (settings?.cat_i_license_fee || 30));
-    totalRoomCharges = ratePerNight * nights * numRooms;
+    totalRoomCharges = ratePerNightFor(!isNonOrg, "Cat I") * nights * numRooms;
   }
-  
+
   // Advance paid
   const advancePaid = booking.advance_paid || 0;
   
