@@ -5,6 +5,14 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-16 — Temp diagnostic tooling removed, reconciliation cleanup complete (branch: claude/qa-audit-fixes)
+With the Aug 2026 investigation fully closed, removed the one-off tools it
+needed along the way: the per-row "Debug" button, the "Aug 2026
+Diagnostics" button, the "Cancel 7 Flagged Bookings" batch action, and the
+two admin-only temp report endpoints behind them. Kept the lasting
+results: the permanent "needs attention" banner + "Mark departed" action
+on the Bookings page, and the pre-existing /reports/reconcile check.
+
 ## 2026-11-16 — Aug 2026 reconciliation saga fully closed out (branch: claude/qa-audit-fixes)
 All 7 stale-confirmed bookings from the earlier scan are gone: owner
 cross-checked each against the physical register ("DETAILS OF ECSAG
