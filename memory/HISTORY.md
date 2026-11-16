@@ -5,6 +5,28 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-16 — Full-codebase audit: 15 fixes, 9 questions for the owner (branch: claude/qa-audit-fixes)
+First systematic read of the whole app rather than one symptom's path. Fixed,
+each with a test that failed before: mix & match bookings were mis-reported
+(ignored early departure, penalty and Non-Org override) and over-billed at
+check-in (every room x every night); a Non-Org booking's unassigned room
+billed at the Org rate; stay extensions mispriced or missing from reports;
+a shortened booking recorded a bogus "refund due" that the check-out screen
+then took off the bill; a cancel could queue no refund (or two); the Excel
+export still dropped penalty-only bookings; receipts printed today's rate;
+backups left out payments/guests/users and a successful restore said
+"failed"; the "backup overdue" warning could never show. Check-in, check-out,
+extend and amend now all price rooms through one function in report_calc.py.
+Every route on every prefix checked for the ordering bug (none) and for login
+and role enforcement, as permanent tests; endpoint tests now run with no
+database (backend/tests/inprocess.py). NOT decided, waiting on the owner
+(docs/audit-2026-11-findings.md, section B): the check-out screen's own
+"amount due" formula, late check-outs counted as unbilled nights, check-in
+extra-bed pricing, early check-in blocked on screen, and service-data files
+sitting in the repository. A TEMP admin-only "Audit check" button is on the
+Reports page for the owner to run against live data — remove it and
+/reports/temp-audit-2026-11 once the result is back.
+
 ## 2026-11-16 — Temp diagnostic tooling removed, reconciliation cleanup complete (branch: claude/qa-audit-fixes)
 With the Aug 2026 investigation fully closed, removed the one-off tools it
 needed along the way: the per-row "Debug" button, the "Aug 2026
