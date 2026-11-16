@@ -82,8 +82,7 @@ export default function Bookings() {
   const navigate = useNavigate();
   const { user } = useAuth(); // Get current user for role-based permissions
   const isViewer = user?.role === 'viewer'; // Check if user is viewer
-  const isAdmin = user?.role === 'admin';
-  
+
   const [bookings, setBookings] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [availableRooms, setAvailableRooms] = useState([]);
@@ -1440,127 +1439,6 @@ export default function Bookings() {
     });
   };
 
-  // TEMP diagnostic for the August 2026 reconciliation — remove after use.
-  // Runs the existing /reports/reconcile cross-check plus the new
-  // early-checkout-gap scan and shows both in one native dialog (phone-
-  // friendly, no dev tools needed — same pattern as the row "Debug" button).
-  const handleAug2026Diagnostics = async () => {
-    try {
-      const [reconcileRes, gapRes, staleRes] = await Promise.all([
-        axios.get(`${API}/reports/reconcile`, { params: { month: 8, year: 2026 } }),
-        axios.get(`${API}/reports/early-checkout-gap`, { params: { month: 8, year: 2026 } }),
-        axios.get(`${API}/reports/stale-confirmed-bookings`),
-      ]);
-      const r = reconcileRes.data;
-      const g = gapRes.data;
-      const s = staleRes.data;
-
-      const lines = [
-        `=== RECONCILE (Aug 2026) ===`,
-        `consistent: ${r.consistent}`,
-        r.mismatches.length > 0
-          ? `mismatches:\n${r.mismatches.map(m => `  - ${m.check}: ${m.left} vs ${m.right}`).join("\n")}`
-          : `mismatches: none`,
-        `revenue — allotment: ${r.totals.revenue.room_allotment}, guest_details: ${r.totals.revenue.guest_details}, occupancy: ${r.totals.revenue.room_occupancy}, monthly: ${r.totals.revenue.monthly_grand_total}`,
-        ``,
-        `=== EARLY-CHECKOUT GAP (Aug 2026) ===`,
-        `affected bookings: ${g.affected_bookings_count}`,
-        `total vanished amount: ₹${g.total_vanished_amount}`,
-        ...g.bookings.map(b =>
-          `  - ${b.booking_number} ${b.guest_name}: billed ₹${b.billed_amount}, shown ₹${b.shown_in_reports}, vanished ₹${b.vanished_amount} (in ${b.check_in_date} → ${b.planned_check_out_date}, actually left ${b.actual_checkout_date})`
-        ),
-        ``,
-        `=== STALE CONFIRMED BOOKINGS (all-time, as of ${s.as_of}) ===`,
-        `stuck at "confirmed" with checkout already past: ${s.stale_confirmed_count}`,
-        `likely backdated entries: ${s.likely_backdated_count}`,
-        `actually causing a room-overlap in reports: ${s.causing_report_overlap_count}`,
-        ...s.bookings.map(b => {
-          const line = `  - ${b.booking_number} ${b.guest_name} room(s) ${(b.rooms || []).join(",")}: ${b.check_in_date} → ${b.planned_check_out_date}, ${b.days_since_planned_checkout}d past checkout, entered ${b.created_at || "?"}${b.entry_lag_days != null ? ` (${b.entry_lag_days}d after check-in)` : ""}${b.likely_backdated_entry ? " [BACKDATED]" : ""}`;
-          const overlapLines = (b.overlapping_bookings || []).map(o =>
-            `      overlaps ${o.booking_number} ${o.guest_name} in room(s) ${o.rooms.join(",")} (${o.check_in_date} → ${o.check_out_date})`
-          );
-          return [line, ...overlapLines].join("\n");
-        }),
-      ];
-      const fullText = lines.join("\n");
-      // window.prompt() silently truncates long text on some mobile browsers
-      // once the data grows (more stale bookings, more overlap detail) —
-      // copy to the clipboard instead so nothing gets cut off, falling back
-      // to the prompt only if the clipboard API is unavailable/denied.
-      try {
-        await navigator.clipboard.writeText(fullText);
-        toast.success("Diagnostics copied to clipboard — paste it to Claude", { duration: 6000 });
-      } catch (clipboardError) {
-        window.prompt("Select all (or screenshot) and send to Claude:", fullText);
-      }
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Diagnostics failed");
-    }
-  };
-
-  // TEMP, ONE-OFF: cancel the 7 stale-confirmed bookings the owner confirmed
-  // against the physical register ("DETAILS OF ECSAG QUERY") are either staff
-  // double-entries or no-shows no one ever cancelled — none are real unclosed
-  // stays. Calls the SAME POST /bookings/cancel the Bookings page's own
-  // Cancel button uses, so this has the exact same effect (status, notes,
-  // room status, refund-queue logic) as cancelling each one by hand in the
-  // UI. Remove this handler/button once run.
-  const STALE_BOOKINGS_TO_CANCEL = [
-    { booking_number: "BK0453", reason: "Double entry by staff — BK0454 is the correct booking for this stay (register-confirmed)" },
-    { booking_number: "BK0331", reason: "Double entry by staff (register-confirmed)" },
-    { booking_number: "BK0943", reason: "Room was cancelled; staff forgot to cancel this booking record (register-confirmed)" },
-    { booking_number: "BK0112", reason: "Double entry by staff (register-confirmed)" },
-    { booking_number: "BK0356", reason: "Guest never arrived; staff forgot to cancel the booking (register-confirmed)" },
-    { booking_number: "BK0601", reason: "Guest never arrived; staff forgot to cancel the booking (register-confirmed)" },
-    { booking_number: "BK0929", reason: "Guest never arrived; staff forgot to cancel the booking (register-confirmed)" },
-  ];
-
-  const handleCancelFlaggedBookings = async () => {
-    const confirmed = window.confirm(
-      `This will CANCEL ${STALE_BOOKINGS_TO_CANCEL.length} bookings confirmed as mistakes/no-shows against the register:\n\n` +
-      STALE_BOOKINGS_TO_CANCEL.map(b => `${b.booking_number}: ${b.reason}`).join("\n") +
-      `\n\nUses the normal Cancel action (same as the Bookings page) — no refund is auto-created. Proceed?`
-    );
-    if (!confirmed) return;
-
-    try {
-      const staleRes = await axios.get(`${API}/bookings/stale-confirmed`);
-      const idByNumber = {};
-      (staleRes.data.bookings || []).forEach(b => { idByNumber[b.booking_number] = b.id; });
-
-      const results = [];
-      for (const target of STALE_BOOKINGS_TO_CANCEL) {
-        const id = idByNumber[target.booking_number];
-        if (!id) {
-          results.push(`${target.booking_number}: SKIPPED — not found in the stale-confirmed list (already resolved?)`);
-          continue;
-        }
-        try {
-          await axios.post(`${API}/bookings/cancel`, {
-            booking_id: id,
-            reason: target.reason,
-            refund_amount: 0,
-          });
-          results.push(`${target.booking_number}: cancelled`);
-        } catch (err) {
-          results.push(`${target.booking_number}: FAILED — ${err.response?.data?.detail || err.message}`);
-        }
-      }
-
-      const summary = results.join("\n");
-      try {
-        await navigator.clipboard.writeText(summary);
-        toast.success("Cancellation results copied to clipboard — paste it to Claude", { duration: 8000 });
-      } catch (clipboardError) {
-        window.prompt("Results — select all and send to Claude:", summary);
-      }
-      fetchStaleConfirmed();
-      fetchData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Failed to run batch cancellation");
-    }
-  };
-
   // Stay Extension handlers
   const openExtendDialog = (booking) => {
     setSelectedBooking(booking);
@@ -1955,26 +1833,6 @@ export default function Bookings() {
             <FilePdf size={20} />
             Print Booking Slips
           </Button>
-          {isAdmin && (
-            <Button
-              variant="outline"
-              onClick={handleAug2026Diagnostics}
-              className="flex items-center gap-2 text-slate-600 border-slate-300 hover:bg-slate-100"
-              title="TEMP diagnostic for the August 2026 reconciliation — remove after use"
-            >
-              Aug 2026 Diagnostics
-            </Button>
-          )}
-          {isAdmin && (
-            <Button
-              variant="outline"
-              onClick={handleCancelFlaggedBookings}
-              className="flex items-center gap-2 text-red-600 border-red-300 hover:bg-red-50"
-              title="TEMP, one-off: cancel the 7 register-confirmed mistaken/no-show bookings — remove after use"
-            >
-              Cancel 7 Flagged Bookings
-            </Button>
-          )}
           <Button
             onClick={() => setShowNewBooking(true)}
             className="earms-btn-primary flex items-center gap-2"
@@ -2202,23 +2060,6 @@ export default function Bookings() {
                               className="text-purple-600 border-purple-200 hover:bg-purple-50"
                               title="Download checkout receipt">
                               <FilePdf size={16} className="mr-1" />Receipt
-                            </Button>
-                          )}
-                          {/* TEMP DIAGNOSTIC — Aug 2026 reconciliation (remove after use).
-                              Admin-only: shows this booking's full raw record in a native
-                              dialog so it can be copied/screenshotted without needing
-                              browser dev tools, which are impractical on a phone. */}
-                          {isAdmin && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => window.prompt(
-                                `Raw data for ${booking.booking_number} — select all (or screenshot) and send to Claude:`,
-                                JSON.stringify(booking, null, 2)
-                              )}
-                              className="text-slate-500 border-slate-300 hover:bg-slate-100"
-                              title="Show raw booking data (temporary diagnostic)">
-                              Debug
                             </Button>
                           )}
                           {/* Delete button - available for all statuses */}
