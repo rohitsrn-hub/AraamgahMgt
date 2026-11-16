@@ -5,6 +5,22 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-16 — Stale-booking cleanup: "needs attention" banner and bulk-cancel were silently broken (branch: claude/qa-audit-fixes)
+Owner tried the "Cancel 7 Flagged Bookings" cleanup action (after confirming
+against the physical register that all 7 were mistakes/no-shows) and got
+"Booking not found" immediately. Root cause: GET /bookings/stale-confirmed
+was registered AFTER GET /bookings/{booking_id} — FastAPI matches routes in
+registration order, and {booking_id} matches any single path segment
+including the literal word "stale-confirmed", so every call was actually
+hitting get_booking("stale-confirmed") and 404ing. This had been broken
+since both were added in September: the Bookings page's "needs attention"
+banner has never actually shown (it fails open, no error toast), and the
+one booking (BK0601) that did get cancelled was evidently done by hand,
+not through this feature. Fixed by moving the route above the generic
+{booking_id} one; audited every other /bookings/* route for the same
+conflict (none found). Owner can now re-run the bulk-cancel for the
+remaining 6 (BK0112, BK0331, BK0453, BK0356, BK0943, BK0929).
+
 ## 2026-09-27 — August 2026 reconciliation: verified fixed end to end (branch: claude/qa-audit-fixes)
 Owner re-ran the Aug 2026 Diagnostics button after all fixes deployed:
 reconcile still consistent across all four reports (₹2,33,500, up from the
