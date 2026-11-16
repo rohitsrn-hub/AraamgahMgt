@@ -5,6 +5,25 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-16 — Aug 2026 reconciliation saga fully closed out (branch: claude/qa-audit-fixes)
+All 7 stale-confirmed bookings from the earlier scan are gone: owner
+cross-checked each against the physical register ("DETAILS OF ECSAG
+QUERY") — every one was a staff double-entry or a no-show no one ever
+cancelled, none a real unclosed stay — then cancelled all 7 through the
+fixed bulk-cancel action (one, BK0601, had already been done by hand).
+Confirmed clean end state: reconcile still consistent across all four
+reports at ₹2,29,900 (down from the ₹2,33,500 peak while those phantom
+bookings were still counted, and up from the original, badly broken
+₹1,76,900 this whole investigation started from), ₹0 early-checkout gap,
+0 stale-confirmed bookings, 0 room-overlaps. This closes the reconciliation
+that began with the Monthly Report flat-rate bug: every money and
+room-overlap issue found along the way is now fixed and verified against
+real production data, not just unit tests. Found along the way, also
+during this cleanup: the real deployed backend is `earms-backend` on
+Render — a separate, same-named-sounding `sarai-auth-test` service had
+been mistaken for it once already; worth remembering which one is real
+next time a fix doesn't seem to take effect.
+
 ## 2026-11-16 — Stale-booking cleanup: "needs attention" banner and bulk-cancel were silently broken (branch: claude/qa-audit-fixes)
 Owner tried the "Cancel 7 Flagged Bookings" cleanup action (after confirming
 against the physical register that all 7 were mistakes/no-shows) and got
