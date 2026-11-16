@@ -1976,6 +1976,48 @@ async def get_bookings(
     bookings = await db.bookings.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return bookings
 
+# Must be registered BEFORE /bookings/{booking_id} below — FastAPI/Starlette
+# matches routes in registration order, and {booking_id} matches ANY single
+# path segment including the literal word "stale-confirmed". Registered
+# after it, every call here was being swallowed by get_booking() instead,
+# which looked up a booking literally named "stale-confirmed", found none,
+# and returned 404 "Booking not found" — silently breaking both the
+# Bookings page's "needs attention" banner and anything that called this
+# endpoint, every single time, since the day it was added.
+@api_router.get("/bookings/stale-confirmed")
+async def list_stale_confirmed_bookings(current_user: dict = Depends(require_staff_or_admin_role)):
+    """Confirmed bookings whose planned checkout has already passed and that
+    were never actually checked in — the entry was made (often via Migration
+    Mode, for a stay already over) but no one ran it through the real
+    check-in/checkout flow. Left alone, these sit at "confirmed" forever and
+    still count as occupying their room for their full original window in
+    every report, which can overlap a different, real guest later placed in
+    that same room and inflate that room's occupancy numbers.
+
+    Powers the "needs attention" banner on the Bookings page so staff see
+    this on every visit instead of it only surfacing during an audit.
+    """
+    today = ist_today_str()
+    candidates = await db.bookings.find({
+        "status": "confirmed",
+        "actual_check_in": None,
+        "check_out_date": {"$lt": today},
+    }, {"_id": 0}).sort("check_out_date", 1).to_list(200)
+
+    result = []
+    for bk in candidates:
+        checkout_date = date_type.fromisoformat(bk["check_out_date"])
+        result.append({
+            "id": bk.get("id"),
+            "booking_number": bk.get("booking_number"),
+            "guest_name": bk.get("guest_name"),
+            "rooms": bk.get("room_numbers") or ([bk["room_number"]] if bk.get("room_number") else []),
+            "check_in_date": bk.get("check_in_date"),
+            "check_out_date": bk.get("check_out_date"),
+            "days_since_planned_checkout": (date_type.fromisoformat(today) - checkout_date).days,
+        })
+    return {"as_of": today, "count": len(result), "bookings": result}
+
 @api_router.get("/bookings/{booking_id}")
 async def get_booking(booking_id: str, current_user: dict = Depends(get_current_user_with_db)):
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
@@ -2684,40 +2726,6 @@ async def cancel_booking(request: CancelBookingRequest, current_user: dict = Dep
         await db.refunds.insert_one(serialize_doc(refund.model_dump()))
     
     return {"message": "Booking cancelled successfully", "booking_id": request.booking_id}
-
-@api_router.get("/bookings/stale-confirmed")
-async def list_stale_confirmed_bookings(current_user: dict = Depends(require_staff_or_admin_role)):
-    """Confirmed bookings whose planned checkout has already passed and that
-    were never actually checked in — the entry was made (often via Migration
-    Mode, for a stay already over) but no one ran it through the real
-    check-in/checkout flow. Left alone, these sit at "confirmed" forever and
-    still count as occupying their room for their full original window in
-    every report, which can overlap a different, real guest later placed in
-    that same room and inflate that room's occupancy numbers.
-
-    Powers the "needs attention" banner on the Bookings page so staff see
-    this on every visit instead of it only surfacing during an audit.
-    """
-    today = ist_today_str()
-    candidates = await db.bookings.find({
-        "status": "confirmed",
-        "actual_check_in": None,
-        "check_out_date": {"$lt": today},
-    }, {"_id": 0}).sort("check_out_date", 1).to_list(200)
-
-    result = []
-    for bk in candidates:
-        checkout_date = date_type.fromisoformat(bk["check_out_date"])
-        result.append({
-            "id": bk.get("id"),
-            "booking_number": bk.get("booking_number"),
-            "guest_name": bk.get("guest_name"),
-            "rooms": bk.get("room_numbers") or ([bk["room_number"]] if bk.get("room_number") else []),
-            "check_in_date": bk.get("check_in_date"),
-            "check_out_date": bk.get("check_out_date"),
-            "days_since_planned_checkout": (date_type.fromisoformat(today) - checkout_date).days,
-        })
-    return {"as_of": today, "count": len(result), "bookings": result}
 
 @api_router.post("/bookings/{booking_id}/close-stale")
 async def close_stale_booking(
