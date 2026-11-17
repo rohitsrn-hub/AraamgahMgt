@@ -343,7 +343,15 @@ async def perform_incremental_backup(db) -> Dict:
 
 async def get_backup_history(db, limit: int = 50) -> List[Dict]:
     """Get backup history (last N backups)"""
-    return (await list_backup_metadata(db))[:limit]
+    history = (await list_backup_metadata(db))[:limit]
+    for b in history:
+        # Can this backup actually be restored? Its file may have been wiped by a
+        # redeploy; only a copy kept in the database (or a file still on disk) counts.
+        b["restorable"] = bool(
+            b.get("status") == "SUCCESS"
+            and (b.get("stored_in_database") or (b.get("file_path") and Path(b["file_path"]).exists()))
+        )
+    return history
 
 
 async def cleanup_old_backups(db, retention_days: int = 90):

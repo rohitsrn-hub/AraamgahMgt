@@ -5081,7 +5081,7 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
     summary = {"checked_out": len(checked_out), "reported": 0.0, "billed": 0.0, "collected": 0.0,
                "reported_but_not_collected": 0.0, "collected_beyond_reported": 0.0,
                "differ_from_billed": 0, "reported_minus_billed": 0.0, "by_cause": {}}
-    differing, unexplained = [], []
+    differing, unexplained, under_collected, over_collected = [], [], [], []
     for b in checked_out:
         reported = booking_financials(b, settings, wide_start, wide_end, room_maps)["total_amount"]
         billed = round(b.get("total_amount", 0) or 0, 2)
@@ -5089,10 +5089,16 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         summary["reported"] = round(summary["reported"] + reported, 2)
         summary["billed"] = round(summary["billed"] + billed, 2)
         summary["collected"] = round(summary["collected"] + collected, 2)
+        pay_row = {"bk": b.get("booking_number"), "out": b.get("actual_checkout_date") or b.get("check_out_date"),
+                   "reported": reported, "billed": billed, "collected": collected,
+                   "advance": b.get("advance_paid", 0) or 0, "final_payment": b.get("final_payment", 0) or 0,
+                   "payment_mode": b.get("payment_mode"), "balance_on_record": b.get("balance_amount")}
         if reported - collected > 0.5:
             summary["reported_but_not_collected"] = round(summary["reported_but_not_collected"] + reported - collected, 2)
+            under_collected.append({**pay_row, "short_by": round(reported - collected, 2)})
         elif collected - reported > 0.5:
             summary["collected_beyond_reported"] = round(summary["collected_beyond_reported"] + collected - reported, 2)
+            over_collected.append({**pay_row, "extra": round(collected - reported, 2)})
         if abs(reported - billed) <= 0.5:
             continue
         tags = []
@@ -5163,6 +5169,10 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         "reports": reports,
         "checked_out_in_month": summary,
         "differing_bookings": differing[:100],
+        # Bookings whose reported value is not covered by advance + final payment (and the
+        # reverse), largest first — the list behind reported_but_not_collected.
+        "under_collected": sorted(under_collected, key=lambda r: -r["short_by"])[:80],
+        "over_collected": sorted(over_collected, key=lambda r: -r["extra"])[:40],
         "unexplained": unexplained,
         "month_counts": month_counts,
         "current_state": {

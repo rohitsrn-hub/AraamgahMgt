@@ -5,6 +5,24 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — October 2026 month check: reconciles; ₹7,900 not collected still to be traced (branch: claude/qa-audit-fixes)
+First full month check (run on 18 Nov, covers 1-31 Oct). October revenue is
+₹2,50,625 across 134 bookings and 362 room-days, identical in all four
+reports. It was ₹2,52,350 before the extra-bed ruling; the ₹1,725 drop is
+exactly 23 bed-nights at ₹75, as expected. Of 133 stays that checked out in
+October, 2 differ from their stored bill: BK1032 (late check-out, stored bill
+₹700 low, cash matches the reports) and BK1284 (stored ₹1,400 vs ₹1,200: its
+check-in record said Cat I for a Cat II room; the guest paid ₹1,200; new code
+ignores that stale field). ₹7,900 of reported October value has no matching
+payment and ₹850 was collected beyond it — the audit check now lists the
+bookings behind both so they can be chased. Backups: 18 of 20 backup files
+were already gone from the server (redeploys wipe them) and only 2 backups
+had been taken in 30 days (a sleeping server never ran the 2 am job), so
+until today there was effectively no usable backup; no copy has been
+downloaded to a computer yet. The backup list now marks which backups can
+really be restored. Stored refund-due values on 10 active bookings are still
+wrong but nothing displays or uses them any more.
+
 ## 2026-11-18 — Net Revenue fixed and the small clean-up items done (branch: claude/qa-audit-fixes)
 Owner chose "cash received" for the Dashboard's Net Revenue: advances were
 being counted twice (a ₹1,000 stay showed ₹1,400); it is now advances plus

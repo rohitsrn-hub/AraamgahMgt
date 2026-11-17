@@ -151,3 +151,36 @@ def test_audit_check_tells_whether_backup_files_survive_redeploys(api, tmp_path,
     state = api.client.get("/api/reports/audit-check").json()["current_state"]["backups"]
     assert (state["successful_total"], state["files_still_on_server"], state["files_missing_from_server"]) == (2, 1, 1)
     assert state["kept_in_database_too"] == 2 and second["file_path"]
+
+
+# ---------------- found by the first full month check (Oct 2026) ----------------
+
+def test_audit_check_lists_the_bookings_behind_reported_but_not_collected(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-06-17")
+    api.seed("bookings", [
+        booking(status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2, charge_reason="normal",
+                total_amount=1000.0, advance_paid=400.0, final_payment=0.0, balance_amount=600.0, payment_mode="cash"),
+        booking(id="b2", booking_number="BK0002", status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2,
+                charge_reason="normal", total_amount=1000.0, advance_paid=400.0, final_payment=700.0, room_ids=["r2"], room_numbers=["C1-02"]),
+        booking(id="b3", booking_number="BK0003", status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2,
+                charge_reason="normal", total_amount=1000.0, advance_paid=400.0, final_payment=600.0, room_ids=["r3"], room_numbers=["C2-07"], room_categories=["Cat I"]),
+    ])
+    data = api.client.get("/api/reports/audit-check").json()
+    assert [r["bk"] for r in data["under_collected"]] == ["BK0001"]
+    assert data["under_collected"][0]["short_by"] == 600 and data["under_collected"][0]["advance"] == 400
+    assert data["under_collected"][0]["balance_on_record"] == 600
+    assert [r["bk"] for r in data["over_collected"]] == ["BK0002"] and data["over_collected"][0]["extra"] == 100
+    assert data["checked_out_in_month"]["reported_but_not_collected"] == 600
+
+
+def test_backup_history_says_which_backups_can_really_be_restored(api, tmp_path):
+    from services import backup_service
+    api.seed("backup_metadata", [
+        {"backup_id": "lost", "status": "SUCCESS", "backup_type": "FULL", "timestamp": "2026-10-01T00:00:00+00:00",
+         "file_path": str(tmp_path / "gone.json")},
+        {"backup_id": "kept", "status": "SUCCESS", "backup_type": "FULL", "timestamp": "2026-11-01T00:00:00+00:00",
+         "file_path": None, "stored_in_database": True},
+        {"backup_id": "bad", "status": "FAILED", "backup_type": "FULL", "timestamp": "2026-11-02T00:00:00+00:00"},
+    ])
+    history = {b["backup_id"]: b["restorable"] for b in asyncio.run(backup_service.get_backup_history(api.db))}
+    assert history == {"lost": False, "kept": True, "bad": False}

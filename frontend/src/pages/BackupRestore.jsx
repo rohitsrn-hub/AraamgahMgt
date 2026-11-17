@@ -610,7 +610,14 @@ export default function BackupRestore() {
                     </td>
                     <td className="p-2 text-sm">{formatBytes(backup.file_size_mb || 0)}</td>
                     <td className="p-2 text-sm">{backup.duration_seconds || 0}s</td>
-                    <td className="p-2">{getStatusBadge(backup.status)}</td>
+                    <td className="p-2">
+                      {getStatusBadge(backup.status)}
+                      {backup.status === "SUCCESS" && backup.restorable === false && (
+                        <span className="ml-2 text-xs text-red-600" title="The file was lost when the server restarted or redeployed, and no copy was kept in the database">
+                          not restorable
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -637,7 +644,7 @@ export default function BackupRestore() {
                   onChange={(e) => setSelectedBackupId(e.target.value)}
                 >
                   <option value="">Select a backup</option>
-                  {history.filter(b => b.status === "SUCCESS").map(backup => (
+                  {history.filter(b => b.status === "SUCCESS" && b.restorable !== false).map(backup => (
                     <option key={backup.backup_id} value={backup.backup_id}>
                       {formatIST(backup.timestamp, "dd MMM yyyy, HH:mm")} - {backup.backup_type}
                     </option>
