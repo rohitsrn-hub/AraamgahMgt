@@ -75,9 +75,12 @@ real bookings comes from what I paste to you.
   there is an "Audit check" button. It is read-only, changes nothing, and
   copies a block of text to the clipboard. I will paste that block to you. It
   contains, for every month on record: whether the four reports agree and the
-  month's revenue; then every checked-out booking whose reported value differs
-  from its billed total, grouped by likely cause; then counts of bookings in
-  each risky category.
+  month's revenue; then, for checked-out bookings, a month-by-month table of
+  what the reports say, what was billed and what was collected
+  (`by_checkout_month`), every booking whose reported value differs from its
+  billed total grouped by likely cause, the complete list of unexplained ones
+  (`unexplained`), and counts of bookings in each risky category plus the real
+  state of the backups (`exposure.backups`).
 - **Sometimes** photos or a spreadsheet of my paper register for the month.
 
 If I have not pasted the audit-check result, ask me for it once and wait. The
@@ -100,8 +103,17 @@ month. Compare each earlier month's revenue with the figure recorded in
 `memory/HISTORY.md` at its last check, if there is one, and tell me about any
 month whose total has moved.
 
-**Step 2 — reports against billed totals.** Take the bookings in
-`reported_vs_billed` whose check-out date falls in the month. For each cause
+**Step 2 — reports against billed totals, and against cash.** Use
+`reported_vs_billed.by_checkout_month` for the requested month: it gives the
+count of bookings that differ, the rupee difference by cause, and the three
+totals `reported`, `billed` and `collected`. `reported_but_not_collected` is
+revenue the reports count that no payment covers; `collected_beyond_reported`
+is the reverse. When the cash side agrees with the reports and the stored bill
+is the odd one out, say so — it means the stored bill is stale, not that the
+reports are wrong. Amounts are whole-stay and attributed to the month the stay
+ended in, so a stay crossing a month boundary will not match the monthly
+report's night-by-night split; do not treat that as an error. Take the
+bookings in `reported_vs_billed` whose check-out date falls in the month. For each cause
 group, give me the number of bookings and the rupee difference. Then sort the
 groups into three kinds:
 
@@ -109,7 +121,8 @@ groups into three kinds:
   extra bed taken at check-in, if those are still undecided). Say which
   question, and what the month's total would be under each possible answer.
 - *Explained by something already ruled on.* Say which ruling.
-- *Unexplained.* These are the ones that matter. For each, work out from the
+- *Unexplained.* These are the ones that matter, and `unexplained` lists every
+  one with its dates, rooms and billing categories. For each, work out from the
   code what the reports would compute and what check-out would have stored,
   and find where they part. If you cannot tell from the pasted summary, ask me
   for that booking's details by booking number rather than guessing.
@@ -121,7 +134,9 @@ is not worth my time; a pattern is.
 **Step 4 — the risk counts.** Look at the `exposure` section for anything new
 this month: mix-and-match bookings currently active, a Non-Org booking with an
 Org-rate room, a booking cancelled after check-in, active bookings with a
-wrong stored refund amount, and the date of the last successful backup. Tell
+wrong stored refund amount, and the backups. For backups read `latest_success`
+and `hours_since_latest`: more than about 26 hours means the daily backup has
+not run, and `successful_last_30_days` should be close to 30. Tell
 me about any that is non-zero or stale, and what it means in practice.
 
 **Step 5 — the paper register, if I gave it to you.** Compare the register's

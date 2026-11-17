@@ -742,7 +742,20 @@ async def update_settings(request: AppSettingsUpdate, current_user: dict = Depen
     """Update app settings"""
     update_data = {k: v for k, v in request.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
+
+    # The Settings page displays the rate in force TODAY (GET /settings merges
+    # it over the base fields) and sends all six rate fields back on every
+    # Save. Writing an unchanged echo into the BASE fields once a scheduled
+    # rate change has taken effect re-priced every booking dated before that
+    # change in every report — an admin changing only the default advance
+    # turned a Rs 1,000 July stay into Rs 1,200. A rate that equals what is
+    # already in force today is not an edit; leave the base untouched.
+    existing = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    in_force_today = effective_rate_settings(existing, ist_today_str())
+    for field in RATE_FIELDS:
+        if field in update_data and field in in_force_today and update_data[field] == in_force_today[field]:
+            del update_data[field]
+
     result = await db.app_settings.update_one({}, {"$set": update_data})
     # matched_count, not modified_count: Mongo reports modified_count == 0 when
     # the new values equal the old ones, so re-saving an unchanged settings form
@@ -4807,6 +4820,23 @@ async def reconcile_reports(month: int = Query(..., ge=1, le=12), year: int = Qu
 # Started life as temporary tooling for the Nov 2026 audit and was kept
 # because /reports/reconcile alone only proves the reports agree with EACH
 # OTHER, not with the money.
+async def _backup_summary() -> dict:
+    """Latest successful backup, worked out in Python (see
+    backup_service.list_backup_metadata for why Mongo's own sort can't be
+    used), plus how many exist and how many were taken in the last 30 days."""
+    successful = await backup_service.list_backup_metadata(db, {"status": "SUCCESS"})
+    now_utc = datetime.now(timezone.utc)
+    stamps = [t for t in (backup_service.parse_backup_timestamp(b.get("timestamp")) for b in successful) if t]
+    latest = stamps[0] if stamps else None
+    return {
+        "latest_success": latest.isoformat() if latest else None,
+        "hours_since_latest": round((now_utc - latest).total_seconds() / 3600, 1) if latest else None,
+        "successful_total": len(stamps),
+        "successful_last_30_days": sum(1 for t in stamps if (now_utc - t).days < 30),
+        "stored_as_dates_not_text": sum(1 for b in successful if isinstance(b.get("timestamp"), datetime)),
+    }
+
+
 @api_router.get("/reports/audit-check")
 async def audit_check(current_user: dict = Depends(require_admin_role)):
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
@@ -4843,6 +4873,12 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
             return None
 
     drift, tag_totals = [], {}
+    # Per CHECK-OUT month, whole-stay amounts: what the reports say each
+    # booking is worth, what its stored bill says, and what was actually
+    # collected (advance + final payment). A stay that crosses a month is
+    # attributed whole to the month it ended in — these are for comparing
+    # reported money with cash, not a substitute for the monthly report.
+    by_month, unexplained = {}, []
     uncollected_count, uncollected_sum = 0, 0.0
     for b in bookings:
         if b.get("status") != BookingStatus.CHECKED_OUT.value:
@@ -4853,8 +4889,23 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         if "charged_nights" in b and abs(collected - billed) > 0.5:
             uncollected_count += 1
             uncollected_sum += billed - collected
+        month_key = ((b.get("actual_checkout_date") or b.get("check_out_date") or "")[:7]) or "unknown"
+        m = by_month.setdefault(month_key, {
+            "checked_out": 0, "reported": 0.0, "billed": 0.0, "collected": 0.0,
+            "reported_but_not_collected": 0.0, "collected_beyond_reported": 0.0,
+            "differ_from_billed": 0, "reported_minus_billed": 0.0, "by_cause": {}})
+        m["checked_out"] += 1
+        m["reported"] = round(m["reported"] + reported, 2)
+        m["billed"] = round(m["billed"] + billed, 2)
+        m["collected"] = round(m["collected"] + collected, 2)
+        if reported - collected > 0.5:
+            m["reported_but_not_collected"] = round(m["reported_but_not_collected"] + reported - collected, 2)
+        elif collected - reported > 0.5:
+            m["collected_beyond_reported"] = round(m["collected_beyond_reported"] + collected - reported, 2)
         if abs(reported - billed) <= 0.5:
             continue
+        m["differ_from_billed"] += 1
+        m["reported_minus_billed"] = round(m["reported_minus_billed"] + reported - billed, 2)
         tags = []
         if (b.get("actual_checkout_date") or "") > (b.get("check_out_date") or ""):
             tags.append("late_checkout")
@@ -4872,6 +4923,20 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         t = tag_totals.setdefault(tag, {"bookings": 0, "reported_minus_billed": 0.0})
         t["bookings"] += 1
         t["reported_minus_billed"] = round(t["reported_minus_billed"] + reported - billed, 2)
+        mt = m["by_cause"].setdefault(tag, {"bookings": 0, "reported_minus_billed": 0.0})
+        mt["bookings"] += 1
+        mt["reported_minus_billed"] = round(mt["reported_minus_billed"] + reported - billed, 2)
+        if tag == "unexplained":
+            # Every one, with what is needed to see why — the "largest" list
+            # below is capped and small differences never made it into it.
+            unexplained.append({
+                "bk": b.get("booking_number"), "reported": reported, "billed": billed, "collected": collected,
+                "in": b.get("check_in_date"), "out_booked": b.get("check_out_date"),
+                "out_actual": b.get("actual_checkout_date"), "charge_reason": b.get("charge_reason"),
+                "charged_nights": b.get("charged_nights"), "is_org": b.get("is_org"),
+                "rooms": b.get("room_numbers"), "categories": b.get("room_categories"),
+                "charge_categories": [mp.get("charge_category") for mp in (b.get("room_guest_mapping") or [])],
+            })
         drift.append({
             "bk": b.get("booking_number"), "out": b.get("actual_checkout_date") or b.get("check_out_date"),
             "reported": reported, "billed": billed, "collected": collected, "why": tag,
@@ -4912,8 +4977,7 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         "active_bookings_with_wrong_refund_due": wrong_refund_due,
         "checked_out_with_unpaid_balance": {"bookings": uncollected_count, "rupees": round(uncollected_sum, 2)},
         "payments_rows": await db.payments.count_documents({}),
-        "last_successful_backup": (await db.backup_metadata.find_one(
-            {"status": "SUCCESS"}, {"_id": 0, "timestamp": 1, "backup_type": 1}, sort=[("timestamp", -1)])),
+        "backups": await _backup_summary(),
     }
 
     return {
@@ -4923,6 +4987,8 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         "reported_vs_billed": {
             "checked_out_bookings_that_differ": len(drift),
             "by_cause": tag_totals,
+            "by_checkout_month": dict(sorted(by_month.items())),
+            "unexplained": unexplained,
             "largest": drift[:40],
         },
         "exposure": exposure,
@@ -5061,11 +5127,8 @@ async def get_backup_status(current_user: dict = Depends(require_staff_or_admin_
         total_backups = await db.backup_metadata.count_documents({"status": "SUCCESS"})
         
         # Get first backup date
-        first_backup = await db.backup_metadata.find_one(
-            {"status": "SUCCESS"},
-            {"_id": 0, "timestamp": 1},
-            sort=[("timestamp", 1)]
-        )
+        successful = await backup_service.list_backup_metadata(db, {"status": "SUCCESS"})
+        first_backup = successful[-1] if successful else None
         
         # Check for missed backups
         missed_check = await scheduler_service.check_missed_backups(db)

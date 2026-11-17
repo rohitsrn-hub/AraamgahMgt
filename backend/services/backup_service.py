@@ -59,14 +59,43 @@ COLLECTIONS_TO_BACKUP = [
 ]
 
 
+def parse_backup_timestamp(value) -> Optional[datetime]:
+    """A backup record's timestamp as an aware UTC datetime, whichever way it
+    was stored. Records written before 11 May 2026 (and the scheduler's
+    failure records) hold a real BSON date; every later one holds an ISO
+    string. Returns None if it is neither."""
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+async def list_backup_metadata(db, query: Optional[Dict] = None) -> List[Dict]:
+    """Backup records matching `query`, NEWEST FIRST, ordered in Python.
+
+    Never ask Mongo to sort these by timestamp: with both dates and strings
+    in the collection it orders by TYPE first (every date ranks above every
+    string), so "newest" came back as the oldest date-typed record — the
+    last successful backup read 11 April 2026 for seven months while newer
+    backups sat unseen below it. "Restore last backup" had the same flaw and
+    would have restored that April backup. The collection is tiny (one record
+    per backup), so sorting here is cheap."""
+    docs = await db.backup_metadata.find(query or {}, {"_id": 0}).to_list(None)
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    docs.sort(key=lambda d: parse_backup_timestamp(d.get("timestamp")) or oldest, reverse=True)
+    return docs
+
+
 async def get_last_backup_metadata(db) -> Optional[Dict]:
     """Get metadata of the last successful backup"""
-    backup = await db.backup_metadata.find_one(
-        {"status": "SUCCESS"},
-        {"_id": 0},
-        sort=[("timestamp", -1)]
-    )
-    return backup
+    docs = await list_backup_metadata(db, {"status": "SUCCESS"})
+    return docs[0] if docs else None
 
 
 async def perform_full_backup(db) -> Dict:
@@ -247,13 +276,7 @@ async def perform_incremental_backup(db) -> Dict:
 
 async def get_backup_history(db, limit: int = 50) -> List[Dict]:
     """Get backup history (last N backups)"""
-    backups = await db.backup_metadata.find(
-        {},
-        {"_id": 0},
-        sort=[("timestamp", -1)],
-        limit=limit
-    ).to_list(limit)
-    return backups
+    return (await list_backup_metadata(db))[:limit]
 
 
 async def cleanup_old_backups(db, retention_days: int = 90):

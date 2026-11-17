@@ -554,3 +554,86 @@ def test_audit_check_is_admin_only_read_only_and_flags_drift(api):
     assert api.find("bookings") == before, "diagnostic must not change data"
     api.as_role("staff")
     assert api.client.get("/api/reports/audit-check").status_code == 403
+
+
+# ====================================================================
+# Found by the first live audit-check (18 Nov 2026)
+# ====================================================================
+
+def test_saving_settings_after_a_rate_change_does_not_reprice_old_bookings(api):
+    """The Settings page shows today's in-force rate and sends it back on every
+    Save; that used to overwrite the BASE rate and re-price every earlier booking."""
+    api.seed("bookings", [booking(status="checked_out", actual_checkout_date="2026-07-12",
+                                  check_in_date="2026-07-10", check_out_date="2026-07-12")])
+    asyncio.run(api.db.app_settings.update_one({}, {"$set": {
+        "cat_i_room_rent": 470, "cat_i_license_fee": 30,
+        "rate_history": [{"id": "h", "effective_date": "2026-08-16", "cat_i_room_rent": 570}]}}))
+    before = reported_total(api, "b1")["total_amount"]
+    shown = api.client.get("/api/settings").json()
+    assert shown["cat_i_room_rent"] == 570                      # page shows the new rate
+    res = api.client.put("/api/settings", json={
+        "cat_i_room_rent": shown["cat_i_room_rent"], "cat_i_license_fee": shown["cat_i_license_fee"],
+        "default_advance_amount": 500})                         # admin only changed the advance
+    assert res.status_code == 200
+    saved = api.find_one("app_settings", {})
+    assert saved["cat_i_room_rent"] == 470 and saved["default_advance_amount"] == 500
+    assert reported_total(api, "b1")["total_amount"] == before == 1000
+
+
+def test_a_genuinely_edited_rate_is_still_saved(api):
+    assert api.client.put("/api/settings", json={"cat_ii_room_rent": 400}).status_code == 200
+    assert api.find_one("app_settings", {})["cat_ii_room_rent"] == 400
+
+
+def _mixed_backup_records(api):
+    new = datetime.now(timezone.utc) - timedelta(days=1)
+    old = datetime(2026, 4, 11, 8, 52, 43)               # a real date, as before 11 May 2026
+    api.seed("backup_metadata", [
+        {"backup_id": "apr", "status": "SUCCESS", "backup_type": "FULL", "timestamp": old},
+        {"backup_id": "nov", "status": "SUCCESS", "backup_type": "INCREMENTAL", "timestamp": new.isoformat()},
+        {"backup_id": "bad", "status": "FAILED", "backup_type": "FULL", "timestamp": datetime.now(timezone.utc)},
+    ])
+
+
+def test_latest_backup_is_the_newest_not_the_newest_stored_as_a_date(api):
+    from services import backup_service
+    _mixed_backup_records(api)
+    assert asyncio.run(backup_service.get_last_backup_metadata(api.db))["backup_id"] == "nov"
+    assert [b["backup_id"] for b in asyncio.run(backup_service.get_backup_history(api.db))][:2] == ["bad", "nov"]
+    summary = api.client.get("/api/reports/audit-check").json()["exposure"]["backups"]
+    assert summary["successful_total"] == 2 and summary["successful_last_30_days"] == 1
+    assert summary["stored_as_dates_not_text"] == 1 and summary["hours_since_latest"] < 30
+
+
+def test_backup_status_does_not_call_a_recent_backup_overdue(api):
+    _mixed_backup_records(api)
+    status = api.client.get("/api/backups/status").json()
+    assert status["last_backup"]["backup_id"] == "nov"
+    assert status["missed_backup_warning"]["missed"] is False
+
+
+def test_restore_last_backup_picks_the_newest(api, tmp_path):
+    from services import restore_service
+    _mixed_backup_records(api)
+    asyncio.run(api.db.backup_metadata.update_one({"backup_id": "nov"}, {"$set": {"file_path": str(tmp_path / "x.json")}}))
+    (tmp_path / "x.json").write_text('{"collections": {}}')
+    result = asyncio.run(restore_service.restore_last_backup(api.db))
+    assert result["backup_id"] == "nov"
+
+
+def test_audit_check_lists_every_unexplained_booking_and_splits_by_month(api):
+    api.seed("bookings", [
+        # billed as Cat I, reported as Cat II: reported is 100 a night lower, no tag explains it
+        booking(status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2, charge_reason="normal",
+                final_payment=0.0, room_ids=["r3"], room_numbers=["C2-07"], room_categories=["Cat II"],
+                total_amount=1000.0, advance_paid=800.0),
+        booking(id="b2", booking_number="BK0002", status="checked_out", check_in_date="2026-06-10",
+                check_out_date="2026-06-12", actual_checkout_date="2026-06-12", charged_nights=2,
+                charge_reason="normal", total_amount=1000.0, advance_paid=400.0, final_payment=600.0),
+    ])
+    data = api.client.get("/api/reports/audit-check").json()["reported_vs_billed"]
+    assert [u["bk"] for u in data["unexplained"]] == ["BK0001"]
+    may, june = data["by_checkout_month"]["2026-05"], data["by_checkout_month"]["2026-06"]
+    assert may["reported_minus_billed"] == -200 and may["by_cause"] == {"unexplained": {"bookings": 1, "reported_minus_billed": -200.0}}
+    assert may["reported"] == 800 and may["collected"] == 800 and may["reported_but_not_collected"] == 0
+    assert june["differ_from_billed"] == 0 and june["reported"] == june["collected"] == 1000

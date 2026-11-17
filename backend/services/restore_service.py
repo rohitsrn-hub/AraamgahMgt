@@ -122,11 +122,8 @@ async def restore_full(backup_id: str, db) -> Dict:
 
 async def restore_last_backup(db) -> Dict:
     """Restore the most recent successful backup"""
-    last_backup = await db.backup_metadata.find_one(
-        {"status": "SUCCESS"},
-        {"_id": 0},
-        sort=[("timestamp", -1)]
-    )
+    from services.backup_service import get_last_backup_metadata
+    last_backup = await get_last_backup_metadata(db)
     
     if not last_backup:
         raise ValueError("No successful backup found")
@@ -139,26 +136,21 @@ async def restore_by_date_range(start_date: datetime, end_date: datetime, db) ->
     Restore all backups within a date range using MERGE strategy
     """
     try:
-        # Find all backups in range. Timestamps are stored as UTC ISO
-        # strings; a datetime bound never matches a string field in Mongo, so
-        # this used to find nothing and every date-range restore failed with
-        # "No successful backups found". Compare like with like.
-        def _utc_iso(dt: datetime) -> str:
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc).isoformat()
+        # Find all backups in range. Timestamps are stored both as dates and
+        # as ISO strings and Mongo never matches a string against a date
+        # bound (nor orders the two sensibly), so filter in Python on the
+        # parsed value. This used to find nothing and every date-range
+        # restore failed with "No successful backups found".
+        from services.backup_service import list_backup_metadata, parse_backup_timestamp
 
-        backups = await db.backup_metadata.find(
-            {
-                "timestamp": {
-                    "$gte": _utc_iso(start_date),
-                    "$lte": _utc_iso(end_date)
-                },
-                "status": "SUCCESS"
-            },
-            {"_id": 0, "backup_id": 1, "timestamp": 1},
-            sort=[("timestamp", 1)]  # Oldest first
-        ).to_list(None)
+        def _utc(dt: datetime) -> datetime:
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+        lo, hi = _utc(start_date), _utc(end_date)
+        backups = [
+            b for b in reversed(await list_backup_metadata(db, {"status": "SUCCESS"}))  # oldest first
+            if (ts := parse_backup_timestamp(b.get("timestamp"))) and lo <= ts <= hi
+        ]
         
         if not backups:
             raise ValueError(f"No successful backups found between {start_date} and {end_date}")

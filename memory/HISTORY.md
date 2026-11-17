@@ -5,6 +5,24 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — First live month-end audit check: all months reconcile; two more defects fixed (branch: claude/qa-audit-fixes)
+Owner ran the Audit check against the live database. The four reports agree
+with each other in every month — baseline totals recorded here for next
+month's comparison: Apr ₹1,47,750, May ₹2,08,175, Jun ₹1,98,375, Jul
+₹2,01,625, Aug ₹2,29,900 (unchanged from the register-verified figure),
+Sep ₹2,56,825, Oct ₹2,52,350, Nov so far ₹1,91,900. Against what guests were
+billed, 176 checked-out bookings differ by ₹93,750 in total: about ₹53,500 is
+late check-outs (the cash collected matches the reports in most of the listed
+cases) and about ₹40,600 is extra beds taken at check-in, which the listed
+cases show were reported as revenue but not collected — both still waiting on
+the owner's ruling. Five bookings (-₹1,000) were unexplained and could not be
+identified because the check only listed the largest 40; the check now lists
+every unexplained booking and splits everything by month. Fixed: saving the
+Settings page after the 16 Aug rate change re-priced every earlier booking
+(reproduced, not yet triggered live); and the "last backup" shown was the
+wrong record (it read 11 April), so whether backups have run since May is
+still unknown until the next check shows the corrected figure.
+
 ## 2026-11-16 — Audit check button made permanent; month-end procedure written (branch: claude/qa-audit-fixes)
 The admin-only "Audit check" button on the Reports page is no longer
 temporary — owner's decision. It is the data source for a monthly routine:

@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 import pytz
 import logging
 
-from services.backup_service import perform_incremental_backup, cleanup_old_backups
+from services.backup_service import perform_incremental_backup, cleanup_old_backups, get_last_backup_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,9 @@ async def scheduled_backup_job():
         # Save failure metadata
         await db_instance.backup_metadata.insert_one({
             "backup_id": f"failed_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
-            "timestamp": datetime.now(timezone.utc),
+            # ISO string like every other backup record (a raw datetime here
+            # is what made "latest backup" sort wrongly).
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "backup_type": "INCREMENTAL",
             "status": "FAILED",
             "error_message": f"Scheduled backup failed: {str(e)}",
@@ -119,7 +121,7 @@ async def update_backup_schedule(hour: int, minute: int, db):
                     "hour": hour,
                     "minute": minute,
                     "timezone": "IST",
-                    "updated_at": datetime.now(timezone.utc)
+                    "updated_at": datetime.now(timezone.utc).isoformat()
                 }
             }},
             upsert=True
@@ -144,11 +146,8 @@ async def check_missed_backups(db) -> dict:
     """
     try:
         # Get last successful backup
-        last_backup = await db.backup_metadata.find_one(
-            {"status": "SUCCESS"},
-            {"_id": 0, "timestamp": 1},
-            sort=[("timestamp", -1)]
-        )
+        # Not find_one(sort=timestamp): see backup_service.list_backup_metadata.
+        last_backup = await get_last_backup_metadata(db)
         
         if not last_backup:
             return {
