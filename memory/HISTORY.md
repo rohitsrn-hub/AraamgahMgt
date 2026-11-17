@@ -5,6 +5,21 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — Owner's rulings applied: extra beds at check-out only, late check-outs billed for nights stayed (branch: claude/qa-audit-fixes)
+Owner ruled: (1) extra beds are charged at check-out for the exact beds and
+days used — a bed noted at check-in is not a charge; (2) late check-outs are
+billed for nights actually stayed; (3) the Audit check covers only the
+previous closed month. Done: reports no longer count check-in extra beds (past
+months' reported revenue drops by that amount — about ₹40,600 over Apr-Nov, so
+the baseline totals in the entry below are now the OLD figures); check-out
+now bills late nights and extra beds through one calculation, and the
+check-out screen shows that same figure instead of its own (which could be a
+night off); the screen's date default no longer lags a day in the early
+morning; confirming a stay extension no longer shows a false "Network
+error"; the receipt prints the stored bill; and the Audit check now audits
+only last month, with a new month-by-month baseline to be recorded at the
+next run. Bookings checked out before today keep their old stored bills.
+
 ## 2026-11-18 — First live month-end audit check: all months reconcile; two more defects fixed (branch: claude/qa-audit-fixes)
 Owner ran the Audit check against the live database. The four reports agree
 with each other in every month — baseline totals recorded here for next

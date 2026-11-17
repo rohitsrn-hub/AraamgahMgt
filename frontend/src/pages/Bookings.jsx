@@ -50,7 +50,7 @@ import {
 } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useLocation, useNavigate } from "react-router-dom";
-import { fmtINR } from "@/utils/formatters";
+import { fmtINR, istTodayStr } from "@/utils/formatters";
 import { getRoomRate } from "@/utils/rateUtils";
 
 // Indian mobile phone validation
@@ -105,6 +105,8 @@ export default function Bookings() {
   const [showCheckOut, setShowCheckOut] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [refundInfo, setRefundInfo] = useState(null);
+  const [checkoutQuote, setCheckoutQuote] = useState(null);       // the server's bill for the check-out screen
+  const [checkoutQuoteError, setCheckoutQuoteError] = useState(false);
   // Set when the recalculated check-in total differs from what the booking
   // was originally quoted at (e.g. a scheduled rate change took effect
   // between booking and check-in) — holds what's needed to actually submit
@@ -909,7 +911,8 @@ export default function Bookings() {
       };
     });
 
-    const extraBedCharge = actionForm.extra_beds * 75;
+    // Extra beds are charged at check-out for the days actually used, not here.
+    const extraBedCharge = 0;
     const totalWithExtra = roomChargesTotal + extraBedCharge;
     const balance = totalWithExtra - (selectedBooking.advance_paid || 0);
     return { nights, roomChargesTotal, extraBedCharge, totalWithExtra, balance, roomChargesBreakdown };
@@ -1144,7 +1147,7 @@ export default function Bookings() {
         notes: form.notes,
         extra_beds_checkout: form.extra_beds_checkout || 0,
         extra_bed_days: form.extra_bed_days || 0,
-        actual_checkout_date: form.actual_checkout_date || new Date().toISOString().split('T')[0],
+        actual_checkout_date: form.actual_checkout_date || istTodayStr(),
         // Include payment details
         card_last4: form.card_last4 || undefined,
         card_type: form.card_type || undefined,
@@ -1372,6 +1375,46 @@ export default function Bookings() {
     setShowCheckOut(true);
   };
 
+  // The check-out screen's bill comes from the server (GET .../checkout-quote) — the same
+  // calculation check-out stores — so what staff collect, the stored total and every report
+  // agree. Nights billed = nights actually stayed (a late check-out is billed to the date
+  // entered); extra beds = beds x days entered below. Re-fetched whenever the date or bed
+  // fields change.
+  const checkoutDate = actionForm.actual_checkout_date || istTodayStr();
+  useEffect(() => {
+    setCheckoutQuote(null);
+    setCheckoutQuoteError(false);
+    if (!showCheckOut || !selectedBooking?.id) return undefined;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await axios.get(`${API}/bookings/${selectedBooking.id}/checkout-quote`, {
+          params: {
+            actual_checkout_date: checkoutDate,
+            extra_beds: actionForm.extra_beds_checkout || 0,
+            extra_bed_days: actionForm.extra_bed_days || 0,
+          },
+        });
+        if (!cancelled) setCheckoutQuote(res.data);
+      } catch (error) {
+        if (!cancelled) {
+          setCheckoutQuoteError(true);
+          toast.error(
+            error.response?.data?.detail || "Could not calculate the bill. Use Amend Amount to enter it by hand and tell the administrator.",
+            { id: "checkout-quote-failed" }
+          );
+        }
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCheckOut, selectedBooking?.id, checkoutDate, actionForm.extra_beds_checkout, actionForm.extra_bed_days]);
+
+  // Nights between check-in and the check-out date entered (caps "days used" for extra beds).
+  const checkoutStayNights = () => Math.max(
+    1, Math.round((new Date(checkoutDate) - new Date(selectedBooking?.check_in_date)) / 86400000)
+  );
+
   const canCheckInToday = (booking) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1514,7 +1557,7 @@ export default function Bookings() {
       setShowExtendDialog(false);
       setShowExtensionConfirm(false);
       setExtensionPlan(null);
-      await fetchBookings();
+      await fetchData();  // was fetchBookings(), which does not exist: it threw after a SUCCESSFUL extension and showed "Network error"
     } catch { toast.error("Network error"); }
     finally { setExtensionConfirmLoading(false); }
   };
@@ -2619,12 +2662,11 @@ export default function Bookings() {
               {/* Extra Beds */}
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
                 <Label className="font-semibold text-amber-800">Extra Beds Required</Label>
-                <p className="text-xs text-amber-600 mb-2">₹75 per extra bed — added to final bill</p>
+                <p className="text-xs text-amber-600 mb-2">Just a note for now — ₹75 per bed per day is charged at check-out for the days actually used</p>
                 <div className="flex items-center gap-3">
                   <Input type="number" min="0" max="5" value={actionForm.extra_beds}
                     onChange={(e) => setActionForm({...actionForm, extra_beds: parseInt(e.target.value) || 0})}
                     onFocus={(e) => e.target.select()} className="earms-input w-24" data-testid="input-extra-beds-checkin" />
-                  {actionForm.extra_beds > 0 && <span className="text-sm font-medium text-amber-700">Charge: {fmtINR(actionForm.extra_beds * 75, 0)}</span>}
                 </div>
               </div>
 
@@ -3148,10 +3190,9 @@ export default function Bookings() {
                         </div>
                         
                         {actionForm.extra_beds > 0 && (
-                          <div className="flex justify-between text-amber-700">
-                            <span>Extra Beds ({actionForm.extra_beds} × ₹75):</span>
-                            <span className="font-medium">+ {fmtINR(extraBedCharge, 2)}</span>
-                          </div>
+                          <p className="text-xs text-amber-700">
+                            {actionForm.extra_beds} extra bed(s) noted — charged at check-out for the days actually used.
+                          </p>
                         )}
                         <div className="flex justify-between text-blue-700 border-t border-slate-200 pt-1 mt-1">
                           <span>Advance Already Paid:</span>
@@ -3222,10 +3263,7 @@ export default function Bookings() {
               <div className="p-4 bg-slate-50 rounded-xl">
                 <p className="font-medium">{selectedBooking.guest_name}</p>
                 <p className="text-sm text-slate-500">Room {getRoomDisplay(selectedBooking)}</p>
-                {selectedBooking.extra_beds > 0 && (
-                  <p className="text-xs text-amber-600">Extra Beds (at check-in): {selectedBooking.extra_beds} × ₹75 = {fmtINR(selectedBooking.extra_bed_charge, 0)}</p>
-                )}
-                <p className="text-sm font-medium text-amber-600 mt-2">Balance Due: {fmtINR(selectedBooking.balance_amount, 0)}</p>
+                <p className="text-sm font-medium text-amber-600 mt-2">Balance Due (before check-out charges): {fmtINR(selectedBooking.balance_amount, 0)}</p>
                 
                 {/* Stay Duration Info */}
                 <div className="mt-3 pt-3 border-t border-slate-200">
@@ -3240,28 +3278,25 @@ export default function Bookings() {
                     </div>
                     <div>
                       <span className="text-slate-500">Check-Out Date:</span>
-                      <p className="font-medium text-slate-700">{format(new Date(), "dd MMM yyyy")}</p>
+                      <p className="font-medium text-slate-700">{format(parseISO(checkoutDate), "dd MMM yyyy")}</p>
                     </div>
                     <div>
                       <span className="text-slate-500">Total Duration:</span>
                       <p className="font-semibold text-blue-600">
-                        {(() => {
-                          const checkIn = selectedBooking.actual_check_in 
-                            ? new Date(selectedBooking.actual_check_in)
-                            : new Date(selectedBooking.check_in_date);
-                          const checkOut = new Date();
-                          const nights = Math.ceil((checkOut - checkIn) / 86400000);
-                          return `${nights} day${nights !== 1 ? 's' : ''}`;
-                        })()}
+                        {checkoutStayNights()} night{checkoutStayNights() !== 1 ? 's' : ''}
                       </p>
                     </div>
                   </div>
                 </div>
               </div>
               
-              {/* Extra Bed Usage During Stay */}
+              {/* Extra Bed Usage During Stay — the ONLY place extra beds are charged */}
               <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
-                <h4 className="font-semibold text-blue-800 mb-3">Extra Bed Usage (If any additional beds used)</h4>
+                <h4 className="font-semibold text-blue-800 mb-1">Extra Bed Usage (If any additional beds used)</h4>
+                <p className="text-xs text-blue-700 mb-3">
+                  Extra beds are charged here, for the beds and the exact number of days actually used.
+                  {selectedBooking.extra_beds > 0 && ` ${selectedBooking.extra_beds} extra bed(s) were noted at check-in — enter what was really used.`}
+                </p>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label>Extra Beds Used</Label>
@@ -3286,22 +3321,10 @@ export default function Bookings() {
                     <Input
                       type="number"
                       min="0"
-                      max={(() => {
-                        const checkIn = selectedBooking.actual_check_in 
-                          ? new Date(selectedBooking.actual_check_in)
-                          : new Date(selectedBooking.check_in_date);
-                        const checkOut = new Date();
-                        return Math.ceil((checkOut - checkIn) / 86400000);
-                      })()}
+                      max={checkoutStayNights()}
                       value={actionForm.extra_bed_days || 0}
                       onChange={(e) => {
-                        const maxDays = (() => {
-                          const checkIn = selectedBooking.actual_check_in 
-                            ? new Date(selectedBooking.actual_check_in)
-                            : new Date(selectedBooking.check_in_date);
-                          const checkOut = new Date();
-                          return Math.ceil((checkOut - checkIn) / 86400000);
-                        })();
+                        const maxDays = checkoutStayNights();
                         const days = parseInt(e.target.value) || 0;
                         if (days > maxDays) {
                           toast.error(`Days used cannot exceed total stay duration of ${maxDays} day${maxDays !== 1 ? 's' : ''}`);
@@ -3314,13 +3337,7 @@ export default function Bookings() {
                       className="earms-input mt-1"
                       data-testid="input-extra-bed-days"
                     />
-                    <p className="text-xs text-slate-500 mt-1">Max: {(() => {
-                      const checkIn = selectedBooking.actual_check_in 
-                        ? new Date(selectedBooking.actual_check_in)
-                        : new Date(selectedBooking.check_in_date);
-                      const checkOut = new Date();
-                      return Math.ceil((checkOut - checkIn) / 86400000);
-                    })()} days (total stay duration)</p>
+                    <p className="text-xs text-slate-500 mt-1">Max: {checkoutStayNights()} days (total stay duration)</p>
                   </div>
                 </div>
                 {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
@@ -3343,14 +3360,14 @@ export default function Bookings() {
                   <Input
                     id="actual_checkout_date"
                     type="date"
-                    value={actionForm.actual_checkout_date || new Date().toISOString().split('T')[0]}
+                    value={checkoutDate}
                     onChange={(e) => setActionForm({...actionForm, actual_checkout_date: e.target.value})}
                     className="mt-1"
                     min={selectedBooking?.check_in_date}
-                    max={new Date().toISOString().split('T')[0]}
+                    max={istTodayStr()}
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    {format(parseISO(actionForm.actual_checkout_date || new Date().toISOString().split('T')[0]), "dd/MM/yyyy")}
+                    {format(parseISO(checkoutDate), "dd/MM/yyyy")}
                   </p>
                   {selectedBooking?.planned_early_checkout_date && (
                     <div className="mt-2 text-xs p-2 bg-green-50 border border-green-200 rounded">
@@ -3359,6 +3376,14 @@ export default function Bookings() {
                       </p>
                       <p className="text-green-600 mt-1">
                         Will be charged for actual days only.
+                      </p>
+                    </div>
+                  )}
+                  {checkoutDate > selectedBooking?.check_out_date && (
+                    <div className="mt-2 text-xs p-2 bg-amber-100 border border-amber-300 rounded">
+                      <p className="text-amber-800">
+                        Checking out after the booked date ({selectedBooking.check_out_date}). Billed for the nights actually stayed, up to this date.
+                        If the guest really left on the booked date, set the Checkout Date to that day.
                       </p>
                     </div>
                   )}
@@ -3380,71 +3405,38 @@ export default function Bookings() {
                 <div className="p-4 bg-green-50 rounded-xl border border-green-300">
                   <h4 className="font-semibold text-green-800 mb-3">Total Bill Calculation</h4>
                   <div className="space-y-2">
-                    {(() => {
-                      // Calculate actual stay charges based on actual check-in to today
-                      const checkInDate = selectedBooking.actual_check_in 
-                        ? new Date(selectedBooking.actual_check_in)
-                        : new Date(selectedBooking.check_in_date);
-                      const checkOutDate = new Date(); // Today
-                      const actualNights = Math.ceil((checkOutDate - checkInDate) / 86400000);
-                      
-                      // Get room categories and calculate rates
-                      const roomCategories = selectedBooking.room_categories || [];
-                      const numRooms = selectedBooking.num_rooms || selectedBooking.room_ids.length || 1;
-                      const isNonOrg = !selectedBooking.is_org;
-                      
-                      let totalRoomCharges = 0;
-                      
-                      // Calculate room charges (rate INCLUDES license fee).
-                      // Resolved by the booking's own check-in date — an
-                      // overstaying guest checked in before a rate change
-                      // keeps the old rate, even though "today" is after it.
-                      roomCategories.forEach(category => {
-                        const roomRate = getRoomRate(settings, selectedBooking.check_in_date, !isNonOrg, category);
-                        const fullRate = roomRate.rent + roomRate.licenseFee;
-                        totalRoomCharges += fullRate * actualNights;
-                      });
-                      
-                      // If no categories, use num_rooms
-                      if (roomCategories.length === 0 && numRooms > 0) {
-                        const roomRate = isNonOrg ? 570 : 470; // Default Cat I
-                        const fullRate = roomRate + 30; // Add license fee
-                        totalRoomCharges = fullRate * actualNights * numRooms;
-                      }
-                      
-                      // Advance paid (to be subtracted)
-                      const advancePaid = selectedBooking.advance_paid || 0;
-                      
-                      // "Refund due" recorded by an amendment is NOT subtracted
-                      // here. Room charges minus advance already yields a
-                      // negative amount (= refund) whenever the guest has
-                      // overpaid; subtracting refund_due as well counted the
-                      // same money twice — and older amendments stored the
-                      // whole price drop there, not an actual overpayment,
-                      // which took real money off the bill.
-                      
-                      // ONLY use checkout extra bed charges (actual usage)
-                      const extraBedActual = (actionForm.extra_beds_checkout || 0) * (actionForm.extra_bed_days || 0) * 75;
-                      
-                      // Final calculation: Room Charges - Advance + Extra Beds
-                      const amountDue = totalRoomCharges - advancePaid + extraBedActual;
-                      
+                    {!checkoutQuote ? (
+                      <p className="text-sm text-slate-600">
+                        {checkoutQuoteError
+                          ? "⚠️ The bill could not be calculated. Use “Amend Amount” to enter the amount by hand and tell the administrator."
+                          : "Calculating bill…"}
+                      </p>
+                    ) : (() => {
+                      const q = checkoutQuote;
+                      const amountDue = q.amount_due_now;
+                      const numRooms = selectedBooking.num_rooms || (selectedBooking.room_ids || []).length || 1;
+                      const reasonNote = {
+                        late_checkout: "Billed to the checkout date entered (late check-out).",
+                        early_checkout_informed: "Early check-out, informed at check-in — billed for nights actually stayed.",
+                        early_checkout_not_informed: "Early check-out, NOT informed at check-in — billed for the full booked stay.",
+                      }[q.charge_reason];
                       return (
                         <>
                           <div className="flex justify-between text-sm">
-                            <span className="text-slate-600">Room Charges ({actualNights} night{actualNights !== 1 ? 's' : ''} × {numRooms} room{numRooms > 1 ? 's' : ''}):</span>
-                            <span className="font-medium">{fmtINR(totalRoomCharges, 0)}</span>
+                            <span className="text-slate-600">Room Charges ({q.charged_nights} night{q.charged_nights !== 1 ? 's' : ''} × {numRooms} room{numRooms > 1 ? 's' : ''}):</span>
+                            <span className="font-medium">{fmtINR(q.room_total, 0)}</span>
                           </div>
-                          {advancePaid > 0 && (
-                            <div className="flex justify-between text-sm text-orange-600">
-                              <span>Less: Advance Paid:</span>
-                              <span className="font-medium">-{fmtINR(advancePaid, 0)}</span>
-                            </div>
-                          )}
-                          {(actionForm.extra_beds_checkout > 0 && actionForm.extra_bed_days > 0) && (
+                          {reasonNote && <p className="text-xs text-slate-500">{reasonNote}</p>}
+                          {q.extra_bed_charge > 0 && (
                             <div className="flex justify-between text-sm">
                               <span className="text-slate-600">Extra Beds (actual usage):</span>
-                              <span className="font-medium">{fmtINR(extraBedActual, 0)} ({actionForm.extra_beds_checkout} bed{actionForm.extra_beds_checkout > 1 ? 's' : ''} × {actionForm.extra_bed_days} day{actionForm.extra_bed_days > 1 ? 's' : ''})</span>
+                              <span className="font-medium">{fmtINR(q.extra_bed_charge, 0)} ({actionForm.extra_beds_checkout} bed{actionForm.extra_beds_checkout > 1 ? 's' : ''} × {actionForm.extra_bed_days} day{actionForm.extra_bed_days > 1 ? 's' : ''})</span>
+                            </div>
+                          )}
+                          {q.advance_paid > 0 && (
+                            <div className="flex justify-between text-sm text-orange-600">
+                              <span>Less: Advance Paid:</span>
+                              <span className="font-medium">-{fmtINR(q.advance_paid, 0)}</span>
                             </div>
                           )}
                           <div className="border-t border-green-300 pt-2 mt-2">
@@ -3455,7 +3447,7 @@ export default function Bookings() {
                               <span className={`text-xl font-bold ${amountDue >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                                 {amountDue >= 0 ? fmtINR(amountDue, 0) : '-' + fmtINR(Math.abs(amountDue), 0)}
                               </span>
-                              <input type="hidden" id="calculated-total" value={amountDue.toFixed(0)} />
+                              <input type="hidden" id="calculated-total" value={amountDue.toFixed(2)} />
                             </div>
                             {amountDue < 0 && (
                               <p className="text-xs text-red-600 mt-2">⚠️ Customer has overpaid. Please process refund of {fmtINR(Math.abs(amountDue), 0)}</p>
@@ -3487,6 +3479,7 @@ export default function Bookings() {
                     </Button>
                     <Button
                       size="sm"
+                      disabled={!checkoutQuote}
                       onClick={() => {
                         const totalInput = document.getElementById('calculated-total');
                         const totalDue = totalInput ? parseFloat(totalInput.value) : 0;

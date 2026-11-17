@@ -276,12 +276,12 @@ def test_extension_is_not_given_away_free_at_checkout_without_a_room_mapping(api
     assert reported_total(api, "b1")["total_amount"] == 2000
 
 
-def test_extension_keeps_the_check_in_extra_bed_in_the_balance(api):
+def test_a_bed_noted_at_checkin_is_not_billed_until_checkout_and_extension_keeps_the_balance(api):
     api.seed("bookings", [booking()])
     after_in = checkin(api, extra_beds=1)
-    assert after_in["balance_amount"] == 1000 + 75 - 400
+    assert after_in["extra_bed_charge"] == 0 and after_in["balance_amount"] == 1000 - 400
     extend(api, "2026-05-13")
-    assert api.find_one("bookings", {"id": "b1"})["balance_amount"] == 1500 + 75 - 400
+    assert api.find_one("bookings", {"id": "b1"})["balance_amount"] == 1500 - 400
 
 
 def test_extension_of_a_room_charged_non_org_is_priced_non_org(api):
@@ -535,25 +535,41 @@ def test_setup_keeps_the_non_org_rate_it_was_given(api):
 # Audit check (month-end reconciliation data source)
 # ====================================================================
 
-def test_audit_check_is_admin_only_read_only_and_flags_drift(api):
-    api.seed("bookings", [
-        booking(status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2,
-                charge_reason="normal", final_payment=600.0),
-        # checked out a day late: billed 2 nights, reports count 3
-        booking(id="b2", booking_number="BK0002", status="checked_out", actual_checkout_date="2026-05-13",
-                charged_nights=2, charge_reason="normal", final_payment=600.0, room_ids=["r2"],
-                room_numbers=["C1-02"]),
-    ])
+def test_audit_check_is_admin_only_and_read_only(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-06-17")
+    api.seed("bookings", [booking(status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2,
+                                  charge_reason="normal", final_payment=600.0)])
     before = api.find("bookings")
     res = api.client.get("/api/reports/audit-check")
     assert res.status_code == 200, res.text
-    data = res.json()
-    assert data["months"][0]["month"] == "2026-05" and data["months"][0]["consistent"] is True
-    assert data["reported_vs_billed"]["checked_out_bookings_that_differ"] == 1
-    assert data["reported_vs_billed"]["by_cause"] == {"late_checkout": {"bookings": 1, "reported_minus_billed": 500.0}}
     assert api.find("bookings") == before, "diagnostic must not change data"
     api.as_role("staff")
     assert api.client.get("/api/reports/audit-check").status_code == 403
+
+
+def test_audit_check_covers_only_the_previous_closed_month(api, monkeypatch):
+    """Run on 17 Nov it audits 1-31 Oct and nothing else; in January it audits December."""
+    api.seed("bookings", [
+        booking(id="oct", booking_number="BKOCT", status="checked_out", check_in_date="2026-10-10",
+                check_out_date="2026-10-12", actual_checkout_date="2026-10-12", charged_nights=2, charge_reason="normal",
+                final_payment=600.0),
+        booking(id="sep", booking_number="BKSEP", status="checked_out", check_in_date="2026-09-10",
+                check_out_date="2026-09-12", actual_checkout_date="2026-09-12", charged_nights=2, charge_reason="normal",
+                final_payment=600.0, room_ids=["r2"], room_numbers=["C1-02"]),
+        booking(id="nov", booking_number="BKNOV", status="checked_out", check_in_date="2026-11-03",
+                check_out_date="2026-11-05", actual_checkout_date="2026-11-05", charged_nights=2, charge_reason="normal",
+                final_payment=0.0, room_ids=["r3"], room_numbers=["C2-07"], room_categories=["Cat II"]),
+    ])
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-11-17")
+    data = api.client.get("/api/reports/audit-check").json()
+    assert data["audited_month"] == "2026-10"
+    assert data["period"] == {"from": "2026-10-01", "to": "2026-10-31"}
+    assert data["reports"]["consistent"] is True
+    assert data["reports"]["totals"]["revenue"]["room_allotment"] == 1000     # October's one stay, not Sept or Nov
+    assert data["checked_out_in_month"]["checked_out"] == 1
+    assert "months" not in data and "2026-09" not in str(data) and "BKNOV" not in str(data)
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2027-01-05")
+    assert api.client.get("/api/reports/audit-check").json()["audited_month"] == "2026-12"
 
 
 # ====================================================================
@@ -600,7 +616,7 @@ def test_latest_backup_is_the_newest_not_the_newest_stored_as_a_date(api):
     _mixed_backup_records(api)
     assert asyncio.run(backup_service.get_last_backup_metadata(api.db))["backup_id"] == "nov"
     assert [b["backup_id"] for b in asyncio.run(backup_service.get_backup_history(api.db))][:2] == ["bad", "nov"]
-    summary = api.client.get("/api/reports/audit-check").json()["exposure"]["backups"]
+    summary = api.client.get("/api/reports/audit-check").json()["current_state"]["backups"]
     assert summary["successful_total"] == 2 and summary["successful_last_30_days"] == 1
     assert summary["stored_as_dates_not_text"] == 1 and summary["hours_since_latest"] < 30
 
@@ -621,19 +637,89 @@ def test_restore_last_backup_picks_the_newest(api, tmp_path):
     assert result["backup_id"] == "nov"
 
 
-def test_audit_check_lists_every_unexplained_booking_and_splits_by_month(api):
+def test_audit_check_lists_every_unexplained_booking_in_the_month(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-06-17")
     api.seed("bookings", [
         # billed as Cat I, reported as Cat II: reported is 100 a night lower, no tag explains it
         booking(status="checked_out", actual_checkout_date="2026-05-12", charged_nights=2, charge_reason="normal",
                 final_payment=0.0, room_ids=["r3"], room_numbers=["C2-07"], room_categories=["Cat II"],
                 total_amount=1000.0, advance_paid=800.0),
-        booking(id="b2", booking_number="BK0002", status="checked_out", check_in_date="2026-06-10",
-                check_out_date="2026-06-12", actual_checkout_date="2026-06-12", charged_nights=2,
-                charge_reason="normal", total_amount=1000.0, advance_paid=400.0, final_payment=600.0),
+        booking(id="b2", booking_number="BK0002", status="checked_out", actual_checkout_date="2026-05-12",
+                charged_nights=2, charge_reason="normal", total_amount=1000.0, advance_paid=400.0, final_payment=600.0,
+                room_ids=["r2"], room_numbers=["C1-02"]),
     ])
-    data = api.client.get("/api/reports/audit-check").json()["reported_vs_billed"]
+    data = api.client.get("/api/reports/audit-check").json()
     assert [u["bk"] for u in data["unexplained"]] == ["BK0001"]
-    may, june = data["by_checkout_month"]["2026-05"], data["by_checkout_month"]["2026-06"]
-    assert may["reported_minus_billed"] == -200 and may["by_cause"] == {"unexplained": {"bookings": 1, "reported_minus_billed": -200.0}}
-    assert may["reported"] == 800 and may["collected"] == 800 and may["reported_but_not_collected"] == 0
-    assert june["differ_from_billed"] == 0 and june["reported"] == june["collected"] == 1000
+    summ = data["checked_out_in_month"]
+    assert summ["differ_from_billed"] == 1 and summ["reported_minus_billed"] == -200
+    assert summ["by_cause"] == {"unexplained": {"bookings": 1, "reported_minus_billed": -200.0}}
+    assert summ["reported"] == 1800 and summ["collected"] == 1800 and summ["reported_but_not_collected"] == 0
+
+
+# ====================================================================
+# Owner rulings, Nov 2026: extra beds at check-out only; late check-outs billed for nights stayed
+# ====================================================================
+
+def test_late_checkout_is_billed_for_the_nights_actually_stayed(api):
+    api.seed("bookings", [booking()])                                  # booked 10-12 May, Rs 500/night
+    checkin(api)
+    out = checkout(api, actual_checkout_date="2026-05-14", final_payment=1600)
+    assert out["charge_reason"] == "late_checkout" and out["charged_nights"] == 4
+    assert out["total_amount"] == 2000 and out["room_rent_total"] == 4 * 470
+    assert out["balance_amount"] == 0
+    assert reported_total(api, "b1")["total_amount"] == 2000, "stored bill and reports must agree"
+
+
+def test_late_checkout_of_a_mix_and_match_stay_bills_and_reports_the_extra_nights_in_the_last_room(api):
+    api.seed("bookings", [booking(**MIX)])
+    checkin(api)
+    out = checkout(api, actual_checkout_date="2026-05-16")            # booked to the 14th, left the 16th
+    assert out["total_amount"] == 1800 + 2 * 400
+    assert [seg["night_date"] for seg in out["room_segments"]][-2:] == ["2026-05-14", "2026-05-15"]
+    assert reported_total(api, "b1")["total_amount"] == 2600
+
+
+def test_on_time_and_early_checkouts_are_unchanged_by_the_late_rule(api):
+    api.seed("bookings", [booking(check_out_date="2026-05-14", total_amount=2000.0)])
+    checkin(api, planned_early_checkout_date="2026-05-12")
+    out = checkout(api, actual_checkout_date="2026-05-12")
+    assert out["charge_reason"] == "early_checkout_informed" and out["total_amount"] == 1000
+
+
+def test_extra_bed_is_charged_at_checkout_for_beds_times_days_used(api):
+    api.seed("bookings", [booking(check_out_date="2026-05-14", total_amount=2000.0)])
+    checkin(api, extra_beds=2)                                         # noted at check-in: not charged
+    out = checkout(api, actual_checkout_date="2026-05-14", extra_beds_checkout=1, extra_bed_days=3)
+    assert out["extra_bed_charge_checkout"] == 225
+    assert out["total_amount"] == 2000 + 225
+    assert reported_total(api, "b1")["total_amount"] == 2225
+    assert reported_total(api, "b1")["extra_bed_charge"] == 225
+
+
+def test_a_guest_who_asked_for_a_bed_only_at_checkout_is_charged_for_it(api):
+    api.seed("bookings", [booking()])
+    checkin(api)                                                        # no extra bed at check-in
+    out = checkout(api, actual_checkout_date="2026-05-12", extra_beds_checkout=2, extra_bed_days=1)
+    assert out["total_amount"] == 1000 + 150 and reported_total(api, "b1")["total_amount"] == 1150
+
+
+def test_checkout_quote_equals_the_bill_check_out_stores_and_changes_nothing(api):
+    api.seed("bookings", [booking(check_out_date="2026-05-14", total_amount=2000.0)])
+    checkin(api)
+    before = api.find_one("bookings", {"id": "b1"})
+    q = api.client.get("/api/bookings/b1/checkout-quote", params={
+        "actual_checkout_date": "2026-05-15", "extra_beds": 1, "extra_bed_days": 2}).json()
+    assert api.find_one("bookings", {"id": "b1"}) == before
+    assert q["charged_nights"] == 5 and q["room_total"] == 2500 and q["extra_bed_charge"] == 150
+    assert q["total_due"] == 2650 and q["amount_due_now"] == 2650 - 400 and q["charge_reason"] == "late_checkout"
+    out = checkout(api, actual_checkout_date="2026-05-15", extra_beds_checkout=1, extra_bed_days=2, final_payment=2250)
+    assert out["total_amount"] == q["total_due"] and out["balance_amount"] == 0
+
+
+def test_checkout_quote_shows_an_overpaid_guest_as_negative_and_rejects_bad_input(api):
+    api.seed("bookings", [booking(advance_paid=1500.0)])
+    checkin(api)
+    q = api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "2026-05-12"}).json()
+    assert q["amount_due_now"] == -500
+    assert api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "tomorrow"}).status_code == 400
+    assert api.client.get("/api/bookings/nope/checkout-quote").status_code == 404

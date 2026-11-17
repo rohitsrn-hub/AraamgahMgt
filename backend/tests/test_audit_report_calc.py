@@ -158,9 +158,10 @@ def test_combination_july_side():
     assert rooms["C2-09"]["nights"] == 0
     # Billed 29, 30, 31 Jul: C1-01 x3 @500, C2-08 x2 @600 (override), C2-09 x1 @400.
     assert fin["room_rent"] + fin["license_fee"] == 3 * 500 + 2 * 600 + 1 * 400
-    # Extra beds: 1 bed x Rs 75 x 2 physical nights + Rs 150 added at checkout (31 Jul).
-    assert fin["extra_bed_charge"] == 150 + 150
-    assert fin["total_amount"] == 3100 + 300
+    # Extra beds: only the Rs 150 settled at check-out (31 Jul); the bed noted
+    # at check-in (extra_beds=1) is information, not a charge.
+    assert fin["extra_bed_charge"] == 150
+    assert fin["total_amount"] == 3100 + 150
     assert round(sum(r["revenue"] for r in fin["rooms"]), 2) == fin["total_amount"]
 
 
@@ -180,7 +181,7 @@ def test_combination_months_add_up_to_the_whole():
     jul = booking_financials(bk, SETTINGS, *JUL, ROOM_MAPS)["total_amount"]
     aug = booking_financials(bk, SETTINGS, *AUG, ROOM_MAPS)["total_amount"]
     whole = booking_financials(bk, SETTINGS, *WHOLE, ROOM_MAPS)["total_amount"]
-    assert jul + aug == whole == 5200
+    assert jul + aug == whole == 5050
 
 
 def test_no_rupee_lost_or_doubled_across_month_boundaries():

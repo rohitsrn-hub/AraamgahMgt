@@ -46,6 +46,14 @@ How to run the tests (no database or server needed):
 - **Fixed: saving the Settings page re-priced old bookings.** After a scheduled rate change takes effect, Settings shows today's rate and sends it back on every Save, which overwrote the base rate that every booking dated before the change is priced from. Reproduced: a ₹1,000 July stay became ₹1,200 after an admin changed only the default advance. The live totals were intact at the time of the check (August still ₹2,29,900). Test: `test_saving_settings_after_a_rate_change_does_not_reprice_old_bookings`. Still open for the owner: typing a different rate into those fields (rather than saving unchanged ones) still rewrites the base rate and so past months — rate changes should only go through the Rate Schedule.
 - **Fixed: "last backup" was read wrongly.** Backup records exist as real dates (before 11 May) and as text (after); Mongo sorts every date above every text value, so the newest backup came back as 11 April 2026. That also made "Restore last backup" pick the April one and the overdue warning misjudge. Worked out in Python now; tests `test_latest_backup_is_the_newest_*`, `test_backup_status_*`, `test_restore_last_backup_picks_the_newest`. Whether backups have actually been running since May can only be read from the new `exposure.backups` block of the audit check.
 
+## B3. Owner's rulings on B1-B4 (18 Nov 2026) and what changed
+
+- **B3 extra beds:** charged only at check-out for beds x exact days used. Check-in no longer bills or counts them; reports count only the check-out charge. This lowers every past month's reported revenue by the check-in component (about ₹40,600 across April-November in the 18 Nov audit data, much of it double-counted where a bed was also charged at check-out).
+- **B2 late check-outs:** billed for nights actually stayed. Check-out now stores that bill (charge reason `late_checkout`); reports already counted those nights.
+- **B1 check-out screen:** now shows the server's bill (`/bookings/{id}/checkout-quote`) instead of its own elapsed-time arithmetic.
+- Also fixed in the same pass: the check-out screen's default date used UTC (a day behind between 00:00 and 05:30 IST); confirming a stay extension showed "Network error" after succeeding (`fetchBookings` did not exist).
+- **Still open:** B4 early check-in blocked on screen, B5 service data in the repository, B6 backup storage, B7 dashboard net revenue.
+
 ## C. Audit check (kept permanently)
 
 `GET /api/reports/audit-check` (admin-only, read-only) and the "Audit check" button on the Reports page. Built as temporary tooling for this audit; made permanent on the owner's instruction as the data source for the month-end check in `docs/month-end-reconciliation-agent.md`.

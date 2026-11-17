@@ -38,6 +38,18 @@ Vercel site the same day. Never push half-done work.
 - After changing anything report-related, check
   `GET /api/reports/reconcile?month=&year=` returns `consistent: true`.
 
+## Billing rulings (owner, Nov 2026 — not open questions)
+- **Extra beds** are charged ONLY at check-out: beds used x exact days used x
+  Rs 75. A bed noted at check-in is information and is never billed or
+  counted as revenue. (`booking_financials` counts only
+  `extra_bed_charge_checkout`, in the month of the actual check-out.)
+- **Late check-out** is billed for the nights actually stayed, to the check-out
+  date entered. **Early check-out** is billed for actual nights only if the
+  guest said so at check-in, otherwise for the full booked stay.
+- The check-out screen shows the SERVER's bill (`GET /bookings/{id}/checkout-quote`,
+  the same function `check_out` stores). Never re-add client-side bill maths.
+- The Reports page "Audit check" audits only the previous closed month, by design.
+
 ## Hard data rules
 - NEVER store or digitize: military rank, Army/service number, unit, or any
   service data. These are paper-only by policy (see the Org Data Form PDF).

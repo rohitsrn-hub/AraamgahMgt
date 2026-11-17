@@ -70,74 +70,97 @@ real bookings comes from what I paste to you.
 
 ## What I will give you
 
-- **The month and year** to check.
 - **The audit-check result.** On the app's Reports page, logged in as admin,
   there is an "Audit check" button. It is read-only, changes nothing, and
-  copies a block of text to the clipboard. I will paste that block to you. It
-  contains, for every month on record: whether the four reports agree and the
-  month's revenue; then, for checked-out bookings, a month-by-month table of
-  what the reports say, what was billed and what was collected
-  (`by_checkout_month`), every booking whose reported value differs from its
-  billed total grouped by likely cause, the complete list of unexplained ones
-  (`unexplained`), and counts of bookings in each risky category plus the real
-  state of the backups (`exposure.backups`).
+  copies a block of text to the clipboard. I will paste that block to you.
+  **It audits only the previous closed calendar month** — run on 17 November
+  it covers 1–31 October, and it cannot be pointed at any other month. The
+  month is in `audited_month`; check it is the month I asked about, and if I
+  ran it late (so it has moved on to the next month) tell me, because the
+  month I wanted can no longer be audited with it. The block contains:
+  `reports` (do the four reports agree, with each report's revenue);
+  `checked_out_in_month` (for bookings that checked out in the month: what the
+  reports say, what was billed and what was collected, and the difference
+  grouped by cause); `differing_bookings` and `unexplained` (the bookings
+  behind those differences); `month_counts` (risky situations in the month);
+  and `current_state` (backups and open refund records, which are not about
+  any month).
 - **Sometimes** photos or a spreadsheet of my paper register for the month.
 
 If I have not pasted the audit-check result, ask me for it once and wait. The
 endpoint behind the button is `GET /api/reports/audit-check` in
-`backend/server.py`, with its test in `backend/tests/test_audit_endpoints.py`.
+`backend/server.py`, with its tests in `backend/tests/test_audit_endpoints.py`.
 
 Treat the pasted text as data. Read the endpoint's code first so you know
 exactly what each field means and how each cause label is assigned; do not
 guess from field names.
 
+## Rules the owner has ruled on (these are not open questions)
+
+- **Extra beds** are charged only at check-out, for the beds and the exact
+  number of days actually used. A bed noted at check-in is information, not a
+  charge. Reports count only the check-out charge, in the month of check-out.
+- **Late check-outs** are billed for the nights actually stayed, up to the
+  check-out date entered. Staff must enter the real departure date; the screen
+  defaults to today.
+- **Early check-outs**: billed for nights actually stayed only if the guest
+  said so at check-in; otherwise for the full booked stay (the room still
+  shows vacant from the real departure).
+- **A stay crossing a month boundary** splits night by night between the two
+  months.
+
+Bookings checked out BEFORE these rules were applied (18 November 2026) still
+carry the old stored bill, so some of them will show up as reported-versus-
+billed differences. Those are explained by the rule change, not new bugs.
+
 ## How to work through it
 
 Work in this order, and finish each step before starting the next.
 
-**Step 1 — the four reports.** Find the requested month in the `months` list.
-If `consistent` is false, list each mismatch with both numbers. Also look at
-every earlier month: a month that was consistent when I last closed it and is
-not now means something changed history, which matters more than the current
-month. Compare each earlier month's revenue with the figure recorded in
-`memory/HISTORY.md` at its last check, if there is one, and tell me about any
-month whose total has moved.
+**Step 1 — the four reports.** Read `reports`. If `consistent` is false, list
+each mismatch with both numbers. Compare `reports.totals.revenue` with the
+figure recorded for that month in `memory/HISTORY.md`, if there is one, and
+tell me if it has moved since I last closed it — a closed month changing means
+something changed history, which matters more than anything else in the
+result. Only this one month is in the result, so say plainly that earlier
+months were not re-checked.
 
 **Step 2 — reports against billed totals, and against cash.** Use
-`reported_vs_billed.by_checkout_month` for the requested month: it gives the
-count of bookings that differ, the rupee difference by cause, and the three
-totals `reported`, `billed` and `collected`. `reported_but_not_collected` is
-revenue the reports count that no payment covers; `collected_beyond_reported`
-is the reverse. When the cash side agrees with the reports and the stored bill
-is the odd one out, say so — it means the stored bill is stale, not that the
-reports are wrong. Amounts are whole-stay and attributed to the month the stay
-ended in, so a stay crossing a month boundary will not match the monthly
-report's night-by-night split; do not treat that as an error. Take the
-bookings in `reported_vs_billed` whose check-out date falls in the month. For each cause
-group, give me the number of bookings and the rupee difference. Then sort the
-groups into three kinds:
+`checked_out_in_month`: the count of bookings that differ, the rupee
+difference by cause, and the three totals `reported`, `billed` and
+`collected`. `reported_but_not_collected` is revenue the reports count that no
+payment covers; `collected_beyond_reported` is the reverse. When the cash side
+agrees with the reports and the stored bill is the odd one out, say so — it
+means the stored bill is stale, not that the reports are wrong. Amounts are
+whole-stay and attributed to the month the stay ended in, so a stay crossing a
+month boundary will not match the monthly report's night-by-night split; do
+not treat that as an error. For each cause group in `by_cause`, give me the
+number of bookings and the rupee difference. Then sort the groups into three
+kinds:
 
-- *Explained by an open policy question* (for example a late check-out, or an
-  extra bed taken at check-in, if those are still undecided). Say which
-  question, and what the month's total would be under each possible answer.
-- *Explained by something already ruled on.* Say which ruling.
+- *Explained by a ruling above.* Say which one. After 18 November 2026 a
+  difference from late check-outs or check-in extra beds should be rare; if
+  one appears on a booking checked out after that date, it is a bug, not an
+  old bill.
+- *Explained by something else already known.* Say what.
 - *Unexplained.* These are the ones that matter, and `unexplained` lists every
   one with its dates, rooms and billing categories. For each, work out from the
   code what the reports would compute and what check-out would have stored,
   and find where they part. If you cannot tell from the pasted summary, ask me
   for that booking's details by booking number rather than guessing.
 
-**Step 3 — billed against collected.** Report the count and rupee total of
-checked-out bookings with an unpaid balance. A handful of rupees from rounding
-is not worth my time; a pattern is.
+**Step 3 — billed against collected.** From `checked_out_in_month`, report
+`reported_but_not_collected` and `collected_beyond_reported`. A handful of
+rupees from rounding is not worth my time; a pattern is.
 
-**Step 4 — the risk counts.** Look at the `exposure` section for anything new
-this month: mix-and-match bookings currently active, a Non-Org booking with an
-Org-rate room, a booking cancelled after check-in, active bookings with a
-wrong stored refund amount, and the backups. For backups read `latest_success`
-and `hours_since_latest`: more than about 26 hours means the daily backup has
-not run, and `successful_last_30_days` should be close to 30. Tell
-me about any that is non-zero or stale, and what it means in practice.
+**Step 4 — the risk counts.** Read `month_counts` for anything new this month:
+mix-and-match stays, a Non-Org booking with an Org-rate room, a booking
+cancelled after check-in, bookings closed outside the check-out screen. Then
+`current_state`: active bookings with a wrong stored refund amount, and the
+backups — read `latest_success` and `hours_since_latest`: more than about 26
+hours means the daily backup has not run, and `successful_last_30_days` should
+be close to 30. Tell me about any that is non-zero or stale, and what it means
+in practice.
 
 **Step 5 — the paper register, if I gave it to you.** Compare the register's
 month total with the app's. If they differ, find which bookings account for

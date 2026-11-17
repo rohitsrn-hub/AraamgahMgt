@@ -15,7 +15,14 @@ Conventions (applied identically in all reports):
   vacancy/occupancy% uses — always follows this.
 - Statuses counted: confirmed, checked_in, checked_out. Cancelled never counts.
 - Money = per-room (room_rent + license_fee) x billed-nights-in-period
-          + extra_beds x EXTRA_BED_RATE x nights-in-period.
+          + the extra-bed charge settled at check-out (see below).
+- Extra beds are charged ONLY at check-out, for the beds and exact days
+  actually used (owner ruling, Nov 2026) and counted in whichever period
+  contains the actual check-out date. A bed noted at check-in (`extra_beds`)
+  is information only and is never revenue: it used to be counted as
+  beds x Rs 75 x nights, which overstated revenue for guests who never took
+  one and counted it twice for those who did and were then charged at
+  check-out.
   Rates come from the room's own category (a Cat II room in a mixed booking is
   billed at Cat II, not at the booking's "first" category).
 - billed-nights-in-period is identical to nights-in-period, EXCEPT for a
@@ -310,13 +317,12 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
                           though its money is now correct.
         room_rent         sum of room-rent across rooms (billed_nights basis)
         license_fee       sum of license fees across rooms (billed_nights basis)
-        extra_bed_charge  extra_beds x EXTRA_BED_RATE x nights, PLUS any extra
-                          bed added at checkout (extra_bed_charge_checkout —
-                          a flat amount with no stored date range, so counted
-                          entirely in whichever period contains the actual
-                          checkout date, the one date it's really tied to).
-                          Physical basis; no ruling covers extra beds for an
-                          early-checkout penalty, so unaffected by billed_nights.
+        extra_bed_charge  the extra-bed charge settled at checkout
+                          (extra_bed_charge_checkout = beds x days used x
+                          EXTRA_BED_RATE — a flat amount with no stored date
+                          range, so counted entirely in whichever period
+                          contains the actual checkout date, the one date
+                          it's really tied to). Unaffected by billed_nights.
         total_amount      room_rent + license_fee + extra_bed_charge
     """
     is_org = bk.get("is_org", False)
@@ -324,10 +330,10 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
     billed_nights = billing_nights_in_period(bk, period_start, period_end)
     charge_categories = _room_charge_categories(bk)
 
-    # An extra bed added at checkout (separate from extra_beds, set at booking
-    # time) is settled as one flat amount with no stored date range — the
-    # only date it's really tied to is the actual checkout, so it counts
-    # entirely in whichever period contains that date.
+    # Extra beds are settled at check-out as one flat amount (beds x days
+    # used x rate) with no stored date range — the only date it's really tied
+    # to is the actual checkout, so it counts entirely in whichever period
+    # contains that date.
     checkout_extra_bed_charge = 0.0
     if bk.get("status") == "checked_out":
         actual_checkout = _parse_date(bk.get("actual_checkout_date"))
@@ -383,7 +389,7 @@ def booking_financials(bk: dict, settings: dict, period_start: date, period_end:
                 room_rent_total += rent * billed_nights
                 license_total += lf * billed_nights
 
-    extra_bed_charge = (bk.get("extra_beds", 0) or 0) * EXTRA_BED_RATE * nights + checkout_extra_bed_charge
+    extra_bed_charge = checkout_extra_bed_charge
 
     for i, room in enumerate(rooms_out):
         room["revenue"] = round(

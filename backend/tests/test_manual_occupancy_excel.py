@@ -71,7 +71,8 @@ def test_workbook_rows_and_totals():
         _booking(),
         _booking(booking_number="BKTEST2", is_org=False,
                   room_numbers=["C2-08"], room_categories=["Cat II"],
-                  extra_beds=1, guest_name="Second Guest", guest_contact="+91 9123456789"),
+                  extra_bed_charge_checkout=75, actual_checkout_date="2026-06-11",
+                  guest_name="Second Guest", guest_contact="+91 9123456789"),
     ]
     db = _FakeDB(bookings, {}, ROOMS)
 
@@ -98,7 +99,7 @@ def test_workbook_rows_and_totals():
     assert ws["H3"].value == 1
     assert ws["N3"].value == 500.0
 
-    # Row 2: Cat II non-org guest, 1 night, 1 extra bed -> 570 + 30 + 75 = 675
+    # Row 2: Cat II non-org guest, 1 night, 1 extra bed-night charged at check-out -> 570 + 30 + 75 = 675
     assert ws["F4"].value == "Non-Org"
     assert ws["N4"].value == 675.0
 

@@ -53,33 +53,40 @@ def booking(**overrides):
 
 
 class TestExtraBeds:
-    """Root cause #1 — the ₹75 signature. Occupancy dropped extra-bed money."""
+    """Extra beds are charged ONLY at check-out, for the beds and days actually
+    used (owner ruling, Nov 2026). History: root cause #1 of the July 2026
+    reconciliation was occupancy dropping extra-bed money (the Rs 75
+    signature); the rule that fixed it counted beds noted at check-in x Rs 75
+    x nights, which the owner has since ruled wrong — guests often ask for a
+    bed partway through, and the bill at check-out is the charge."""
 
-    def test_one_extra_bed_one_night(self):
-        # Evidence case BK0146: Occ ₹500 vs Alloc ₹575 — gap exactly 1 x 75
+    def test_a_bed_noted_at_checkin_is_not_revenue(self):
         fin = booking_financials(booking(extra_beds=1), SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
-        assert fin["total_amount"] == 575.0
-        assert fin["extra_bed_charge"] == 75.0
+        assert fin["total_amount"] == 500.0
+        assert fin["extra_bed_charge"] == 0.0
 
-    def test_extra_beds_multiple_nights(self):
-        # Evidence case BK0123 shape: 4 nights Cat I + 4 extra beds -> 2000 + 1200
+    def test_extra_bed_is_what_was_charged_at_checkout_for_the_days_used(self):
+        # 4 nights Cat I; 2 beds used for 3 of them -> 2 x 3 x 75 charged at check-out
         fin = booking_financials(
-            booking(check_out_date="2026-05-14", extra_beds=4),
+            booking(check_out_date="2026-05-14", status="checked_out", actual_checkout_date="2026-05-14",
+                    extra_beds_checkout=2, extra_bed_days=3, extra_bed_charge_checkout=2 * 3 * EXTRA_BED_RATE),
             SETTINGS, MAY_START, MAY_END, ROOM_MAPS,
         )
         assert fin["nights"] == 4
         assert fin["room_rent"] + fin["license_fee"] == 2000.0
-        assert fin["extra_bed_charge"] == 4 * EXTRA_BED_RATE * 4
-        assert fin["total_amount"] == 3200.0
+        assert fin["extra_bed_charge"] == 450.0
+        assert fin["total_amount"] == 2450.0
 
     def test_per_room_revenues_sum_to_total(self):
         # Occupancy credits rooms individually; the sum must equal the booking
         # total so occupancy and allotment can never diverge again.
         fin = booking_financials(
             booking(room_numbers=["C1-01", "C2-08"], room_categories=["Cat I", "Cat II"],
-                    extra_beds=2, check_out_date="2026-05-13"),
+                    status="checked_out", actual_checkout_date="2026-05-13", extra_bed_charge_checkout=150,
+                    check_out_date="2026-05-13"),
             SETTINGS, MAY_START, MAY_END, ROOM_MAPS,
         )
+        assert fin["extra_bed_charge"] == 150
         assert round(sum(r["revenue"] for r in fin["rooms"]), 2) == fin["total_amount"]
 
 
@@ -442,14 +449,14 @@ class TestExtraBedAddedAtCheckout:
         fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
         assert fin["extra_bed_charge"] == 0.0
 
-    def test_adds_to_not_replaces_booking_time_extra_beds(self):
+    def test_checkin_bed_count_never_adds_to_the_checkout_charge(self):
         bk = booking(
             check_in_date="2026-05-10", check_out_date="2026-05-12",
             actual_checkout_date="2026-05-12", extra_beds=1,
             extra_bed_charge_checkout=150,
         )
         fin = booking_financials(bk, SETTINGS, MAY_START, MAY_END, ROOM_MAPS)
-        assert fin["extra_bed_charge"] == (1 * 75.0 * 2) + 150
+        assert fin["extra_bed_charge"] == 150  # the check-in bed (extra_beds=1) is not charged on top
 
     def test_a_booking_with_zero_nights_here_still_appears_for_its_checkout_extra_bed(self):
         # Guards the fin["rooms"] gate: a checkout-only charge in a period

@@ -68,9 +68,13 @@ export function generateCheckoutReceipt(booking, settings) {
   const checkInDate = format(new Date(checkInDateRaw), "dd MMM");
   const checkOutDate = format(new Date(checkOutDateRaw), "dd MMM");
   
-  const nights = Math.ceil(
-    (new Date(checkOutDateRaw) - new Date(checkInDateRaw)) / 86400000
-  );
+  // A checked-out booking carries the nights it was actually billed for (late check-outs
+  // included); only fall back to the timestamps for a booking that has not been through
+  // check-out yet.
+  const billedFromServer = booking.charged_nights !== undefined && booking.charged_nights !== null;
+  const nights = billedFromServer
+    ? booking.charged_nights
+    : Math.ceil((new Date(checkOutDateRaw) - new Date(checkInDateRaw)) / 86400000);
 
   // Guest info
   doc.setFillColor(...LIGHT_GRAY);
@@ -124,7 +128,11 @@ export function generateCheckoutReceipt(booking, settings) {
     return rent + licenseFee;
   };
 
-  if (roomGuestMapping.length > 0) {
+  if (billedFromServer) {
+    // The bill check-out stored is the authority (same calculation as the check-out screen and
+    // every report): total less the extra-bed charge settled at check-out.
+    totalRoomCharges = (booking.total_amount || 0) - (booking.extra_bed_charge_checkout || 0);
+  } else if (roomGuestMapping.length > 0) {
     // Use room-guest mapping for accurate calculation (considers org cards per room)
     roomGuestMapping.forEach(room => {
       const category = room.room_category || "Cat I";
@@ -159,7 +167,7 @@ export function generateCheckoutReceipt(booking, settings) {
   
   // Build table rows
   const tableRows = [
-    ["Room Charges", `${fmtINR(totalRoomCharges / nights, 0)} × ${nights} night(s) × ${numRooms} room(s)`, fmtINR(totalRoomCharges, 2)]
+    ["Room Charges", `${fmtINR(nights > 0 ? totalRoomCharges / (nights * numRooms) : 0, 0)} avg × ${nights} night(s) × ${numRooms} room(s)`, fmtINR(totalRoomCharges, 2)]
   ];
   
   // Add extra beds if any (actual usage at checkout)

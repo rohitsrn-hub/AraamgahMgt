@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import re
 import uuid
+import calendar
 from datetime import datetime, timezone, timedelta, date as date_type
 from enum import Enum
 
@@ -38,6 +39,7 @@ from utils.report_calc import (
     effective_rate_settings,
     stay_charges,
     cancellation_refund,
+    EXTRA_BED_RATE,
     RATE_FIELDS,
 )
 from utils.manual_occupancy_excel import build_manual_occupancy_workbook
@@ -2466,12 +2468,15 @@ async def check_in(request: CheckInRequest, current_user: dict = Depends(require
     new_room_rent_total = charges["room_rent"]
     new_license_fee_total = charges["license_fee"]
 
-    # Calculate extra bed charge
-    extra_bed_charge = request.extra_beds * 75.0
+    # Extra beds are charged at CHECK-OUT, for the beds and days actually
+    # used (owner ruling, Nov 2026) — a guest often asks for one only partway
+    # through the stay. The number noted here is for information; it adds
+    # nothing to the bill or the balance.
+    extra_bed_charge = 0.0
 
     # Recalculate total and balance
     new_total_amount = new_room_rent_total + new_license_fee_total
-    new_balance = new_total_amount + extra_bed_charge - booking.get("advance_paid", 0.0)
+    new_balance = new_total_amount - booking.get("advance_paid", 0.0)
 
     # Build update fields — only overwrite non-None values
     update_fields = {
@@ -2595,6 +2600,100 @@ async def update_booking_rooms(booking_id: str, request: dict, current_user: dic
     updated_booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     return {"message": "Room assignments updated", "booking": updated_booking}
 
+async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds: int, extra_bed_days: int) -> dict:
+    """What a guest owes at check-out — the ONE calculation behind both the
+    check-out screen's quote and the bill check_out() stores, so the amount
+    staff collect, the stored total and every report can't differ.
+
+    Owner rulings (Nov 2026):
+      * Nights are billed for the nights actually stayed. A late check-out
+        (actual date after the booked one) is billed to the actual date.
+      * An early check-out is billed for the actual nights only if the guest
+        said so at check-in; otherwise for the full booked term (accountant
+        ruling, Sep 2026) — the room still shows vacant from the real
+        departure.
+      * Extra beds are charged here, at check-out, for the beds and the exact
+        number of days actually used — never at check-in.
+    """
+    settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
+    room_maps = build_room_maps(await db.rooms.find({}, {"_id": 0}).to_list(500))
+
+    check_in_dt = date_type.fromisoformat(str(booking["check_in_date"]).split("T")[0])
+    booked_out_dt = date_type.fromisoformat(str(booking["check_out_date"]).split("T")[0])
+    actual_checkout_date = request_date or ist_today_str()
+    try:
+        actual_dt = date_type.fromisoformat(actual_checkout_date)
+    except (ValueError, TypeError):
+        # Was an unhandled 500 ("Check-out failed") with no usable message.
+        raise HTTPException(status_code=400, detail="Checkout date must be a valid YYYY-MM-DD date")
+
+    priced = booking
+    if actual_dt < booked_out_dt:
+        if booking.get("planned_early_checkout_date"):
+            charged_nights, charge_reason = (actual_dt - check_in_dt).days, "early_checkout_informed"
+        else:
+            charged_nights, charge_reason = (booked_out_dt - check_in_dt).days, "early_checkout_not_informed"
+    elif actual_dt > booked_out_dt:
+        charged_nights, charge_reason = (actual_dt - check_in_dt).days, "late_checkout"
+        # Price the extra nights in the rooms the guest was in on the last
+        # booked night (for a mix & match stay this also adds the nights to
+        # its night plan, which is what the reports read).
+        priced = _booking_with_extension(booking, actual_checkout_date, room_maps)
+    else:
+        charged_nights, charge_reason = (booked_out_dt - check_in_dt).days, "normal"
+    charged_nights = max(0, charged_nights)
+
+    charges = stay_charges(priced, settings, room_maps, charged_nights)
+    if charges["rooms"] or charged_nights == 0:
+        room_rent_only, license_fee_only = charges["room_rent"], charges["license_fee"]
+    else:
+        # Rooms can't be resolved at all (e.g. deleted since): fall back to
+        # what check-in stored rather than bill Rs 0.
+        original_nights = (booked_out_dt - check_in_dt).days
+        factor = (charged_nights / original_nights) if original_nights > 0 else 1
+        room_rent_only = (booking.get("room_rent_total", 0) or 0) * factor
+        license_fee_only = (booking.get("license_fee_total", 0) or 0) * factor
+
+    extra_bed_charge = max(0, extra_beds or 0) * max(0, extra_bed_days or 0) * EXTRA_BED_RATE
+    room_total = room_rent_only + license_fee_only
+    total_due = room_total + extra_bed_charge
+    advance_paid = booking.get("advance_paid", 0) or 0
+    return {
+        "actual_checkout_date": actual_checkout_date,
+        "charged_nights": charged_nights,
+        "charge_reason": charge_reason,
+        "room_rent": room_rent_only,
+        "license_fee": license_fee_only,
+        "room_total": round(room_total, 2),
+        "extra_bed_charge": round(extra_bed_charge, 2),
+        "total_due": round(total_due, 2),
+        "advance_paid": advance_paid,
+        "amount_due_now": round(total_due - advance_paid, 2),  # negative = guest overpaid
+        "priced_booking": priced,
+    }
+
+
+@api_router.get("/bookings/{booking_id}/checkout-quote")
+async def checkout_quote(
+    booking_id: str,
+    actual_checkout_date: Optional[str] = None,
+    extra_beds: int = 0,
+    extra_bed_days: int = 0,
+    current_user: dict = Depends(require_staff_or_admin_role),
+):
+    """The bill check-out would produce for these inputs, without changing
+    anything. The check-out screen shows this number so it can never differ
+    from what is stored."""
+    booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking["status"] != BookingStatus.CHECKED_IN.value:
+        raise HTTPException(status_code=400, detail="Booking is not checked in")
+    bill = await _checkout_bill(booking, actual_checkout_date, extra_beds, extra_bed_days)
+    bill.pop("priced_booking")
+    return bill
+
+
 @api_router.post("/bookings/check-out")
 async def check_out(request: CheckOutRequest, current_user: dict = Depends(require_staff_or_admin_role)):
     booking = await db.bookings.find_one({"id": request.booking_id}, {"_id": 0})
@@ -2605,72 +2704,16 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
         raise HTTPException(status_code=400, detail="Booking is not checked in")
     
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Get settings for rate calculation
-    settings = await db.app_settings.find_one({}, {"_id": 0})
-    
-    # Calculate charges based on early checkout logic
-    original_check_in = booking["check_in_date"]
-    original_check_out = booking["check_out_date"]
-    planned_early_checkout = booking.get("planned_early_checkout_date")  # Informed at check-in
-    actual_checkout_date = request.actual_checkout_date or ist_today_str()
-    
-    # Parse dates
-    check_in_dt = datetime.fromisoformat(original_check_in.replace('Z', '+00:00')).date() if isinstance(original_check_in, str) else original_check_in
-    original_checkout_dt = datetime.fromisoformat(original_check_out.replace('Z', '+00:00')).date() if isinstance(original_check_out, str) else original_check_out
-    try:
-        actual_checkout_dt = datetime.strptime(actual_checkout_date, "%Y-%m-%d").date()
-    except (ValueError, TypeError):
-        # Was an unhandled 500 ("Check-out failed") with no usable message.
-        raise HTTPException(status_code=400, detail="Checkout date must be a valid YYYY-MM-DD date")
-    
-    # Determine which nights to charge
-    if actual_checkout_dt < original_checkout_dt:
-        # Early checkout scenario
-        if planned_early_checkout:
-            # Guest informed at check-in → charge only actual days
-            charged_nights = (actual_checkout_dt - check_in_dt).days
-            charge_reason = "early_checkout_informed"
-        else:
-            # Guest did NOT inform at check-in → charge full booking
-            charged_nights = (original_checkout_dt - check_in_dt).days
-            charge_reason = "early_checkout_not_informed"
-    else:
-        # Normal or late checkout → charge booked nights
-        charged_nights = (original_checkout_dt - check_in_dt).days
-        charge_reason = "normal"
-    
-    # Room charges for the charged nights, from report_calc.stay_charges() —
-    # the same per-room calculation check-in and every report use (honours
-    # the per-room Non-Org override, the check-in-date rate, and mix & match
-    # segments). This replaces two hand-rolled copies: one that re-derived
-    # rates from room_guest_mapping, and a fallback for bookings without a
-    # mapping that divided the room total STORED AT CHECK-IN by the CURRENT
-    # number of booked nights — after a stay extension that total was stale,
-    # so the guest's whole extension came out free.
-    charged_nights = max(0, charged_nights)
-    all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(500)
-    charges = stay_charges(booking, settings or {}, build_room_maps(all_rooms), charged_nights)
-    if charges["rooms"] or charged_nights == 0:
-        room_rent_only = charges["room_rent"]
-        license_fee_only = charges["license_fee"]
-    else:
-        # Rooms can't be resolved at all (e.g. deleted since): fall back to
-        # what check-in stored rather than bill Rs 0.
-        original_nights = (original_checkout_dt - check_in_dt).days
-        factor = (charged_nights / original_nights) if original_nights > 0 else 1
-        room_rent_only = (booking.get("room_rent_total", 0) or 0) * factor
-        license_fee_only = (booking.get("license_fee_total", 0) or 0) * factor
-    room_rent_recalculated = room_rent_only + license_fee_only
 
-    # Calculate extra bed charges
-    extra_bed_charge_checkout = (request.extra_beds_checkout or 0) * (request.extra_bed_days or 0) * 75
-    
-    # Total amount due
-    total_amount_due = room_rent_recalculated + extra_bed_charge_checkout
-    
-    # Balance after subtracting advance
-    advance_paid = booking.get("advance_paid", 0)
+    bill = await _checkout_bill(booking, request.actual_checkout_date, request.extra_beds_checkout, request.extra_bed_days)
+    actual_checkout_date = bill["actual_checkout_date"]
+    charged_nights = bill["charged_nights"]
+    charge_reason = bill["charge_reason"]
+    room_rent_only = bill["room_rent"]
+    license_fee_only = bill["license_fee"]
+    extra_bed_charge_checkout = bill["extra_bed_charge"]
+    total_amount_due = bill["total_due"]
+    advance_paid = bill["advance_paid"]
     final_balance = total_amount_due - advance_paid
     
     # Build update fields
@@ -2692,6 +2735,9 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
         "updated_at": now
     }
     
+    if charge_reason == "late_checkout" and bill["priced_booking"].get("room_segments"):
+        update_fields["room_segments"] = bill["priced_booking"]["room_segments"]
+
     # Optional fields
     optional_fields = {
         "payment_mode": request.payment_mode,
@@ -4171,7 +4217,6 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
 
     for bk in bookings:
         fin = booking_financials(bk, settings, month_start, month_end, room_maps)
-        nights = fin["nights"]
         # Not "nights == 0": an uninformed early checkout can be a real 0-night
         # occupant of this month while still owing penalty (billed_nights)
         # revenue here — fin["rooms"] is empty only when truly neither applies.
@@ -4213,7 +4258,7 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
                 non_org_room_rent_total += room["room_rent"]
                 non_org_license_fee_total += room["license_fee"]
 
-        extra_beds_total += (bk.get("extra_beds", 0) or 0) * nights
+        extra_beds_total += round(fin["extra_bed_charge"] / EXTRA_BED_RATE)  # bed-nights actually charged
         # fin["extra_bed_charge"] also carries a bed added at checkout
         # (extra_bed_charge_checkout), which extra_beds_total above can't
         # represent as a night count — money must come from here, not from
@@ -4837,80 +4882,71 @@ async def _backup_summary() -> dict:
     }
 
 
+def previous_closed_month(today_str: str) -> tuple:
+    """(year, month) of the calendar month before the one `today_str` falls in."""
+    year, month = int(today_str[:4]), int(today_str[5:7])
+    return (year - 1, 12) if month == 1 else (year, month - 1)
+
+
 @api_router.get("/reports/audit-check")
 async def audit_check(current_user: dict = Depends(require_admin_role)):
+    """Month-end audit of the PREVIOUS CLOSED MONTH only (owner's rule: run on
+    17 Nov and it audits 1-31 Oct; there is deliberately no way to point it at
+    another month). Read-only.
+
+    Answers, for that month: do the four reports agree with each other; for
+    the bookings that CHECKED OUT in it, do the reports agree with what each
+    guest was billed and with what was collected; and a few counts of risky
+    situations. A final block reports the current state of things that are
+    not about any month (backups, open refund records)."""
+    today = ist_today_str()
+    year, month = previous_closed_month(today)
+    month_key = f"{year}-{month:02d}"
+    last_day = calendar.monthrange(year, month)[1]
+    period_start, period_end = date_type(year, month, 1), date_type(year, month, last_day)
+
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
     room_maps = build_room_maps(await db.rooms.find({}, {"_id": 0}).to_list(500))
     bookings = await db.bookings.find({}, {"_id": 0}).to_list(20000)
     wide_start, wide_end = date_type(2000, 1, 1), date_type(2100, 1, 1)
 
-    # 1. Do the four reports agree with each other, for EVERY month on record?
-    months = []
-    check_ins = sorted(b["check_in_date"][:7] for b in bookings if b.get("check_in_date"))
-    if check_ins:
-        year, month = int(check_ins[0][:4]), int(check_ins[0][5:7])
-        today = ist_today_str()
-        while f"{year}-{month:02d}" <= today[:7]:
-            try:
-                rec = await reconcile_reports(month=month, year=year)
-                months.append({
-                    "month": f"{year}-{month:02d}",
-                    "consistent": rec["consistent"],
-                    "revenue": rec["totals"]["revenue"]["room_allotment"],
-                    "mismatches": rec["mismatches"],
-                })
-            except Exception as e:  # report the failure, don't hide it
-                months.append({"month": f"{year}-{month:02d}", "consistent": False, "error": str(e)})
-            month += 1
-            if month == 13:
-                year, month = year + 1, 1
+    # 1. Do the four reports agree with each other for this month?
+    try:
+        rec = await reconcile_reports(month=month, year=year)
+        reports = {"consistent": rec["consistent"], "mismatches": rec["mismatches"], "totals": rec["totals"]}
+    except Exception as e:  # report the failure, don't hide it
+        reports = {"consistent": False, "error": str(e)}
 
-    # 2. Do the reports agree with what each guest was actually billed and paid?
-    def ist_date(iso_ts):
-        try:
-            return datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00")).astimezone(IST).date().isoformat()
-        except (ValueError, TypeError):
-            return None
+    # 2. For bookings that checked out in the month: reported vs billed vs
+    # collected. Whole-stay amounts, attributed to the month the stay ended
+    # in — a stay crossing a month boundary will not match the monthly
+    # report's night-by-night split, which is expected.
+    def checkout_month(b):
+        return (b.get("actual_checkout_date") or b.get("check_out_date") or "")[:7]
 
-    drift, tag_totals = [], {}
-    # Per CHECK-OUT month, whole-stay amounts: what the reports say each
-    # booking is worth, what its stored bill says, and what was actually
-    # collected (advance + final payment). A stay that crosses a month is
-    # attributed whole to the month it ended in — these are for comparing
-    # reported money with cash, not a substitute for the monthly report.
-    by_month, unexplained = {}, []
-    uncollected_count, uncollected_sum = 0, 0.0
-    for b in bookings:
-        if b.get("status") != BookingStatus.CHECKED_OUT.value:
-            continue
+    checked_out = [b for b in bookings if b.get("status") == BookingStatus.CHECKED_OUT.value and checkout_month(b) == month_key]
+    summary = {"checked_out": len(checked_out), "reported": 0.0, "billed": 0.0, "collected": 0.0,
+               "reported_but_not_collected": 0.0, "collected_beyond_reported": 0.0,
+               "differ_from_billed": 0, "reported_minus_billed": 0.0, "by_cause": {}}
+    differing, unexplained = [], []
+    for b in checked_out:
         reported = booking_financials(b, settings, wide_start, wide_end, room_maps)["total_amount"]
         billed = round(b.get("total_amount", 0) or 0, 2)
         collected = round((b.get("advance_paid", 0) or 0) + (b.get("final_payment", 0) or 0), 2)
-        if "charged_nights" in b and abs(collected - billed) > 0.5:
-            uncollected_count += 1
-            uncollected_sum += billed - collected
-        month_key = ((b.get("actual_checkout_date") or b.get("check_out_date") or "")[:7]) or "unknown"
-        m = by_month.setdefault(month_key, {
-            "checked_out": 0, "reported": 0.0, "billed": 0.0, "collected": 0.0,
-            "reported_but_not_collected": 0.0, "collected_beyond_reported": 0.0,
-            "differ_from_billed": 0, "reported_minus_billed": 0.0, "by_cause": {}})
-        m["checked_out"] += 1
-        m["reported"] = round(m["reported"] + reported, 2)
-        m["billed"] = round(m["billed"] + billed, 2)
-        m["collected"] = round(m["collected"] + collected, 2)
+        summary["reported"] = round(summary["reported"] + reported, 2)
+        summary["billed"] = round(summary["billed"] + billed, 2)
+        summary["collected"] = round(summary["collected"] + collected, 2)
         if reported - collected > 0.5:
-            m["reported_but_not_collected"] = round(m["reported_but_not_collected"] + reported - collected, 2)
+            summary["reported_but_not_collected"] = round(summary["reported_but_not_collected"] + reported - collected, 2)
         elif collected - reported > 0.5:
-            m["collected_beyond_reported"] = round(m["collected_beyond_reported"] + collected - reported, 2)
+            summary["collected_beyond_reported"] = round(summary["collected_beyond_reported"] + collected - reported, 2)
         if abs(reported - billed) <= 0.5:
             continue
-        m["differ_from_billed"] += 1
-        m["reported_minus_billed"] = round(m["reported_minus_billed"] + reported - billed, 2)
         tags = []
         if (b.get("actual_checkout_date") or "") > (b.get("check_out_date") or ""):
             tags.append("late_checkout")
-        if (b.get("extra_beds", 0) or 0) > 0:
-            tags.append("checkin_extra_bed")
+        if (b.get("extra_bed_charge_checkout", 0) or 0) > 0:
+            tags.append("checkout_extra_bed")
         if b.get("room_segments"):
             tags.append("mix_match")
         if b.get("is_amended"):
@@ -4920,30 +4956,46 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         if b.get("charge_reason") == "early_checkout_not_informed":
             tags.append("penalty")
         tag = "+".join(tags) or "unexplained"
-        t = tag_totals.setdefault(tag, {"bookings": 0, "reported_minus_billed": 0.0})
-        t["bookings"] += 1
-        t["reported_minus_billed"] = round(t["reported_minus_billed"] + reported - billed, 2)
-        mt = m["by_cause"].setdefault(tag, {"bookings": 0, "reported_minus_billed": 0.0})
-        mt["bookings"] += 1
-        mt["reported_minus_billed"] = round(mt["reported_minus_billed"] + reported - billed, 2)
+        summary["differ_from_billed"] += 1
+        summary["reported_minus_billed"] = round(summary["reported_minus_billed"] + reported - billed, 2)
+        cause = summary["by_cause"].setdefault(tag, {"bookings": 0, "reported_minus_billed": 0.0})
+        cause["bookings"] += 1
+        cause["reported_minus_billed"] = round(cause["reported_minus_billed"] + reported - billed, 2)
+        row = {"bk": b.get("booking_number"), "out": b.get("actual_checkout_date") or b.get("check_out_date"),
+               "reported": reported, "billed": billed, "collected": collected, "why": tag}
+        differing.append(row)
         if tag == "unexplained":
-            # Every one, with what is needed to see why — the "largest" list
-            # below is capped and small differences never made it into it.
             unexplained.append({
-                "bk": b.get("booking_number"), "reported": reported, "billed": billed, "collected": collected,
-                "in": b.get("check_in_date"), "out_booked": b.get("check_out_date"),
+                **row, "in": b.get("check_in_date"), "out_booked": b.get("check_out_date"),
                 "out_actual": b.get("actual_checkout_date"), "charge_reason": b.get("charge_reason"),
                 "charged_nights": b.get("charged_nights"), "is_org": b.get("is_org"),
                 "rooms": b.get("room_numbers"), "categories": b.get("room_categories"),
                 "charge_categories": [mp.get("charge_category") for mp in (b.get("room_guest_mapping") or [])],
             })
-        drift.append({
-            "bk": b.get("booking_number"), "out": b.get("actual_checkout_date") or b.get("check_out_date"),
-            "reported": reported, "billed": billed, "collected": collected, "why": tag,
-        })
-    drift.sort(key=lambda d: abs(d["reported"] - d["billed"]), reverse=True)
+    differing.sort(key=lambda d: abs(d["reported"] - d["billed"]), reverse=True)
 
-    # 3. How exposed is live data to the issues found?
+    # 3. Counts for this month's check-outs, and a few for stays that touched it.
+    touching = [
+        b for b in bookings
+        if b.get("status") in ("confirmed", "checked_in", "checked_out")
+        and (b.get("check_in_date") or "") <= period_end.isoformat()
+        and (b.get("actual_checkout_date") or b.get("check_out_date") or "") >= period_start.isoformat()
+    ]
+    month_counts = {
+        "late_checkouts": sum(1 for b in checked_out if (b.get("actual_checkout_date") or "") > (b.get("check_out_date") or "")),
+        "uninformed_early_checkouts": sum(1 for b in checked_out if b.get("charge_reason") == "early_checkout_not_informed"),
+        "checked_out_with_extra_bed_charge": sum(1 for b in checked_out if (b.get("extra_bed_charge_checkout", 0) or 0) > 0),
+        "closed_outside_the_checkout_screen": [b.get("booking_number") for b in checked_out if "charged_nights" not in b],
+        "mix_match_stays": [b.get("booking_number") for b in touching if b.get("room_segments")],
+        "non_org_bookings_with_an_org_rate_room": [
+            b.get("booking_number") for b in touching if not b.get("is_org")
+            and any((m.get("charge_category") or "Non-Org") != "Non-Org" for m in (b.get("room_guest_mapping") or []))],
+        "cancelled_after_check_in": [
+            b.get("booking_number") for b in bookings if b.get("status") == "cancelled" and b.get("actual_check_in")
+            and (b.get("check_in_date") or "")[:7] == month_key],
+    }
+
+    # 4. Current state — not about any month.
     active = [b for b in bookings if b.get("status") in ("confirmed", "checked_in")]
     wrong_refund_due = [
         {"bk": b.get("booking_number"), "status": b.get("status"), "stored_refund_due": b.get("refund_due"),
@@ -4951,47 +5003,19 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         for b in active
         if abs((b.get("refund_due") or 0) - max(0.0, (b.get("advance_paid", 0) or 0) - (b.get("total_amount", 0) or 0))) > 0.5
     ]
-    early_check_ins = [
-        b.get("booking_number") for b in bookings
-        if b.get("actual_check_in") and "charged_nights" in b
-        and (ist_date(b["actual_check_in"]) or "9999") < (b.get("check_in_date") or "")
-    ]
-    exposure = {
-        "bookings_total": len(bookings),
-        "mix_match_bookings": sum(1 for b in bookings if b.get("room_segments")),
-        "mix_match_active_now": [b.get("booking_number") for b in active if b.get("room_segments")],
-        "extended_bookings": sum(1 for b in bookings if b.get("is_amended")),
-        "bookings_with_checkin_extra_bed": sum(1 for b in bookings if (b.get("extra_beds", 0) or 0) > 0),
-        "of_those_also_extra_bed_at_checkout": sum(
-            1 for b in bookings if (b.get("extra_beds", 0) or 0) > 0 and (b.get("extra_bed_charge_checkout", 0) or 0) > 0),
-        "late_checkouts": sum(
-            1 for b in bookings if b.get("status") == "checked_out"
-            and (b.get("actual_checkout_date") or "") > (b.get("check_out_date") or "")),
-        "uninformed_early_checkouts": sum(1 for b in bookings if b.get("charge_reason") == "early_checkout_not_informed"),
-        "non_org_bookings_with_an_org_rate_room": [
-            b.get("booking_number") for b in bookings if not b.get("is_org")
-            and any((m.get("charge_category") or "Non-Org") != "Non-Org" for m in (b.get("room_guest_mapping") or []))],
-        "cancelled_after_check_in": [
-            b.get("booking_number") for b in bookings if b.get("status") == "cancelled" and b.get("actual_check_in")],
-        "checked_in_before_booked_date": early_check_ins[:40],
-        "active_bookings_with_wrong_refund_due": wrong_refund_due,
-        "checked_out_with_unpaid_balance": {"bookings": uncollected_count, "rupees": round(uncollected_sum, 2)},
-        "payments_rows": await db.payments.count_documents({}),
-        "backups": await _backup_summary(),
-    }
-
     return {
-        "as_of": ist_today_str(),
-        "months": months,
-        "all_months_consistent": all(m["consistent"] for m in months),
-        "reported_vs_billed": {
-            "checked_out_bookings_that_differ": len(drift),
-            "by_cause": tag_totals,
-            "by_checkout_month": dict(sorted(by_month.items())),
-            "unexplained": unexplained,
-            "largest": drift[:40],
+        "audited_month": month_key,
+        "period": {"from": period_start.isoformat(), "to": period_end.isoformat()},
+        "as_of": today,
+        "reports": reports,
+        "checked_out_in_month": summary,
+        "differing_bookings": differing[:100],
+        "unexplained": unexplained,
+        "month_counts": month_counts,
+        "current_state": {
+            "active_bookings_with_wrong_refund_due": wrong_refund_due,
+            "backups": await _backup_summary(),
         },
-        "exposure": exposure,
     }
 
 
