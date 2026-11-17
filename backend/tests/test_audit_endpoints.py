@@ -469,7 +469,7 @@ def test_cancel_refund_is_capped_at_the_advance_and_second_cancel_is_refused(api
 def test_backup_covers_every_collection_that_holds_real_data():
     from services.backup_service import COLLECTIONS_TO_BACKUP
     used = set(re.findall(r"\bdb\.([a-z_]+)\.", Path(server.__file__).read_text()))
-    not_business_data = {"backup_metadata", "restore_logs", "migration_status", "counters", "command"}
+    not_business_data = {"backup_metadata", "backup_snapshots", "backup_downloads", "restore_logs", "migration_status", "counters", "command"}
     assert used - not_business_data <= set(COLLECTIONS_TO_BACKUP), \
         f"collections written by the app but missing from backups: {used - not_business_data - set(COLLECTIONS_TO_BACKUP)}"
 
@@ -723,3 +723,70 @@ def test_checkout_quote_shows_an_overpaid_guest_as_negative_and_rejects_bad_inpu
     assert q["amount_due_now"] == -500
     assert api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "tomorrow"}).status_code == 400
     assert api.client.get("/api/bookings/nope/checkout-quote").status_code == 404
+
+
+# ====================================================================
+# Early arrival (owner ruling, Nov 2026): allowed; check-in moves to today; extra nights billed
+# ====================================================================
+
+def test_early_arrival_needs_confirmation_and_changes_nothing_without_it(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-05-08")          # booked 10-12 May
+    api.seed("bookings", [booking()])
+    res = api.client.post("/api/bookings/check-in", json={"booking_id": "b1", "staff_id": "s1"})
+    assert res.status_code == 409 and "2 day(s) before" in res.json()["detail"]
+    stored = api.find_one("bookings", {"id": "b1"})
+    assert stored["status"] == "confirmed" and stored["check_in_date"] == "2026-05-10"
+
+
+def test_early_arrival_moves_check_in_bills_the_extra_nights_and_reports_agree(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-05-08")
+    api.seed("bookings", [booking()])
+    after = checkin(api, allow_early_arrival=True)
+    assert after["check_in_date"] == "2026-05-08" and after["original_check_in_date"] == "2026-05-10"
+    assert after["early_arrival_nights"] == 2
+    assert after["total_amount"] == 4 * 500, "4 nights (8-12 May) at Rs 500"
+    assert after["balance_amount"] == 2000 - 400
+    assert after["amendment_log"][-1]["source"] == "early_arrival"
+    fin = reported_total(api, "b1")
+    assert fin["nights"] == 4 and fin["total_amount"] == 2000
+    out = checkout(api, actual_checkout_date="2026-05-12")
+    assert out["charged_nights"] == 4 and out["total_amount"] == 2000
+    assert reported_total(api, "b1")["total_amount"] == 2000
+
+
+def test_early_arrival_is_refused_if_the_room_is_taken_for_the_early_nights(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-05-08")
+    api.seed("bookings", [
+        booking(),
+        booking(id="b2", booking_number="BK0002", check_in_date="2026-05-06", check_out_date="2026-05-09"),  # in C1-01 until the 9th
+    ])
+    res = api.client.post("/api/bookings/check-in", json={"booking_id": "b1", "staff_id": "s1", "allow_early_arrival": True})
+    assert res.status_code == 409
+    assert "C1-01" in res.json()["detail"] and "BK0002" in res.json()["detail"]
+    assert api.find_one("bookings", {"id": "b1"})["status"] == "confirmed"
+
+
+def test_early_arrival_is_fine_when_the_previous_guest_leaves_that_morning(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-05-08")
+    api.seed("bookings", [
+        booking(),
+        booking(id="b2", booking_number="BK0002", status="checked_out", check_in_date="2026-05-06",
+                check_out_date="2026-05-08", actual_checkout_date="2026-05-08"),
+    ])
+    assert checkin(api, allow_early_arrival=True)["check_in_date"] == "2026-05-08"
+
+
+def test_early_arrival_of_a_mix_and_match_booking_extends_its_night_plan_backwards(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-05-09")           # MIX booked 10-14 May
+    api.seed("bookings", [booking(**MIX)])
+    after = checkin(api, allow_early_arrival=True)
+    assert [seg["night_date"] for seg in after["room_segments"]][:2] == ["2026-05-09", "2026-05-10"]
+    assert after["total_amount"] == 1800 + 500, "the extra night is in the first room (Cat I, Rs 500)"
+    assert reported_total(api, "b1")["total_amount"] == 2300
+
+
+def test_checking_in_on_or_after_the_booked_date_is_unchanged(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-05-10")
+    api.seed("bookings", [booking()])
+    after = checkin(api)
+    assert after["check_in_date"] == "2026-05-10" and "original_check_in_date" not in after

@@ -23,6 +23,7 @@ import {
 import { parseISO, format } from "date-fns";
 import { formatInTimeZone } from "date-fns-tz";
 import { useAuth } from "@/contexts/AuthContext";
+import { istTodayStr } from "@/utils/formatters";
 
 // Helper function to format UTC date to IST
 const formatIST = (utcDateString, formatStr = "dd MMM yyyy, HH:mm") => {
@@ -51,11 +52,12 @@ export default function BackupRestore() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [showRestoreDialog, setShowRestoreDialog] = useState(false);
   const [restoreType, setRestoreType] = useState(null);
   const [selectedBackupId, setSelectedBackupId] = useState(null);
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
-  const [scheduleTime, setScheduleTime] = useState({ hour: 2, minute: 0 });
+  const [scheduleTime, setScheduleTime] = useState({ hour: 14, minute: 0 });
   const [showNoDataWarning, setShowNoDataWarning] = useState(false);
   const [pendingBackupType, setPendingBackupType] = useState(null);
 
@@ -113,6 +115,31 @@ export default function BackupRestore() {
       await fetchBackupStatus();
     } catch (error) {
       console.error("Error fetching backup history:", error);
+    }
+  };
+
+  // Saves a complete backup file on the computer (or phone) that clicked the button — a copy
+  // that does not depend on the server or the database host. The file has no login
+  // passwords in it.
+  const downloadBackup = async () => {
+    setDownloading(true);
+    try {
+      const res = await axios.get(`${API}/backups/download`, { responseType: "blob" });
+      const name = `sarai-backup-${istTodayStr()}.json`;
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast.success(`Backup saved to this computer: ${name}. Keep it somewhere safe (e.g. Google Drive).`, { duration: 10000 });
+      await fetchBackupStatus();
+    } catch (error) {
+      toast.error("Could not download the backup. Please try again, and tell the administrator if it keeps failing.");
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -263,6 +290,35 @@ export default function BackupRestore() {
         </h1>
         <p className="text-slate-500 mt-1">Manage data backups and restore operations</p>
       </div>
+
+      {/* Download a backup to THIS computer (admin) */}
+      {isAdmin && (() => {
+        const lastDl = status?.last_download?.timestamp;
+        const daysSince = lastDl ? Math.floor((Date.now() - new Date(lastDl).getTime()) / 86400000) : null;
+        const stale = daysSince === null || daysSince > 35;
+        return (
+          <Card className={stale ? "border-amber-300 bg-amber-50" : "border-green-300 bg-green-50"} data-testid="download-backup-card">
+            <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-800">Save a backup to this computer</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  Downloads a complete copy of all bookings, payments, guests and settings to the computer you are using now.
+                  Do this at every month end and keep the file somewhere safe. It contains no login passwords.
+                </p>
+                <p className={`text-sm mt-1 font-medium ${stale ? "text-amber-800" : "text-green-800"}`}>
+                  {lastDl
+                    ? `Last saved to a computer: ${formatIST(lastDl)}${daysSince !== null ? ` (${daysSince} day${daysSince !== 1 ? "s" : ""} ago)` : ""}`
+                    : "No backup has been saved to a computer yet."}
+                </p>
+              </div>
+              <Button onClick={downloadBackup} disabled={downloading} className="flex-shrink-0" data-testid="button-download-backup">
+                {downloading ? <SpinnerGap size={18} className="animate-spin mr-2" /> : <CloudArrowDown size={18} className="mr-2" />}
+                {downloading ? "Preparing…" : "Download backup"}
+              </Button>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Warning Banner for Missed Backups */}
       {missedWarning?.missed && (

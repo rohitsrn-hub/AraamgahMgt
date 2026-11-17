@@ -68,7 +68,14 @@ Vercel site the same day. Never push half-done work.
 - **Early check-in**: staff can check a guest in before the booked
   check-in date, with no date restriction. Owner ruling: this is normal —
   covers early walk-ins and same-day timing requests. Do not add a
-  date-order validation that blocks this.
+  date-order validation that blocks this. How it works (owner-chosen, Nov
+  2026): check-in moves the booking's check-in date to today, the extra
+  night(s) are billed (rate in force on the new date), and the room must be
+  free for them — if another booking holds it, check-in is refused with a
+  message naming that booking (staff change the room first). The server
+  requires `allow_early_arrival: true`, which the check-in screen sends after
+  showing an early-arrival notice. The original date is kept in
+  `original_check_in_date`.
 
 ## Conventions
 - Frontend API calls: always `${API}` (imported from `App.js`); a relative

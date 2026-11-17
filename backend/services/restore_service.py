@@ -11,12 +11,53 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _as_datetime(value):
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if isinstance(value, datetime) and value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value
+
+
+async def merge_backup_data(backup_data: Dict, db, dry_run: bool = False) -> Dict:
+    """Merge a backup's documents into the database (MERGE strategy).
+
+    - a document whose "id" is not in the database is added;
+    - one that is already there is replaced only if the backup's copy is
+      NEWER (updated_at / created_at); otherwise the live one is kept;
+    - nothing is ever deleted.
+    dry_run=True only counts what would happen."""
+    stats = {}
+    for collection_name, documents in backup_data.get("collections", {}).items():
+        collection = db[collection_name]
+        added = updated = kept = 0
+        for doc in documents:
+            doc_id = doc.get("id")
+            existing = await collection.find_one({"id": doc_id}, {"_id": 0}) if doc_id else None
+            if existing is None:
+                added += 1
+                if not dry_run:
+                    await collection.insert_one(dict(doc))
+                continue
+            backup_time = _as_datetime(doc.get("updated_at") or doc.get("created_at"))
+            existing_time = _as_datetime(existing.get("updated_at") or existing.get("created_at"))
+            if backup_time and existing_time and backup_time <= existing_time:
+                kept += 1
+                continue
+            updated += 1
+            if not dry_run:
+                await collection.update_one({"id": doc_id}, {"$set": doc})
+        stats[collection_name] = {"added": added, "updated": updated, "kept_live_version": kept, "total": len(documents)}
+    return stats
+
+
 async def restore_full(backup_id: str, db) -> Dict:
     """
     Restore entire backup using MERGE strategy
     - Keeps existing records if they're newer
     - Adds missing records from backup
     """
+    from services.backup_service import load_backup_data
     try:
         # Get backup metadata
         metadata = await db.backup_metadata.find_one(
@@ -26,87 +67,30 @@ async def restore_full(backup_id: str, db) -> Dict:
         
         if not metadata:
             raise ValueError(f"Backup {backup_id} not found")
-        
-        file_path = Path(metadata["file_path"])
-        if not file_path.exists():
-            raise FileNotFoundError(f"Backup file not found: {file_path}")
-        
-        # Load backup data
-        with open(file_path, 'r') as f:
-            backup_data = json.load(f)
-        
+
+        # From the file if it is still on the server, otherwise from the
+        # copy kept in the database.
+        backup_data = await load_backup_data(db, metadata)
+
         restore_stats = {
             "backup_id": backup_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "collections_restored": {},
             "strategy": "MERGE"
         }
-        
-        # Restore each collection
-        for collection_name, documents in backup_data.get("collections", {}).items():
-            try:
-                collection = db[collection_name]
-                merged_count = 0
-                skipped_count = 0
-                
-                for doc in documents:
-                    # Check if document exists (by 'id' field)
-                    doc_id = doc.get("id")
-                    if not doc_id:
-                        # Insert if no ID field
-                        await collection.insert_one(doc)
-                        merged_count += 1
-                        continue
-                    
-                    existing = await collection.find_one({"id": doc_id}, {"_id": 0})
-                    
-                    if not existing:
-                        # Insert new document
-                        await collection.insert_one(doc)
-                        merged_count += 1
-                    else:
-                        # Compare timestamps - keep newer version
-                        backup_time = doc.get("updated_at") or doc.get("created_at")
-                        existing_time = existing.get("updated_at") or existing.get("created_at")
-                        
-                        if backup_time and existing_time:
-                            if isinstance(backup_time, str):
-                                backup_time = datetime.fromisoformat(backup_time.replace('Z', '+00:00'))
-                            if isinstance(existing_time, str):
-                                existing_time = datetime.fromisoformat(existing_time.replace('Z', '+00:00'))
-                            
-                            if backup_time > existing_time:
-                                # Backup is newer, update
-                                await collection.update_one(
-                                    {"id": doc_id},
-                                    {"$set": doc}
-                                )
-                                merged_count += 1
-                            else:
-                                # Existing is newer, skip
-                                skipped_count += 1
-                        else:
-                            # No timestamp, merge anyway
-                            await collection.update_one(
-                                {"id": doc_id},
-                                {"$set": doc}
-                            )
-                            merged_count += 1
-                
-                restore_stats["collections_restored"][collection_name] = {
-                    "merged": merged_count,
-                    "skipped": skipped_count,
-                    "total": len(documents)
+
+        try:
+            for name, counts in (await merge_backup_data(backup_data, db)).items():
+                restore_stats["collections_restored"][name] = {
+                    "merged": counts["added"] + counts["updated"],
+                    "skipped": counts["kept_live_version"],
+                    "total": counts["total"],
                 }
-                
-                logger.info(f"Restored {collection_name}: {merged_count} merged, {skipped_count} skipped")
-                
-            except Exception as e:
-                logger.error(f"Error restoring {collection_name}: {str(e)}")
-                restore_stats["collections_restored"][collection_name] = {
-                    "error": str(e)
-                }
-        
+                logger.info(f"Restored {name}: {counts}")
+        except Exception as e:
+            logger.error(f"Error restoring: {str(e)}")
+            restore_stats["collections_restored"]["error"] = {"error": str(e)}
+
         # Save restore log. Insert a COPY: insert_one() adds a Mongo "_id"
         # (an ObjectId) to the dict it is given, and the API then failed to
         # turn that into JSON — so every restore that had just SUCCEEDED was

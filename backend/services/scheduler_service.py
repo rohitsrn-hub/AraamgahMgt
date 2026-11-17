@@ -1,14 +1,29 @@
 """
 Scheduler Service - Handles automatic scheduled backups
-Default: Daily at 02:00 AM IST
+
+Default: daily at 14:00 IST, PLUS a catch-up: whenever someone is using the
+app and the last full backup is more than 20 hours old, one is taken in the
+background (see maybe_trigger_backup).
+
+Why not 02:00 any more: the backend runs on a free Render web service, which
+(as far as we understand it) sleeps when nobody is using it, and a sleeping
+server cannot run an in-process scheduled job. Nobody uses the app at 2 am,
+so a 2 am backup effectively never ran. The catch-up fires from real use, so
+it runs whenever the app is awake, and the cron time is moved into the working
+day for the days it happens to be awake anyway.
 """
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timezone, timedelta
+import asyncio
+import time
 import pytz
 import logging
 
-from services.backup_service import perform_incremental_backup, cleanup_old_backups, get_last_backup_metadata
+from services.backup_service import (
+    perform_full_backup, cleanup_old_backups, get_last_backup_metadata,
+    list_backup_metadata, parse_backup_timestamp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,24 +35,32 @@ scheduler = None
 db_instance = None
 
 
-def init_scheduler(db):
-    """Initialize scheduler with default backup job"""
+DEFAULT_BACKUP_HOUR = 14
+DEFAULT_BACKUP_MINUTE = 0
+CATCH_UP_AFTER_HOURS = 20          # take a backup on use if the last one is older than this
+_CHECK_EVERY_SECONDS = 600         # look at most this often
+_RETRY_AFTER_FAILURE_SECONDS = 3600
+_state = {"checked_at": None, "failed_at": None, "running": False}
+_tasks = set()                     # keeps background tasks alive until they finish
+
+
+def init_scheduler(db, hour: int = DEFAULT_BACKUP_HOUR, minute: int = DEFAULT_BACKUP_MINUTE):
+    """Initialize scheduler with the daily backup job (at the saved time, if any)."""
     global scheduler, db_instance
-    
+
     db_instance = db
-    
+
     if scheduler is None:
         scheduler = AsyncIOScheduler(timezone=IST)
-        
-        # Schedule daily backup at 02:00 AM IST
+
         scheduler.add_job(
             scheduled_backup_job,
-            trigger=CronTrigger(hour=2, minute=0, timezone=IST),
+            trigger=CronTrigger(hour=hour, minute=minute, timezone=IST),
             id='daily_backup',
-            name='Daily Automatic Backup',
+            name=f'Daily Automatic Backup at {hour:02d}:{minute:02d} IST',
             replace_existing=True
         )
-        
+
         # Schedule cleanup job weekly (Sunday 03:00 AM IST)
         scheduler.add_job(
             cleanup_job,
@@ -46,41 +69,63 @@ def init_scheduler(db):
             name='Weekly Backup Cleanup',
             replace_existing=True
         )
-        
+
         scheduler.start()
-        logger.info("Backup scheduler initialized - Daily backup at 02:00 AM IST")
+        logger.info(f"Backup scheduler initialized - daily backup at {hour:02d}:{minute:02d} IST")
 
 
 async def scheduled_backup_job():
-    """Job function for scheduled backups"""
+    """Daily scheduled backup (a FULL one — the data is small, and a full backup
+    is self-contained, unlike a chain of incrementals)."""
+    await ensure_recent_backup(db_instance, max_age_hours=0)
+
+
+async def ensure_recent_backup(db, max_age_hours: float = CATCH_UP_AFTER_HOURS):
+    """Take a full backup unless a successful FULL one already exists that is
+    newer than max_age_hours. Safe to call often and concurrently: only one
+    runs at a time, and after a failure it waits an hour before trying again
+    (so a broken backup can't hammer the database on every request).
+    Returns the new backup's metadata, or None if nothing was done."""
+    if _state["running"]:
+        return None
+    _state["running"] = True
     try:
-        logger.info("Starting scheduled incremental backup...")
-        metadata = await perform_incremental_backup(db_instance)
-        
-        # Update next scheduled backup time
-        next_run = datetime.now(IST) + timedelta(days=1)
-        next_run = next_run.replace(hour=2, minute=0, second=0, microsecond=0)
-        
-        await db_instance.backup_metadata.update_one(
-            {"backup_id": metadata["backup_id"]},
-            {"$set": {"next_scheduled_backup": next_run}}
-        )
-        
-        logger.info(f"Scheduled backup completed: {metadata['backup_id']}")
-        
+        if max_age_hours > 0:
+            fulls = await list_backup_metadata(db, {"status": "SUCCESS", "backup_type": "FULL"})
+            last = parse_backup_timestamp(fulls[0].get("timestamp")) if fulls else None
+            if last and (datetime.now(timezone.utc) - last) < timedelta(hours=max_age_hours):
+                return None
+            failed_at = _state["failed_at"]
+            if failed_at is not None and (time.monotonic() - failed_at) < _RETRY_AFTER_FAILURE_SECONDS:
+                return None
+        logger.info("Taking a full backup...")
+        metadata = await perform_full_backup(db)
+        _state["failed_at"] = None
+        logger.info(f"Backup completed: {metadata['backup_id']}")
+        return metadata
     except Exception as e:
-        logger.error(f"Scheduled backup failed: {str(e)}")
-        # Save failure metadata
-        await db_instance.backup_metadata.insert_one({
-            "backup_id": f"failed_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
-            # ISO string like every other backup record (a raw datetime here
-            # is what made "latest backup" sort wrongly).
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "backup_type": "INCREMENTAL",
-            "status": "FAILED",
-            "error_message": f"Scheduled backup failed: {str(e)}",
-            "scheduled": True
-        })
+        _state["failed_at"] = time.monotonic()
+        logger.error(f"Backup failed: {str(e)}")   # perform_full_backup already recorded the FAILED row
+        return None
+    finally:
+        _state["running"] = False
+
+
+def maybe_trigger_backup(db):
+    """Called on every authenticated request. Cheap: at most once every ten
+    minutes it starts ensure_recent_backup() in the background, without making
+    the request wait for it."""
+    now = time.monotonic()
+    last_check = _state["checked_at"]
+    if _state["running"] or (last_check is not None and now - last_check < _CHECK_EVERY_SECONDS):
+        return
+    _state["checked_at"] = now
+    try:
+        task = asyncio.get_running_loop().create_task(ensure_recent_backup(db))
+    except RuntimeError:       # no running loop (not inside a request)
+        return
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
 
 
 async def cleanup_job():

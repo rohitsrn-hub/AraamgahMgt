@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Security
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -10,6 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import re
+import json
 import uuid
 import calendar
 from datetime import datetime, timezone, timedelta, date as date_type
@@ -124,7 +125,11 @@ async def get_current_user_with_db(credentials = Security(security)):
     
     if not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="User account is disabled")
-    
+
+    # Someone is using the app, so the server is awake: if the last full
+    # backup is old, take one in the background (see scheduler_service).
+    scheduler_service.maybe_trigger_backup(db)
+
     return user
 
 
@@ -442,6 +447,9 @@ class CheckInRequest(BaseModel):
     planned_early_checkout_date: Optional[str] = None  # YYYY-MM-DD format
     # Alternate contacts (optional, captured at check-in)
     alt_contacts: List[dict] = Field(default_factory=list)
+    # The guest has arrived BEFORE the booked check-in date and staff have
+    # confirmed that check-in moves to today (the extra nights are billed).
+    allow_early_arrival: bool = False
 
 class CheckOutRequest(BaseModel):
     booking_id: str
@@ -1630,6 +1638,24 @@ def _booking_in_rooms(b: dict, rooms: list) -> dict:
     return moved
 
 
+def _booking_with_early_arrival(b: dict, new_check_in: str) -> dict:
+    """A copy of booking `b` as it will be stored once its check-in date moves
+    EARLIER to new_check_in (guest arrived before the booked date). For a mix &
+    match booking, the extra nights go in the rooms of its first night — the
+    nightly plan is what the reports read."""
+    old_in = date_type.fromisoformat(str(b["check_in_date"]).split("T")[0])
+    new_in = date_type.fromisoformat(new_check_in)
+    after = dict(b)
+    after["check_in_date"] = new_check_in
+    segments = sorted(b.get("room_segments") or [], key=lambda seg: seg.get("night_date") or "")
+    if segments:
+        first_rooms = segments[0].get("rooms") or []
+        early = [{"night_date": (new_in + timedelta(days=i)).isoformat(), "rooms": first_rooms}
+                 for i in range(max(0, (old_in - new_in).days))]
+        after["room_segments"] = early + segments
+    return after
+
+
 @api_router.post("/bookings/{booking_id}/plan-extension")
 async def plan_extension(booking_id: str, new_check_out_date: str = Query(..., description="New checkout date YYYY-MM-DD"), current_user: dict = Depends(require_staff_or_admin_role)):
     from datetime import date as date_type, timedelta
@@ -2457,8 +2483,46 @@ async def check_in(request: CheckInRequest, current_user: dict = Depends(require
             room["charge_category"] = "Non-Org"
 
     all_rooms = await db.rooms.find({}, {"_id": 0}).to_list(500)
-    priced_booking = {**booking, "room_guest_mapping": room_guest_mapping or booking.get("room_guest_mapping") or []}
-    charges = stay_charges(priced_booking, settings or {}, build_room_maps(all_rooms))
+    room_maps = build_room_maps(all_rooms)
+
+    # EARLY ARRIVAL (owner ruling: staff may check a guest in before the booked
+    # date, no restriction). Check-in moves to today, the room must be free for
+    # the extra night(s), and they are billed — the rate stays the one in force
+    # on the (new) check-in date, like any booking.
+    today = ist_today_str()
+    booked_check_in = str(booking["check_in_date"]).split("T")[0]
+    early_nights = 0
+    moved_booking = booking
+    if today < booked_check_in:
+        early_nights = (date_type.fromisoformat(booked_check_in) - date_type.fromisoformat(today)).days
+        if not request.allow_early_arrival:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"This guest is arriving {early_nights} day(s) before the booked check-in date ({booked_check_in}). "
+                        "Confirm the early arrival to move check-in to today and bill the extra night(s).")
+            )
+        booking_rooms = booking.get("room_ids") or ([booking["room_id"]] if booking.get("room_id") else [])
+        for rid in booking_rooms:
+            clash = await db.bookings.find_one({
+                "id": {"$ne": booking["id"]},
+                "status": {"$in": [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]},
+                "$or": [{"room_ids": rid}, {"room_id": rid}],
+                "check_in_date": {"$lt": booked_check_in},
+                "check_out_date": {"$gt": today},
+            })
+            if clash:
+                room = next((r for r in all_rooms if r["id"] == rid), {})
+                raise HTTPException(
+                    status_code=409,
+                    detail=(f"Room {room.get('room_number', rid)} is not free for the early nights "
+                            f"({today} to {booked_check_in}): it is booked by {clash.get('booking_number')} "
+                            f"({clash.get('check_in_date')} to {clash.get('check_out_date')}). "
+                            "Change this guest's room first, or check in on the booked date.")
+                )
+        moved_booking = _booking_with_early_arrival(booking, today)
+
+    priced_booking = {**moved_booking, "room_guest_mapping": room_guest_mapping or booking.get("room_guest_mapping") or []}
+    charges = stay_charges(priced_booking, settings or {}, room_maps)
     if not charges["rooms"]:
         # Never silently store a Rs 0 bill (this has happened before).
         raise HTTPException(
@@ -2511,6 +2575,17 @@ async def check_in(request: CheckInRequest, current_user: dict = Depends(require
         update_fields["family_members"] = request.family_members
     if request.alt_contacts:
         update_fields["alt_contacts"] = request.alt_contacts
+    if early_nights:
+        update_fields["check_in_date"] = today
+        update_fields["original_check_in_date"] = booked_check_in
+        update_fields["early_arrival_nights"] = early_nights
+        if moved_booking.get("room_segments"):
+            update_fields["room_segments"] = moved_booking["room_segments"]
+        update_fields["amendment_log"] = (booking.get("amendment_log") or []) + [{
+            "amended_at": now,
+            "changes": [f"Check-in: {booked_check_in} → {today} (guest arrived {early_nights} day(s) early)"],
+            "reason": "Early arrival", "source": "early_arrival",
+        }]
     if room_guest_mapping:
         update_fields["room_guest_mapping"] = room_guest_mapping  # Store the (normalised) mapping
     if request.notes:
@@ -4879,6 +4954,10 @@ async def _backup_summary() -> dict:
         "successful_total": len(stamps),
         "successful_last_30_days": sum(1 for t in stamps if (now_utc - t).days < 30),
         "stored_as_dates_not_text": sum(1 for b in successful if isinstance(b.get("timestamp"), datetime)),
+        "kept_in_database_too": sum(1 for b in successful if b.get("stored_in_database")),
+        "last_download_to_a_computer": (
+            await db.backup_downloads.find_one({}, {"_id": 0, "timestamp": 1, "by": 1}, sort=[("timestamp", -1)])
+        ),
     }
 
 
@@ -5091,7 +5170,14 @@ async def startup_event():
     
     try:
         # Initialize backup scheduler
-        scheduler_service.init_scheduler(db)
+        # Use the backup time the admin last saved (it used to reset to the
+        # default on every restart).
+        saved = ((await db.app_settings.find_one({}, {"_id": 0, "backup_schedule": 1})) or {}).get("backup_schedule") or {}
+        scheduler_service.init_scheduler(
+            db,
+            hour=saved.get("hour", scheduler_service.DEFAULT_BACKUP_HOUR),
+            minute=saved.get("minute", scheduler_service.DEFAULT_BACKUP_MINUTE),
+        )
         logger.info("Backup scheduler initialized")
         
         # Check for missed backups
@@ -5123,6 +5209,31 @@ async def trigger_full_backup(current_user: dict = Depends(require_staff_or_admi
     except Exception as e:
         logger.error(f"Manual full backup failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+
+@api_router.get("/backups/download")
+async def download_backup(current_user: dict = Depends(require_admin_role)):
+    """A complete backup as a file for the computer that asked for it — the
+    copy that does not depend on Render or on the database host. Admin only.
+
+    Login records (and their password hashes) are NOT in it; a plain list of
+    who has an account is, so accounts can be re-created by hand after a
+    recovery. Nothing is written on the server except a note that a download
+    happened, which the month-end audit check reads."""
+    data = await backup_service.collect_full_backup_data(db, include_users=False)
+    counts = {name: len(docs) for name, docs in data["collections"].items()}
+    now_ist = datetime.now(IST)
+    await db.backup_downloads.insert_one({
+        "id": str(uuid.uuid4()), "timestamp": datetime.now(timezone.utc).isoformat(),
+        "by": current_user.get("username") or current_user.get("email") or current_user.get("id"),
+        "record_count": counts,
+    })
+    body = json.dumps(data, default=backup_service._json_default, separators=(",", ":"))
+    filename = f"sarai-backup-{now_ist.strftime('%Y-%m-%d-%H%M')}.json"
+    return Response(
+        content=body, media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"', "X-Backup-Records": str(sum(counts.values()))},
+    )
 
 
 @api_router.post("/backups/manual/incremental")
@@ -5160,8 +5271,10 @@ async def get_backup_status(current_user: dict = Depends(require_staff_or_admin_
         # Get scheduler status
         scheduler_status = scheduler_service.get_scheduler_status()
         
+        last_download = await db.backup_downloads.find_one({}, {"_id": 0}, sort=[("timestamp", -1)])
         return {
             "last_backup": last_backup,
+            "last_download": last_download,
             "total_backups": total_backups,
             "first_backup_date": first_backup.get("timestamp") if first_backup else None,
             "missed_backup_warning": missed_check,

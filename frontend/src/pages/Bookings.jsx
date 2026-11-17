@@ -881,22 +881,28 @@ export default function Bookings() {
     if (!selectedBooking) {
       return { nights: 0, roomChargesTotal: 0, extraBedCharge: 0, totalWithExtra: 0, balance: 0, roomChargesBreakdown: [] };
     }
+    // An early arrival moves check-in to today: the extra nights are billed, and the rate is the
+    // one in force on that (new) check-in date — same as the backend.
+    const earlyDays = earlyArrivalDays(selectedBooking);
+    const effectiveCheckIn = earlyDays > 0 ? istTodayStr() : selectedBooking.check_in_date;
     const nights = Math.ceil(
-      (new Date(selectedBooking.check_out_date) - new Date(selectedBooking.check_in_date)) / 86400000
+      (new Date(selectedBooking.check_out_date) - new Date(effectiveCheckIn)) / 86400000
     );
 
     // A mix & match booking uses each room only on some nights (its
     // room_segments). Bill each room for ITS nights — the same thing the
     // backend and the reports do — not every room for the whole stay.
-    const segments = selectedBooking.room_segments || [];
+    const segments = [...(selectedBooking.room_segments || [])].sort((x, y) => (x.night_date || "").localeCompare(y.night_date || ""));
+    const firstNightRooms = segments.length ? (segments[0].rooms || []) : [];
     const nightsForRoom = (roomNumber) => segments.length === 0
       ? nights
-      : segments.filter(seg => (seg.rooms || []).some(r => r.room_number === roomNumber)).length;
+      : segments.filter(seg => (seg.rooms || []).some(r => r.room_number === roomNumber)).length
+        + (firstNightRooms.some(r => r.room_number === roomNumber) ? earlyDays : 0);
 
     let roomChargesTotal = 0;
     const roomChargesBreakdown = roomGuestMapping.map(room => {
       const isOrgRoom = room.charge_category !== "Non-Org";
-      const roomRate = getRoomRate(settings, selectedBooking.check_in_date, isOrgRoom, room.room_category);
+      const roomRate = getRoomRate(settings, effectiveCheckIn, isOrgRoom, room.room_category);
       const ratePerNight = roomRate.rent + roomRate.licenseFee;
       const roomNights = nightsForRoom(room.room_number);
       const roomTotal = ratePerNight * roomNights;
@@ -919,23 +925,6 @@ export default function Bookings() {
   };
 
   const handleCheckIn = async () => {
-    // Date validation - Cannot check in before scheduled check-in date
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Reset time to start of day
-    
-    const checkInDate = new Date(selectedBooking.check_in_date);
-    checkInDate.setHours(0, 0, 0, 0); // Reset time to start of day
-    
-    if (today < checkInDate) {
-      const checkInDateFormatted = new Date(selectedBooking.check_in_date).toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
-      toast.error(`Cannot check in before scheduled date: ${checkInDateFormatted}`);
-      return;
-    }
-    
     // Staff validation
     if (!actionForm.staff_id) { 
       toast.error("Please select staff member"); 
@@ -1053,6 +1042,7 @@ export default function Bookings() {
         upi_id: actionForm.upi_id || undefined,
         upi_phone: actionForm.upi_phone || undefined,
         planned_early_checkout_date: actionForm.planned_early_checkout_date || undefined,  // Early checkout notification
+        allow_early_arrival: earlyArrivalDays(selectedBooking) > 0,  // staff saw the early-arrival notice in this dialog
         family_members: allFamilyMembers.length > 0 ? allFamilyMembers : undefined,
         room_guest_mapping: roomGuestMapping,  // Send room-guest mapping with inline family members
         alt_contacts: actionForm.alt_contacts.filter(c => c.name.trim() && c.mobile).map(c => ({
@@ -1298,7 +1288,8 @@ export default function Bookings() {
     try {
       const response = await axios.get(`${API}/rooms/available`, {
         params: {
-          check_in: booking.check_in_date,
+          // From today if the guest is arriving early, so a room taken for the early nights isn't offered
+          check_in: earlyArrivalDays(booking) > 0 ? istTodayStr() : booking.check_in_date,
           check_out: booking.check_out_date,
           exclude_booking_id: booking.id  // Exclude current booking to show currently assigned rooms
         }
@@ -1415,14 +1406,12 @@ export default function Bookings() {
     1, Math.round((new Date(checkoutDate) - new Date(selectedBooking?.check_in_date)) / 86400000)
   );
 
-  const canCheckInToday = (booking) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const checkInDate = new Date(booking.check_in_date);
-    checkInDate.setHours(0, 0, 0, 0);
-    
-    return today >= checkInDate;
+  // Days between today (IST) and the booked check-in date, when the guest arrives EARLY (owner
+  // ruling: staff may check a guest in before the booked date). 0 = on time or late.
+  const earlyArrivalDays = (booking) => {
+    if (!booking?.check_in_date) return 0;
+    const days = Math.round((new Date(booking.check_in_date) - new Date(istTodayStr())) / 86400000);
+    return days > 0 ? days : 0;
   };
 
   const handleCancel = async () => {
@@ -2053,9 +2042,9 @@ export default function Bookings() {
                             <>
                               <Button size="sm" variant="outline"
                                 onClick={() => openCheckInDialog(booking)}
-                                disabled={!canCheckInToday(booking) || isViewer}
+                                disabled={isViewer}
                                 className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                title={isViewer ? "Viewers cannot check in guests" : (!canCheckInToday(booking) ? `Check-in available from ${new Date(booking.check_in_date).toLocaleDateString('en-IN')}` : 'Check In')}
+                                title={isViewer ? "Viewers cannot check in guests" : (earlyArrivalDays(booking) > 0 ? `Early arrival: check-in moves to today (${earlyArrivalDays(booking)} day(s) before the booked date)` : 'Check In')}
                                 data-testid={`checkin-btn-${booking.id}`}>
                                 <SignIn size={16} className="mr-1" />Check In
                               </Button>
@@ -3155,6 +3144,18 @@ export default function Bookings() {
                   </div>
                 </div>
               </div>
+
+              {/* Early arrival: check-in moves to today, extra nights billed */}
+              {selectedBooking && earlyArrivalDays(selectedBooking) > 0 && (
+                <div className="p-3 rounded-xl border border-amber-300 bg-amber-50 text-sm text-amber-900" data-testid="early-arrival-notice">
+                  <p className="font-semibold">Early arrival — {earlyArrivalDays(selectedBooking)} day(s) before the booked date ({format(parseISO(selectedBooking.check_in_date), "dd/MM/yyyy")})</p>
+                  <p className="mt-1">
+                    Checking in moves this booking's check-in date to today ({format(parseISO(istTodayStr()), "dd/MM/yyyy")}) and the extra
+                    night{earlyArrivalDays(selectedBooking) > 1 ? "s are" : " is"} billed in the totals below. The room must be free for
+                    {earlyArrivalDays(selectedBooking) > 1 ? " those nights" : " that night"}; if it is not, you will be told which booking is in it.
+                  </p>
+                </div>
+              )}
 
               {/* Bill Preview at Check-In */}
               {selectedBooking && (
@@ -4256,13 +4257,15 @@ export default function Bookings() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-amber-600">
               <WarningCircle size={24} weight="fill" />
-              Rate Changed Since Booking
+              {earlyArrivalDays(selectedBooking) > 0 ? "Early Arrival — New Total" : "Rate Changed Since Booking"}
             </DialogTitle>
           </DialogHeader>
 
           <div className="py-4 space-y-3">
             <p className="text-slate-700">
-              The room rate has changed since this booking was made (a rate revision took effect for this check-in date). The bill will be recalculated at check-in.
+              {earlyArrivalDays(selectedBooking) > 0
+                ? `The guest is arriving ${earlyArrivalDays(selectedBooking)} day(s) before the booked date. Check-in moves to today and the extra night(s) are billed.`
+                : "The room rate has changed since this booking was made (a rate revision took effect for this check-in date). The bill will be recalculated at check-in."}
             </p>
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 text-sm">
               <div className="flex justify-between">
