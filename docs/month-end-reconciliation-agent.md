@@ -163,7 +163,9 @@ be close to 30. Also read `last_download_to_a_computer`: a backup file should
 have been saved to a computer at the last month end (Backup & Restore page,
 "Download backup", admin) — if it is missing or older than about 35 days,
 remind me to do it. `kept_in_database_too` should equal `successful_total` for
-recent backups. Tell me about any that is non-zero or stale, and what it means
+recent backups. `files_missing_from_server` shows whether redeploys are wiping
+the server's backup files (if it is large, only the copies kept in the
+database and the files downloaded to a computer can be trusted). Tell me about any that is non-zero or stale, and what it means
 in practice.
 
 **Step 5 — the paper register, if I gave it to you.** Compare the register's

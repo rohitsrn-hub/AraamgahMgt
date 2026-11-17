@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Security
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Depends, Security, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.security import HTTPBearer
 from dotenv import load_dotenv
@@ -895,13 +895,66 @@ async def delete_rate_schedule_entry(entry_id: str, current_user: dict = Depends
 
 
 
+LOGIN_WINDOW_MINUTES = 15
+LOGIN_MAX_FAILURES_PER_USER = 5      # wrong passwords for one username from one address
+LOGIN_MAX_FAILURES_PER_ADDRESS = 30  # wrong passwords for any usernames from one address
+
+
+def _client_address(request: Request) -> str:
+    """The caller's address. Behind Render's proxy request.client is the proxy
+    itself, so use the LAST X-Forwarded-For entry (the one the proxy added; the
+    earlier ones are supplied by the caller and can be faked)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def _login_retry_minutes(username: str, address: str) -> int:
+    """0 if this login attempt may proceed, else minutes until it may."""
+    since = (datetime.now(timezone.utc) - timedelta(minutes=LOGIN_WINDOW_MINUTES)).isoformat()
+    now = datetime.now(timezone.utc)
+    for query, limit in (
+        ({"username": username, "address": address, "at": {"$gte": since}}, LOGIN_MAX_FAILURES_PER_USER),
+        ({"address": address, "at": {"$gte": since}}, LOGIN_MAX_FAILURES_PER_ADDRESS),
+    ):
+        recent = await db.login_failures.find(query, {"_id": 0, "at": 1}).to_list(1000)
+        if len(recent) >= limit:
+            stamps = sorted((datetime.fromisoformat(r["at"]) for r in recent), reverse=True)
+            unlock_at = stamps[limit - 1] + timedelta(minutes=LOGIN_WINDOW_MINUTES)
+            return max(1, int((unlock_at - now).total_seconds() // 60) + 1)
+    return 0
+
+
 @api_router.post("/auth/login", response_model=LoginResponse)
-async def login(credentials: UserLogin):
+async def login(credentials: UserLogin, request: Request):
     """
     User login endpoint
-    
-    Returns JWT access token on successful authentication
+
+    Returns JWT access token on successful authentication.
+    After 5 wrong passwords for one username (or 30 for any usernames) from one
+    address within 15 minutes, further attempts from that address are refused
+    for the rest of the window — slows password guessing without locking the
+    real user out from anywhere else.
     """
+    username = credentials.email.lower()
+    address = _client_address(request)
+
+    wait = await _login_retry_minutes(username, address)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed login attempts. Please wait {wait} minute(s) and try again."
+        )
+
+    async def failed(status_code: int, detail: str):
+        await db.login_failures.insert_one({"username": username, "address": address,
+                                            "at": datetime.now(timezone.utc).isoformat()})
+        # keep the collection small: forget anything older than a day
+        await db.login_failures.delete_many(
+            {"at": {"$lt": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()}})
+        raise HTTPException(status_code=status_code, detail=detail)
+
     # Find user by username OR email (case-insensitive)
     user = await db.users.find_one(
         {
@@ -914,17 +967,11 @@ async def login(credentials: UserLogin):
     )
     
     if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
+        await failed(401, "Invalid username or password")
     
     # Verify password
     if not verify_password(credentials.password, user["password_hash"]):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password"
-        )
+        await failed(401, "Invalid username or password")
     
     # Check if user is active
     if not user.get("is_active", True):
@@ -932,6 +979,9 @@ async def login(credentials: UserLogin):
             status_code=403,
             detail="Account is disabled. Contact administrator."
         )
+
+    # A correct login clears this username's failures from this address
+    await db.login_failures.delete_many({"username": username, "address": address})
     
     # Update last login
     await db.users.update_one(
@@ -1101,6 +1151,10 @@ async def update_user(
         update_fields["is_active"] = update_data["is_active"]
     
     if "password" in update_data:
+        # The reset-password screen and user creation both require 8+ characters;
+        # this path accepted anything, down to a single character.
+        if not isinstance(update_data["password"], str) or len(update_data["password"]) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
         update_fields["password_hash"] = hash_password(update_data["password"])
     
     if not update_fields:
@@ -1278,6 +1332,13 @@ async def update_room(room_id: str, update: RoomUpdate, current_user: dict = Dep
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="No update data provided")
+
+    # Staff may change a room's status (available / maintenance) — a daily task.
+    # Renaming a room or changing its category rewrites how every earlier
+    # booking of it is listed and priced in reports (a renamed room's old
+    # revenue drops out of Room Occupancy), so that is administrator-only.
+    if current_user.get("role") != "admin" and ({"room_number", "category", "floor"} & set(update_data)):
+        raise HTTPException(status_code=403, detail="Only an administrator can rename a room or change its category or floor")
 
     if "room_number" in update_data:
         collision = await db.rooms.find_one(
@@ -2909,7 +2970,15 @@ async def cancel_booking(request: CancelBookingRequest, current_user: dict = Dep
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
-    if booking["status"] not in [BookingStatus.CONFIRMED.value, BookingStatus.CHECKED_IN.value]:
+    if booking["status"] == BookingStatus.CHECKED_IN.value:
+        # Cancelling removes a booking's nights from every report. A guest who
+        # has checked in has stayed: close the stay with Check Out. A check-in
+        # made by mistake is undone by an administrator deleting the booking.
+        raise HTTPException(
+            status_code=400,
+            detail="A guest who has checked in cannot be cancelled — use Check Out. To undo a booking made by mistake, ask an administrator to delete it."
+        )
+    if booking["status"] != BookingStatus.CONFIRMED.value:
         raise HTTPException(status_code=400, detail="Booking cannot be cancelled")
     
     now = datetime.now(timezone.utc).isoformat()
@@ -3883,63 +3952,61 @@ async def get_fund_dashboard(
     year: Optional[int] = None,
     current_user: dict = Depends(get_current_user_with_db)
 ):
-    """Get fund generation dashboard"""
-    now = datetime.now(timezone.utc)
-    
+    """Cash received in the month, net of refunds (owner ruling, Nov 2026).
+
+    Net revenue = advances received + payments collected at check-out
+                  - refunds paid out (cancellation refunds and any money
+                  handed back to an overpaid guest at check-out).
+    Every payment counts once, in the month it was received. This used to add
+    "completed stays" (which already contains each stay's advance) to
+    "advances received", so every advance on a stay that finished in the
+    month was counted twice.
+
+    The month is the IST calendar month (payment timestamps are stored in UTC).
+    """
+    today = ist_today_str()
     if not month:
-        month = now.month
+        month = int(today[5:7])
     if not year:
-        year = now.year
-    
-    from_date = f"{year}-{month:02d}-01"
-    if month == 12:
-        to_date = f"{year + 1}-01-01"
-    else:
-        to_date = f"{year}-{month + 1:02d}-01"
-    
-    # Get all payments in period
-    payments = await db.payments.find({
-        "created_at": {"$gte": from_date, "$lt": to_date}
-    }, {"_id": 0}).to_list(1000)
-    
-    # Calculate totals    
-    advance_amount = sum(
-        p["amount"] for p in payments 
-        if p["payment_type"] == "advance"
-    )
-    
-    refunds_amount = abs(sum(
-        p["amount"] for p in payments 
-        if p["payment_type"] == "refund"
-    ))
-    
-    # Get refund status
+        year = int(today[:4])
+
+    start_ist = datetime(year, month, 1, tzinfo=IST)
+    end_ist = datetime(year + 1, 1, 1, tzinfo=IST) if month == 12 else datetime(year, month + 1, 1, tzinfo=IST)
+    from_ts = start_ist.astimezone(timezone.utc).isoformat()
+    to_ts = end_ist.astimezone(timezone.utc).isoformat()
+
+    payments = await db.payments.find({"created_at": {"$gte": from_ts, "$lt": to_ts}}, {"_id": 0}).to_list(20000)
+    advance_amount = sum(p["amount"] for p in payments if p["payment_type"] == "advance")
+    checkout_amount = sum(p["amount"] for p in payments if p["payment_type"] == "final")
+    refunds_paid = abs(sum(p["amount"] for p in payments if p["payment_type"] == "refund"))
+
+    # Money handed back to a guest who had overpaid, settled on the check-out
+    # screen as a negative final payment (no payments-ledger row is written for it).
+    handed_back = 0.0
+    checked_out = await db.bookings.find(
+        {"status": BookingStatus.CHECKED_OUT.value, "actual_check_out": {"$gte": from_ts, "$lt": to_ts}},
+        {"_id": 0, "final_payment": 1}
+    ).to_list(20000)
+    for b in checked_out:
+        if (b.get("final_payment") or 0) < 0:
+            handed_back += -b["final_payment"]
+    refunds_amount = refunds_paid + handed_back
+
     pending_refunds = await db.refunds.find({
-        "status": RefundStatus.PENDING.value,
-        "created_at": {"$gte": from_date, "$lt": to_date}
-    }, {"_id": 0}).to_list(100)
-    
+        "status": RefundStatus.PENDING.value, "created_at": {"$gte": from_ts, "$lt": to_ts}
+    }, {"_id": 0}).to_list(2000)
     completed_refunds = await db.refunds.find({
-        "status": RefundStatus.COMPLETED.value,
-        "created_at": {"$gte": from_date, "$lt": to_date}
-    }, {"_id": 0}).to_list(100)
-    
-    # Also get completed bookings amount
-    completed_bookings = await db.bookings.find({
-        "status": BookingStatus.CHECKED_OUT.value,
-        "actual_check_out": {"$gte": from_date, "$lt": to_date}
-    }, {"_id": 0}).to_list(1000)
-    
-    total_from_completed = sum(b["total_amount"] - b.get("balance_amount", 0) for b in completed_bookings)
-    
-    net_revenue = total_from_completed + advance_amount - refunds_amount
-    
+        "status": RefundStatus.COMPLETED.value, "created_at": {"$gte": from_ts, "$lt": to_ts}
+    }, {"_id": 0}).to_list(2000)
+
+    cash_received = advance_amount + checkout_amount
     return {
         "period": {"month": month, "year": year},
-        "completed_stays_amount": total_from_completed,
+        "completed_stays_amount": checkout_amount,        # paid at check-out (field name kept for the dashboard)
         "advance_booking_amount": advance_amount,
+        "cash_received": cash_received,
         "refunds_issued": refunds_amount,
-        "net_revenue": net_revenue,
+        "net_revenue": cash_received - refunds_amount,
         "cancellations": {
             "total": len(pending_refunds) + len(completed_refunds),
             "pending_refunds": len(pending_refunds),
@@ -4374,7 +4441,9 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         (b.get("actual_check_out") or "")[:7] == f"{year}-{month:02d}"
     ), 2)
     
-    total_rooms = s.get("cat_i_rooms_count", 6) + s.get("cat_ii_rooms_count", 9)
+    # The rooms that actually exist (Room Occupancy counts these too), not a
+    # count typed into Settings that can drift from them.
+    total_rooms = len(all_rooms_list) or (s.get("cat_i_rooms_count", 6) + s.get("cat_ii_rooms_count", 9))
     total_booked_days = sum(v["days"] for v in color_stats.values())
     avg_occ = round(total_booked_days / (total_rooms * days_in_month) * 100, 2) if total_rooms * days_in_month > 0 else 0
     
@@ -4955,6 +5024,11 @@ async def _backup_summary() -> dict:
         "successful_last_30_days": sum(1 for t in stamps if (now_utc - t).days < 30),
         "stored_as_dates_not_text": sum(1 for b in successful if isinstance(b.get("timestamp"), datetime)),
         "kept_in_database_too": sum(1 for b in successful if b.get("stored_in_database")),
+        # Do the backup FILES on the server survive a redeploy? If this is far below
+        # successful_total, the server's disk is being wiped and only the copies kept
+        # in the database (and files downloaded to a computer) can be trusted.
+        "files_still_on_server": sum(1 for b in successful if b.get("file_path") and Path(b["file_path"]).exists()),
+        "files_missing_from_server": sum(1 for b in successful if b.get("file_path") and not Path(b["file_path"]).exists()),
         "last_download_to_a_computer": (
             await db.backup_downloads.find_one({}, {"_id": 0, "timestamp": 1, "by": 1}, sort=[("timestamp", -1)])
         ),

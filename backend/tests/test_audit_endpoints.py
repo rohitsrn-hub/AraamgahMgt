@@ -469,7 +469,7 @@ def test_cancel_refund_is_capped_at_the_advance_and_second_cancel_is_refused(api
 def test_backup_covers_every_collection_that_holds_real_data():
     from services.backup_service import COLLECTIONS_TO_BACKUP
     used = set(re.findall(r"\bdb\.([a-z_]+)\.", Path(server.__file__).read_text()))
-    not_business_data = {"backup_metadata", "backup_snapshots", "backup_downloads", "restore_logs", "migration_status", "counters", "command"}
+    not_business_data = {"backup_metadata", "backup_snapshots", "backup_downloads", "login_failures", "restore_logs", "migration_status", "counters", "command"}
     assert used - not_business_data <= set(COLLECTIONS_TO_BACKUP), \
         f"collections written by the app but missing from backups: {used - not_business_data - set(COLLECTIONS_TO_BACKUP)}"
 

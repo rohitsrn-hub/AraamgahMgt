@@ -829,10 +829,10 @@ export function generateRoomOccupancyPDF(data, settings) {
     if (room.bookings_detail && room.bookings_detail.length > 0) {
       const bookingRows = room.bookings_detail.map(b => [
         b.booking_number,
-        b.army_number,
-        b.rank,
+        "",   // Army No — paper-only, left blank for pen
+        "",   // Rank — paper-only
         b.name,
-        b.unit,
+        "",   // Unit — paper-only
         b.from_date,
         b.to_date,
         b.days,
@@ -918,10 +918,10 @@ export function generateRoomAllotmentPDF(data, settings) {
   const allotRows = (data.allotments || []).map((a, idx) => [
     idx + 1,
     a.booking_number,
-    a.army_number,
-    a.guest_rank,
+    "",   // Army No — paper-only, left blank for pen
+    "",   // Rank — paper-only
     a.guest_name,
-    a.guest_unit,
+    "",   // Unit — paper-only
     a.self_count,
     a.wife_count,
     a.child_count,

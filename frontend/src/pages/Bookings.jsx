@@ -342,11 +342,13 @@ export default function Bookings() {
       if (bookingId) {
         const targetBooking = bookings.find(b => b.id === bookingId);
         if (targetBooking) {
-          if (targetBooking.status === 'confirmed' || targetBooking.status === 'checked_in') {
+          if (targetBooking.status === 'confirmed') {
             openCancelDialog(targetBooking);
             clearParams();
           } else {
-            toast.error(`Booking cannot be cancelled (status: ${targetBooking.status})`);
+            toast.error(targetBooking.status === 'checked_in'
+              ? "A guest who has checked in cannot be cancelled — use Check Out. To undo a booking made by mistake, ask an administrator to delete it."
+              : `Booking cannot be cancelled (status: ${targetBooking.status})`);
             clearParams();
           }
         } else {
@@ -355,7 +357,7 @@ export default function Bookings() {
         }
       } else {
         // Fallback: Find first cancelable booking
-        const cancelableBooking = bookings.find(b => b.status === 'confirmed' || b.status === 'checked_in');
+        const cancelableBooking = bookings.find(b => b.status === 'confirmed');
         if (cancelableBooking) {
           openCancelDialog(cancelableBooking);
           clearParams();
@@ -1170,8 +1172,7 @@ export default function Bookings() {
         extra_beds_checkout: 0, extra_bed_days: 0,
         card_last4: "", card_type: "", upi_id: "", upi_phone: "",
         bank_name: "", bank_ifsc: "", bank_account: "",
-        guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", identity_card_number: "",
-        guest_service_status: "", service_type: "", command_hq: "",
+        guest_contact: "", guest_age: "", guest_sex: "", guest_address: "",
         family_members: [] 
       });
       fetchData();
@@ -1430,8 +1431,7 @@ export default function Bookings() {
       setRefundInfo(null);
       setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", refund_amount: 0, extra_beds: 0,
         extra_beds_checkout: 0, extra_bed_days: 0,
-        guest_contact: "", guest_age: "", guest_sex: "", guest_address: "", identity_card_number: "",
-        guest_service_status: "", service_type: "", command_hq: "",
+        guest_contact: "", guest_age: "", guest_sex: "", guest_address: "",
         bank_name: "", bank_ifsc: "", bank_account: "", upi_id: "", upi_phone: "", family_members: [] });
       fetchData();
     } catch (error) {
@@ -2093,14 +2093,6 @@ export default function Bookings() {
                                 title="Print Bill"
                                 data-testid={`print-bill-btn-${booking.id}`}>
                                 <FilePdf size={16} className="mr-1" />Bill
-                              </Button>
-                              <Button size="sm" variant="outline"
-                                onClick={() => openCancelDialog(booking)}
-                                className="text-red-600 border-red-200 hover:bg-red-50"
-                                disabled={isViewer}
-                                title={isViewer ? "Viewers cannot cancel bookings" : "Cancel booking"}
-                                data-testid={`cancel-btn-${booking.id}`}>
-                                <X size={16} />
                               </Button>
                             </>
                           )}
@@ -4379,7 +4371,7 @@ Your booking has been confirmed! 🎉
 📋 *Booking Details:*
 • Booking No: ${createdBookingData.booking_number}
 • Guest: ${createdBookingData.guest_name}
-${createdBookingData.guest_rank ? `• Rank: ${createdBookingData.guest_rank}\n` : ""}${createdBookingData.guest_unit ? `• Unit: ${createdBookingData.guest_unit}\n` : ""}• Room(s): ${(createdBookingData.room_numbers || []).join(", ")}
+• Room(s): ${(createdBookingData.room_numbers || []).join(", ")}
 • Category: ${(createdBookingData.room_categories || []).filter((v, i, arr) => arr.indexOf(v) === i).join(", ")}
 
 📅 *Stay Period:*

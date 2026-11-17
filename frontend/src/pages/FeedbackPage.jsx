@@ -87,9 +87,7 @@ export default function FeedbackPage() {
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
     const personalInfo = [
-      ['Rank & Name:', `${fb.guest_rank || ''} ${fb.guest_name || ''}`],
-      ['Service Status:', fb.service_status || '—'],
-      ['Unit:', fb.guest_unit || '—'],
+      ['Name:', fb.guest_name || ''],
       ['Phone:', fb.guest_contact || '—']
     ];
     
@@ -343,7 +341,6 @@ export default function FeedbackPage() {
                     <div className="flex justify-between items-start mb-3">
                       <div>
                         <p className="font-semibold text-slate-800">{fb.guest_name}</p>
-                        {fb.guest_rank && <p className="text-xs text-slate-500">{fb.guest_rank}{fb.service_status ? ` (${fb.service_status})` : ""}</p>}
                         <p className="text-xs text-slate-400">{fb.check_in_date} to {fb.check_out_date}</p>
                       </div>
                       <div className="text-right flex items-start gap-2">

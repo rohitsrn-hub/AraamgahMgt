@@ -5,6 +5,22 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — Net Revenue fixed and the small clean-up items done (branch: claude/qa-audit-fixes)
+Owner chose "cash received" for the Dashboard's Net Revenue: advances were
+being counted twice (a ₹1,000 stay showed ₹1,400); it is now advances plus
+check-out payments minus refunds, once each, by IST month. Also done at the
+owner's request: a guest who has checked in can no longer be cancelled (use
+Check Out); only administrators can rename a room or change its category; the
+Monthly Report counts the rooms that really exist; editing a user needs an
+8+ character password; login locks out after repeated wrong passwords from
+one address; dead second check-in/check-out forms removed from the Dashboard;
+old rank/unit/service-status references removed from feedback screens, the
+booking message and PDFs (printed blank columns kept for pen entry); the 15
+old live-server tests retired so the default test run is green (141 pass);
+the audit check now also shows whether backup files survive redeploys. Left
+alone: renaming the stored def_civ_* setting keys (needs a data migration) and
+the service-data files in the repository (pending).
+
 ## 2026-11-18 — Backups that survive, a download button, and early check-in allowed (branch: claude/qa-audit-fixes)
 Owner asked for a backup saved on the computer that clicks a button, and for
 the automatic backup to run in the daytime if the 2 am one can't. Done: an

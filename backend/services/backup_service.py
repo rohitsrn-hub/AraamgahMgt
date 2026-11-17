@@ -190,7 +190,8 @@ async def perform_full_backup(db) -> Dict:
         file_path = None
         file_size_mb = None
         try:
-            filename = f"backup_full_{timestamp.strftime('%Y%m%d_%H%M%S')}.json"
+            # short id in the name: two backups in the same second must not share a file
+            filename = f"backup_full_{timestamp.strftime('%Y%m%d_%H%M%S')}_{backup_id[:8]}.json"
             file_path = BACKUP_DIR / filename
             with open(file_path, 'w') as f:
                 json.dump(backup_data, f, indent=2, default=_json_default)

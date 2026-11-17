@@ -17,8 +17,10 @@ Vercel site the same day. Never push half-done work.
   check-out flows). Reports UI: `frontend/src/pages/reports/*`.
 
 ## Commands
-- Backend tests: `cd backend && python3 -m pytest tests/` (pure unit tests;
-  no DB or server needed for test_report_calc / test_manual_occupancy_excel).
+- Backend tests: `cd backend && pip install -r requirements.txt -r requirements-dev.txt && python3 -m pytest tests/`
+  — everything runs in-process against an in-memory database (`tests/inprocess.py`);
+  no server or MongoDB needed. The 15 old live-server tests are retired in
+  `tests/legacy_live_server/` and skipped.
 - Local run: `./start-local.sh` (or `start-local.bat` on Windows).
 - New Python dependency → add to `backend/requirements.txt` in the same
   commit, or the deployed backend crashes on that endpoint.
@@ -49,6 +51,11 @@ Vercel site the same day. Never push half-done work.
 - The check-out screen shows the SERVER's bill (`GET /bookings/{id}/checkout-quote`,
   the same function `check_out` stores). Never re-add client-side bill maths.
 - The Reports page "Audit check" audits only the previous closed month, by design.
+- **Dashboard Net Revenue** = cash received in the IST month (advances +
+  payments at check-out) minus refunds paid. Each payment counts once.
+- A guest who has **checked in cannot be cancelled** (use Check Out; a
+  check-in made by mistake is undone by an administrator deleting the
+  booking). Renaming a room or changing its category/floor is admin-only.
 
 ## Hard data rules
 - NEVER store or digitize: military rank, Army/service number, unit, or any

@@ -7,13 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { generateCheckoutReceipt } from "@/utils/pdfUtils";
 import { fmtINR } from "@/utils/formatters";
-import FeedbackForm from "@/components/FeedbackForm";
 import BookingSelectionModal from "@/components/BookingSelectionModal";
 import { 
   Bed, 
@@ -104,11 +101,7 @@ export default function Dashboard() {
   const [showCalendar, setShowCalendar] = useState(false);
   
   // Modal states
-  const [showCheckInModal, setShowCheckInModal] = useState(false);
-  const [showCheckOutModal, setShowCheckOutModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [showFeedback, setShowFeedback] = useState(false);
-  const [pendingCheckoutBooking, setPendingCheckoutBooking] = useState(null);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [refundInfo, setRefundInfo] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -121,37 +114,11 @@ export default function Dashboard() {
   const [showBookingSelectionAction, setShowBookingSelectionAction] = useState(null); // "checkin" | "checkout" | null
   
   // Action form
-  const [actionForm, setActionForm] = useState({
-    staff_id: "",
-    notes: "",
-    final_payment: 0,
-    payment_mode: "",
-    reason: "",
-    extra_beds: 0,
-    // Check-in personal details
-    guest_contact: "",
-    guest_age: "",
-    guest_sex: "",
-    guest_address: "",
-    identity_card_number: "",
-    guest_service_status: "",
-    service_type: "",
-    command_hq: "",
-    bank_name: "",
-    bank_ifsc: "",
-    bank_account: "",
-    upi_id: "",
-    upi_phone: "",
-    family_members: []
-  });
+  const [actionForm, setActionForm] = useState({ reason: "" });   // the cancel dialog's reason
   
   // Validation error states
-  const [phoneError, setPhoneError] = useState("");
-  const [checkinIfscError, setCheckinIfscError] = useState("");
-  const [checkinUpiPhoneError, setCheckinUpiPhoneError] = useState("");
   
   // Room-guest mapping for check-in pricing
-  const [roomGuestMapping, setRoomGuestMapping] = useState([]);
 
   const fetchDashboardData = async () => {
     try {
@@ -224,71 +191,7 @@ export default function Dashboard() {
   ];
 
   // Filter bookings by status
-  const confirmedBookings = allBookings.filter(b => b.status === "confirmed");
-  const checkedInBookings = allBookings.filter(b => b.status === "checked_in");
   const cancellableBookings = allBookings.filter(b => b.status === "confirmed"); // Only confirmed bookings can be cancelled
-
-  // Handle Check-In
-  const handleCheckIn = async () => {
-    if (!actionForm.staff_id) {
-      toast.error("Please select staff member");
-      return;
-    }
-    setActionLoading(true);
-    try {
-      await axios.post(`${API}/bookings/check-in`, {
-        booking_id: selectedBooking.id,
-        staff_id: actionForm.staff_id,
-        extra_beds: actionForm.extra_beds,
-        notes: actionForm.notes
-      });
-      toast.success(`${selectedBooking.guest_name} checked in successfully!`);
-      setShowCheckInModal(false);
-      setSelectedBooking(null);
-      setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", extra_beds: 0 });
-      fetchDashboardData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Check-in failed");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Handle Check-Out: first show feedback, then complete
-  const handleProceedToFeedback = () => {
-    if (!actionForm.staff_id) { toast.error("Please select staff member"); return; }
-    setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm } });
-    setShowCheckOutModal(false);
-    setShowFeedback(true);
-  };
-
-  const handleFeedbackSubmitted = async () => {
-    setShowFeedback(false);
-    const booking = pendingCheckoutBooking;
-    const form = booking._checkoutForm;
-    setActionLoading(true);
-    try {
-      await axios.post(`${API}/bookings/check-out`, {
-        booking_id: booking.id,
-        staff_id: form.staff_id,
-        final_payment: form.final_payment,
-        payment_mode: form.payment_mode,
-        notes: form.notes
-      });
-      toast.success(`${booking.guest_name} checked out successfully!`);
-      // Generate receipt PDF
-      const settingsData = await axios.get(`${API}/settings`).then(r => r.data);
-      generateCheckoutReceipt(booking, settingsData);
-      setPendingCheckoutBooking(null);
-      setSelectedBooking(null);
-      setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", extra_beds: 0 });
-      fetchDashboardData();
-    } catch (error) {
-      toast.error(error.response?.data?.detail || "Check-out failed");
-    } finally {
-      setActionLoading(false);
-    }
-  };
 
   // Calculate refund when booking is selected for cancellation
   const calculateRefund = async (booking) => {
@@ -316,7 +219,7 @@ export default function Dashboard() {
       setShowCancelModal(false);
       setSelectedBooking(null);
       setRefundInfo(null);
-      setActionForm({ staff_id: "", notes: "", final_payment: 0, payment_mode: "", reason: "", extra_beds: 0 });
+      setActionForm({ reason: "" });
       fetchDashboardData();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Cancellation failed");
@@ -987,7 +890,7 @@ export default function Dashboard() {
                 <div className="text-2xl font-bold text-emerald-800">
                   {formatCurrency(funds.completed_stays_amount)}
                 </div>
-                <div className="text-sm text-emerald-600 mt-1">Completed Stays</div>
+                <div className="text-sm text-emerald-600 mt-1">Paid at Check-out</div>
               </div>
 
               <div className="fund-card advance" data-testid="fund-advance">
@@ -1012,6 +915,7 @@ export default function Dashboard() {
                   {formatCurrency(funds.net_revenue)}
                 </div>
                 <div className="text-sm text-blue-600 mt-1">Net Revenue</div>
+                <div className="text-xs text-blue-500">cash received − refunds</div>
               </div>
             </div>
 
@@ -1063,245 +967,6 @@ export default function Dashboard() {
         onOpenChange={(open) => !open && setShowBookingSelectionAction(null)}
         action={showBookingSelectionAction || "checkin"}
       />
-
-      {/* Check-In Modal */}
-      <Dialog open={showCheckInModal} onOpenChange={setShowCheckInModal}>
-        <DialogContent className="max-w-lg" data-testid="checkin-modal">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-emerald-600">
-              <SignIn size={24} />
-              Check In Guest
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            {/* Booking Selection */}
-            <div>
-              <Label>Select Booked Guest *</Label>
-              {confirmedBookings.length === 0 ? (
-                <div className="p-4 bg-slate-50 rounded-xl text-center text-slate-500 mt-2">
-                  No confirmed bookings available for check-in
-                </div>
-              ) : (
-                <Select 
-                  value={selectedBooking?.id || ""} 
-                  onValueChange={(v) => setSelectedBooking(confirmedBookings.find(b => b.id === v))}
-                >
-                  <SelectTrigger className="earms-input mt-1" data-testid="select-checkin-booking">
-                    <SelectValue placeholder="Select a booking" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {confirmedBookings.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.guest_name} - Room {getRoomDisplay(b)} ({format(parseISO(b.check_in_date), "dd MMM")})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            {selectedBooking && (
-              <div className="p-4 bg-emerald-50 rounded-xl">
-                <p className="font-medium text-emerald-800">{selectedBooking.guest_name}</p>
-                <p className="text-sm text-emerald-600">Room {getRoomDisplay(selectedBooking)} • {getRoomCategories(selectedBooking)}</p>
-                <p className="text-sm text-emerald-600">
-                  {format(parseISO(selectedBooking.check_in_date), "dd MMM")} - {format(parseISO(selectedBooking.check_out_date), "dd MMM yyyy")}
-                </p>
-              </div>
-            )}
-
-            <div>
-              <Label>Staff Member *</Label>
-              <Select value={actionForm.staff_id} onValueChange={(v) => setActionForm({...actionForm, staff_id: v})}>
-                <SelectTrigger className="earms-input mt-1" data-testid="select-staff-checkin">
-                  <SelectValue placeholder="Select staff" />
-                </SelectTrigger>
-                <SelectContent>
-                  {staff.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} ({s.staff_type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label>Notes</Label>
-              <Textarea
-                value={actionForm.notes}
-                onChange={(e) => setActionForm({...actionForm, notes: e.target.value})}
-                placeholder="Check-in notes..."
-                className="mt-1"
-              />
-            </div>
-            {/* Extra Beds */}
-            <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
-              <Label className="font-semibold text-amber-800">Extra Beds Required</Label>
-              <p className="text-xs text-amber-600 mb-2">₹75 per extra bed per night — added to final bill</p>
-              <div className="flex items-center gap-3">
-                <Input
-                  type="number"
-                  min="0"
-                  max="5"
-                  value={actionForm.extra_beds}
-                  onChange={(e) => setActionForm({...actionForm, extra_beds: parseInt(e.target.value) || 0})}
-                  onFocus={(e) => e.target.select()}
-                  className="earms-input w-24"
-                  data-testid="input-extra-beds"
-                />
-                {actionForm.extra_beds > 0 && (
-                  <span className="text-sm font-medium text-amber-700">
-                    Extra charge: {fmtINR(actionForm.extra_beds * 75, 0)}/night
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCheckInModal(false); setSelectedBooking(null); }}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleCheckIn} 
-              disabled={!selectedBooking || !actionForm.staff_id || actionLoading}
-              className="bg-emerald-500 hover:bg-emerald-600"
-            >
-              {actionLoading ? <SpinnerGap size={20} className="animate-spin" /> : "Confirm Check-In"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Check-Out Modal */}
-      <Dialog open={showCheckOutModal} onOpenChange={setShowCheckOutModal}>
-        <DialogContent className="max-w-lg" data-testid="checkout-modal">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <SignOut size={24} />
-              Check Out Guest
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            {/* Booking Selection */}
-            <div>
-              <Label>Select Checked-In Guest *</Label>
-              {checkedInBookings.length === 0 ? (
-                <div className="p-4 bg-slate-50 rounded-xl text-center text-slate-500 mt-2">
-                  No checked-in guests available for check-out
-                </div>
-              ) : (
-                <Select 
-                  value={selectedBooking?.id || ""} 
-                  onValueChange={(v) => setSelectedBooking(checkedInBookings.find(b => b.id === v))}
-                >
-                  <SelectTrigger className="earms-input mt-1" data-testid="select-checkout-booking">
-                    <SelectValue placeholder="Select a guest" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {checkedInBookings.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.guest_name} - Room {getRoomDisplay(b)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            {selectedBooking && (
-              <div className="p-4 bg-amber-50 rounded-xl">
-                <p className="font-medium text-amber-800">{selectedBooking.guest_name}</p>
-                <p className="text-sm text-amber-600">Room {getRoomDisplay(selectedBooking)}</p>
-                {selectedBooking.extra_beds > 0 && (
-                  <p className="text-xs text-amber-600">Extra Beds: {selectedBooking.extra_beds} × ₹75 = {fmtINR(selectedBooking.extra_bed_charge, 2)}</p>
-                )}
-                <p className="text-sm font-medium text-amber-800 mt-1">
-                  Balance Due: {formatCurrency(selectedBooking.balance_amount)}
-                </p>
-              </div>
-            )}
-
-            <div>
-              <Label>Staff Member *</Label>
-              <Select value={actionForm.staff_id} onValueChange={(v) => setActionForm({...actionForm, staff_id: v})}>
-                <SelectTrigger className="earms-input mt-1" data-testid="select-staff-checkout">
-                  <SelectValue placeholder="Select staff" />
-                </SelectTrigger>
-                <SelectContent>
-                  {staff.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name} ({s.staff_type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Final Payment</Label>
-                <Input
-                  type="number"
-                  value={actionForm.final_payment}
-                  onChange={(e) => setActionForm({...actionForm, final_payment: parseFloat(e.target.value) || 0})}
-                  className="earms-input mt-1"
-                />
-              </div>
-              <div>
-                <Label>Payment Mode</Label>
-                <Select value={actionForm.payment_mode} onValueChange={(v) => setActionForm({...actionForm, payment_mode: v})}>
-                  <SelectTrigger className="earms-input mt-1">
-                    <SelectValue placeholder="Mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cash">Cash</SelectItem>
-                    <SelectItem value="upi">UPI</SelectItem>
-                    <SelectItem value="card">Card</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div>
-              <Label>Notes</Label>
-              <Textarea
-                value={actionForm.notes}
-                onChange={(e) => setActionForm({...actionForm, notes: e.target.value})}
-                placeholder="Check-out notes..."
-                className="mt-1"
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setShowCheckOutModal(false); setSelectedBooking(null); }}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleProceedToFeedback} 
-              disabled={!selectedBooking || !actionForm.staff_id || actionLoading}
-              className="bg-amber-500 hover:bg-amber-600"
-              data-testid="proceed-to-feedback-btn"
-            >
-              {actionLoading ? <SpinnerGap size={20} className="animate-spin" /> : "Proceed to Feedback"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Feedback Form (shown before completing checkout) */}
-      {showFeedback && pendingCheckoutBooking && (
-        <FeedbackForm
-          booking={pendingCheckoutBooking}
-          open={showFeedback}
-          onClose={() => { setShowFeedback(false); setPendingCheckoutBooking(null); }}
-          onSubmitted={handleFeedbackSubmitted}
-        />
-      )}
 
       {/* Cancel Booking Modal */}
       <Dialog open={showCancelModal} onOpenChange={(open) => { setShowCancelModal(open); if (!open) { setSelectedBooking(null); setRefundInfo(null); } }}>

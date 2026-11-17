@@ -156,16 +156,8 @@ export default function FeedbackForm({ booking, open, onClose, onSubmitted }) {
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-2">
               <div className="flex justify-between border-b border-dotted border-slate-300 pb-1">
-                <span className="text-slate-600 text-xs">Rank &amp; Name / Rank &amp; Naam:</span>
-                <span className="font-medium text-xs text-slate-800">{booking?.guest_rank ? `${booking.guest_rank} ` : ""}{booking?.guest_name}</span>
-              </div>
-              <div className="flex justify-between border-b border-dotted border-slate-300 pb-1">
-                <span className="text-slate-600 text-xs">Serving/Retired / Sevarat:</span>
-                <span className="font-medium text-xs text-slate-800">{booking?.guest_service_status || "—"}</span>
-              </div>
-              <div className="flex justify-between border-b border-dotted border-slate-300 pb-1">
-                <span className="text-slate-600 text-xs">Unit:</span>
-                <span className="font-medium text-xs text-slate-800">{booking?.guest_unit || "—"}</span>
+                <span className="text-slate-600 text-xs">Name / Naam:</span>
+                <span className="font-medium text-xs text-slate-800">{booking?.guest_name}</span>
               </div>
               <div className="flex justify-between border-b border-dotted border-slate-300 pb-1">
                 <span className="text-slate-600 text-xs">Phone No:</span>
