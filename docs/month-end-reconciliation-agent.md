@@ -159,7 +159,11 @@ cancelled after check-in, bookings closed outside the check-out screen. Then
 `current_state`: active bookings with a wrong stored refund amount, and the
 backups — read `latest_success` and `hours_since_latest`: more than about 26
 hours means the daily backup has not run, and `successful_last_30_days` should
-be close to 30. Tell me about any that is non-zero or stale, and what it means
+be close to 30. Also read `last_download_to_a_computer`: a backup file should
+have been saved to a computer at the last month end (Backup & Restore page,
+"Download backup", admin) — if it is missing or older than about 35 days,
+remind me to do it. `kept_in_database_too` should equal `successful_total` for
+recent backups. Tell me about any that is non-zero or stale, and what it means
 in practice.
 
 **Step 5 — the paper register, if I gave it to you.** Compare the register's

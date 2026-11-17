@@ -5,6 +5,23 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — Backups that survive, a download button, and early check-in allowed (branch: claude/qa-audit-fixes)
+Owner asked for a backup saved on the computer that clicks a button, and for
+the automatic backup to run in the daytime if the 2 am one can't. Done: an
+admin "Download backup" button on the Backup page saves a complete file (no
+login passwords) and the month-end check now reminds to do it; every backup
+is also kept inside the database, so Restore still works after a deploy wipes
+the server's files; the daily backup moved to 14:00 IST and one is also taken
+in the background whenever someone is using the app and the last is over 20
+hours old (a sleeping free server can't run a 2 am job — to be confirmed in
+the Render dashboard, the provider's docs could not be reached from here);
+the backup time set on the screen now survives a restart; a downloaded file is
+restored with backend/scripts/restore_from_backup_file.py. Early check-in
+(option a): the screen no longer blocks it; check-in moves to today, bills the
+extra night(s), and refuses with the clashing booking's number if the room is
+taken. Service-data files in the repository: left pending at the owner's
+request.
+
 ## 2026-11-18 — Owner's rulings applied: extra beds at check-out only, late check-outs billed for nights stayed (branch: claude/qa-audit-fixes)
 Owner ruled: (1) extra beds are charged at check-out for the exact beds and
 days used — a bed noted at check-in is not a charge; (2) late check-outs are

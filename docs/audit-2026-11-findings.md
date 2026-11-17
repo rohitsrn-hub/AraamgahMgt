@@ -52,7 +52,9 @@ How to run the tests (no database or server needed):
 - **B2 late check-outs:** billed for nights actually stayed. Check-out now stores that bill (charge reason `late_checkout`); reports already counted those nights.
 - **B1 check-out screen:** now shows the server's bill (`/bookings/{id}/checkout-quote`) instead of its own elapsed-time arithmetic.
 - Also fixed in the same pass: the check-out screen's default date used UTC (a day behind between 00:00 and 05:30 IST); confirming a stay extension showed "Network error" after succeeding (`fetchBookings` did not exist).
-- **Still open:** B4 early check-in blocked on screen, B5 service data in the repository, B6 backup storage, B7 dashboard net revenue.
+- **B4 early check-in (owner chose option a):** the screen no longer blocks it; check-in moves to today, bills the extra night(s), and is refused with a message naming the booking if the room is taken for those nights.
+- **B6 backups (owner chose a download button, plus a daytime/automatic backup):** "Download backup" on the Backup page (admin) saves a complete file to the computer used, without login passwords; each backup is now also kept compressed inside the database (`backup_snapshots`) so Restore works after a redeploy wipes the server's files; the daily backup is a FULL one at 14:00 IST, plus one is taken in the background whenever the app is in use and the last is over 20 hours old. A downloaded file is restored with `backend/scripts/restore_from_backup_file.py` (dry run by default).
+- **Still open:** B5 service data in the repository (kept pending by the owner), B7 dashboard net revenue and the smaller items in B9 — being discussed with the owner.
 
 ## C. Audit check (kept permanently)
 
