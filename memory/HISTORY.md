@@ -5,6 +5,19 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — Approved live-data corrections built, with originals saved and an undo (branch: claude/qa-audit-fixes)
+Owner approved correcting what the October check found, provided the original
+values are kept until the manual register is reconciled. Built as an admin
+action on the Reports page (Preview / Apply / Undo last): it fixes the stored
+bill of two bookings (BK1284 ₹1,400 → ₹1,200; BK1032 ₹1,625 → ₹2,325) and
+resets a stale "refund due" on 10 active bookings. Each record is changed only
+if it still holds what the audit saw, a full backup is taken first, every
+original value is saved in the data_corrections collection and on the booking's
+own log, and Undo restores them. Nothing has been changed yet — it happens
+when the owner presses Apply. Reports are unaffected. The other older
+bookings whose stored bill differs (pre-ruling late check-outs and extra beds)
+are deliberately left alone until the register is reconciled.
+
 ## 2026-11-18 — October 2026 month check: reconciles; ₹7,900 not collected still to be traced (branch: claude/qa-audit-fixes)
 First full month check (run on 18 Nov, covers 1-31 Oct). October revenue is
 ₹2,50,625 across 134 bookings and 362 room-days, identical in all four

@@ -17,7 +17,7 @@ from datetime import datetime, timezone, timedelta, date as date_type
 from enum import Enum
 
 # Import backup services
-from services import backup_service, restore_service, scheduler_service
+from services import backup_service, restore_service, scheduler_service, corrections_service
 from services.migration_service import run_startup_migrations
 
 # Import utils
@@ -3803,6 +3803,26 @@ async def sync_room_status(current_user: dict = Depends(require_admin_role)):
         "total_checked_in_bookings": len(checked_in_bookings),
         "total_occupied_rooms": len(occupied_room_ids)
     }
+
+# ============= APPROVED DATA CORRECTIONS (admin; see services/corrections_service.py) =============
+
+@api_router.get("/admin/corrections")
+async def corrections_preview(current_user: dict = Depends(require_admin_role)):
+    """What the approved corrections WOULD change (nothing is changed), plus every batch applied so far."""
+    return {"preview": await corrections_service.plan_corrections(db), "batches": await corrections_service.list_batches(db)}
+
+
+@api_router.post("/admin/corrections/apply")
+async def corrections_apply(current_user: dict = Depends(require_admin_role)):
+    """Apply the approved corrections: full backup first, originals recorded, guarded per record."""
+    return await corrections_service.apply_corrections(db, current_user.get("username") or current_user.get("email") or current_user.get("id"))
+
+
+@api_router.post("/admin/corrections/undo/{batch_id}")
+async def corrections_undo(batch_id: str, current_user: dict = Depends(require_admin_role)):
+    """Put back the original values of a batch (a record changed since is skipped, not overwritten)."""
+    return await corrections_service.undo_batch(db, batch_id, current_user.get("username") or current_user.get("email") or current_user.get("id"))
+
 
 @api_router.get("/dashboard/occupancy")
 async def get_occupancy(current_user: dict = Depends(get_current_user_with_db)):

@@ -64,7 +64,11 @@ Vercel site the same day. Never push half-done work.
 - Old field names are banned in new code: `guest_rank`, `def_civ_*`,
   `jco`/`or` report keys. Use `non_org_*` and `org_cat_i`/`org_cat_ii`.
 - Live production DB: any migration or bulk data change needs the owner's
-  explicit go-ahead first, plus a stated rollback path.
+  explicit go-ahead first, plus a stated rollback path. The pattern for a
+  approved correction to specific live records is `services/corrections_service.py`:
+  named records only, preview first, per-record guards, a full backup before,
+  originals saved in `data_corrections`, and an Undo. (Admin buttons on the
+  Reports page.)
 
 ## Deliberate design choices (not bugs — do not "fix")
 - **Overstay**: a guest still checked in past their planned checkout date

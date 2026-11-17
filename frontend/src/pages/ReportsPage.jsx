@@ -40,6 +40,46 @@ export default function ReportsPage({ settings }) {
     }
   };
 
+  // Approved data corrections (admin): a few specific stored bills / stale values agreed with the
+  // owner after the October 2026 check. Preview changes nothing; Apply takes a full backup first and
+  // saves every original value; Undo puts them back. See services/corrections_service.py.
+  const [corrBusy, setCorrBusy] = useState(false);
+  const [corrText, setCorrText] = useState("");
+  const corrCall = async (fn) => {
+    setCorrBusy(true);
+    try { await fn(); }
+    catch (error) { toast.error(error.response?.data?.detail || "That did not work. Nothing was changed unless a message above says so."); }
+    finally { setCorrBusy(false); }
+  };
+  const showCorr = async (data, message) => {
+    const text = JSON.stringify(data, null, 1);
+    setCorrText(text);
+    try { await navigator.clipboard.writeText(text); toast.success(`${message} Details copied.`); }
+    catch { toast.success(message); }
+  };
+  const previewCorrections = () => corrCall(async () => {
+    const res = await axios.get(`${API}/admin/corrections`);
+    const ready = res.data.preview.filter((p) => p.status === "ready").length;
+    await showCorr(res.data, `${ready} correction(s) ready, nothing changed.`);
+  });
+  const applyCorrections = () => corrCall(async () => {
+    const pre = await axios.get(`${API}/admin/corrections`);
+    const ready = pre.data.preview.filter((p) => p.status === "ready");
+    if (ready.length === 0) { await showCorr(pre.data, "Nothing to apply."); return; }
+    const list = ready.map((p) => `${p.booking_number} (${p.kind === "bill" ? "bill" : "refund due"})`).join(", ");
+    if (!window.confirm(`Apply ${ready.length} correction(s)?\n\n${list}\n\nA full backup is taken first and every original value is saved, so this can be undone.`)) return;
+    const res = await axios.post(`${API}/admin/corrections/apply`);
+    await showCorr(res.data, `${res.data.applied} correction(s) applied. Keep the copied details.`);
+  });
+  const undoCorrections = () => corrCall(async () => {
+    const pre = await axios.get(`${API}/admin/corrections`);
+    const batch = pre.data.batches.find((b) => b.records.some((r) => !r.reverted_at));
+    if (!batch) { await showCorr(pre.data, "Nothing to undo."); return; }
+    if (!window.confirm(`Put back the original values from the corrections applied on ${batch.applied_at.slice(0, 10)} (${batch.records.length} record(s))?`)) return;
+    const res = await axios.post(`${API}/admin/corrections/undo/${batch.batch_id}`);
+    await showCorr(res.data, `${res.data.restored} record(s) restored to their original values.`);
+  });
+
   return (
     <div className="space-y-6 p-6">
       {/* Header */}
@@ -66,6 +106,23 @@ export default function ReportsPage({ settings }) {
             <textarea readOnly value={auditCheckText} rows={4} onFocus={(e) => e.target.select()}
               className="mt-2 w-full text-xs font-mono p-2 border border-slate-300 rounded" />
           )}
+
+          <div className="mt-4 pt-3 border-t border-slate-200" data-testid="corrections-box">
+            <p className="font-semibold text-slate-700">Approved data corrections</p>
+            <p className="text-slate-600 mt-1">
+              A few stored bills and stale values agreed after the October check. Preview changes nothing. Apply takes a full backup
+              first and saves every original value; Undo puts them back. Reports are not affected either way.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button onClick={previewCorrections} disabled={corrBusy} className="px-3 py-2 rounded-lg bg-white border border-slate-300 font-semibold disabled:opacity-60">Preview</button>
+              <button onClick={applyCorrections} disabled={corrBusy} className="px-3 py-2 rounded-lg bg-slate-700 text-white font-semibold disabled:opacity-60">Apply</button>
+              <button onClick={undoCorrections} disabled={corrBusy} className="px-3 py-2 rounded-lg bg-white border border-slate-300 font-semibold disabled:opacity-60">Undo last</button>
+            </div>
+            {corrText && (
+              <textarea readOnly value={corrText} rows={6} onFocus={(e) => e.target.select()}
+                className="mt-2 w-full text-xs font-mono p-2 border border-slate-300 rounded" />
+            )}
+          </div>
         </div>
       )}
 
