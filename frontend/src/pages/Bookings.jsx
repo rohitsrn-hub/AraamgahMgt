@@ -1025,6 +1025,22 @@ export default function Bookings() {
       });
     });
     
+    // Non-Org rates are a common source of month-end disputes: make staff confirm each time a room
+    // will be billed at the Non-Org rate, and say why.
+    const nonOrgRooms = roomGuestMapping
+      .filter((r) => !selectedBooking.is_org || calculateRoomChargeCategory(r).charge_category === "Non-Org")
+      .map((r) => r.room_number);
+    if (nonOrgRooms.length > 0) {
+      const why = selectedBooking.is_org
+        ? "a family member in that room has no Org card"
+        : "this booking is marked Non-Org (not an Organization guest)";
+      const ok = window.confirm(
+        `Room ${nonOrgRooms.join(", ")} will be billed at the NON-ORG rate because ${why}.\n\n` +
+        "Press OK only if that is correct. If the guest or family does have valid Org status, press Cancel and fix it first."
+      );
+      if (!ok) return;
+    }
+
     // If the recalculated total no longer matches what this booking was
     // originally quoted at (most commonly: a scheduled rate change took
     // effect between when it was booked and today's check-in), stop and
@@ -1168,6 +1184,7 @@ export default function Bookings() {
         extra_bed_days: form.extra_bed_days || 0,
         actual_checkout_date: form.actual_checkout_date || istTodayStr(),
         confirm_late: !!form.confirm_late,
+        waive_penalty: user?.role === "admin" && !!form.waive_penalty,
         // Include payment details
         card_last4: form.card_last4 || undefined,
         card_type: form.card_type || undefined,
@@ -1398,7 +1415,7 @@ export default function Bookings() {
   const openCheckOutDialog = (booking, defaultDate) => {
     setSelectedBooking(booking);
     const overdue = booking?.check_out_date && booking.check_out_date < istTodayStr();
-    setActionForm(prev => ({ ...prev, actual_checkout_date: defaultDate || (overdue ? booking.check_out_date : undefined) }));
+    setActionForm(prev => ({ ...prev, waive_penalty: false, actual_checkout_date: defaultDate || (overdue ? booking.check_out_date : undefined) }));
     setShowCheckOut(true);
   };
 
@@ -1420,6 +1437,7 @@ export default function Bookings() {
             actual_checkout_date: checkoutDate,
             extra_beds: actionForm.extra_beds_checkout || 0,
             extra_bed_days: actionForm.extra_bed_days || 0,
+            waive_penalty: user?.role === "admin" && !!actionForm.waive_penalty,
           },
         });
         if (!cancelled) setCheckoutQuote(res.data);
@@ -1435,7 +1453,7 @@ export default function Bookings() {
     }, 250);
     return () => { cancelled = true; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showCheckOut, selectedBooking?.id, checkoutDate, actionForm.extra_beds_checkout, actionForm.extra_bed_days]);
+  }, [showCheckOut, selectedBooking?.id, checkoutDate, actionForm.extra_beds_checkout, actionForm.extra_bed_days, actionForm.waive_penalty]);
 
   // Nights between check-in and the check-out date entered (caps "days used" for extra beds).
   const checkoutStayNights = () => Math.max(
@@ -3467,6 +3485,13 @@ export default function Bookings() {
                       <p className="text-red-600 mt-1">
                         Full booking amount will be charged (from {selectedBooking.check_in_date} to {selectedBooking.check_out_date}).
                       </p>
+                      {user?.role === "admin" && (
+                        <label className="flex items-start gap-2 mt-2 text-red-800 cursor-pointer" data-testid="waive-penalty">
+                          <input type="checkbox" className="mt-0.5" checked={!!actionForm.waive_penalty}
+                            onChange={(e) => setActionForm({ ...actionForm, waive_penalty: e.target.checked })} />
+                          <span>Waive this charge{checkoutQuote?.penalty_amount ? ` (${fmtINR(checkoutQuote.penalty_amount)})` : ""} — bill only the nights actually stayed. Administrator only; this is recorded on the booking.</span>
+                        </label>
+                      )}
                     </div>
                   )}
                 </div>

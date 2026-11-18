@@ -820,3 +820,33 @@ def test_one_night_late_needs_no_confirmation_and_the_quote_reports_the_lateness
     assert (q2["late_nights"], q2["late_extra_amount"]) == (0, 0)
     out = checkout(api, actual_checkout_date="2026-05-13")
     assert out["charge_reason"] == "late_checkout" and out["total_amount"] == 1500
+
+
+# ====================================================================
+# Administrator can waive the unannounced-early-departure charge
+# ====================================================================
+
+def test_admin_can_waive_the_early_departure_charge_and_it_is_recorded(api):
+    api.seed("bookings", [booking(check_out_date="2026-05-14")])          # booked 4 nights, Rs 500/night
+    checkin(api)
+    q = api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "2026-05-11"}).json()
+    assert (q["charge_reason"], q["total_due"], q["penalty_amount"]) == ("early_checkout_not_informed", 2000, 1500)
+    q = api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "2026-05-11", "waive_penalty": True}).json()
+    assert (q["charge_reason"], q["total_due"], q["penalty_amount"]) == ("early_checkout_penalty_waived", 500, 1500)
+    out = checkout(api, actual_checkout_date="2026-05-11", waive_penalty=True)
+    assert out["total_amount"] == 500 and out["charged_nights"] == 1
+    assert out["penalty_waived_by"] == "test-admin" and out["penalty_waived_amount"] == 1500
+    assert reported_total(api, "b1")["total_amount"] == 500
+
+
+def test_staff_cannot_waive_and_nothing_is_saved(api):
+    api.seed("bookings", [booking(check_out_date="2026-05-14")])
+    checkin(api)
+    api.as_role("staff")
+    r = api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "2026-05-11", "waive_penalty": True})
+    assert r.status_code == 403
+    r = api.client.post("/api/bookings/check-out", json={"booking_id": "b1", "staff_id": "s1",
+                                                          "actual_checkout_date": "2026-05-11", "waive_penalty": True})
+    assert r.status_code == 403
+    assert api.find_one("bookings", {"id": "b1"})["status"] == "checked_in"
+    assert checkout(api, actual_checkout_date="2026-05-11")["total_amount"] == 2000      # staff still get the normal rule

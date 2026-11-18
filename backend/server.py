@@ -475,6 +475,9 @@ class CheckOutRequest(BaseModel):
     actual_checkout_date: Optional[str] = None  # YYYY-MM-DD format
     # Staff have seen the "this bills N extra nights" warning for a check-out well after the booked date
     confirm_late: bool = False
+    # Administrator forgives the full-stay charge for an early departure the guest did not announce
+    # at check-in: billed for the nights actually stayed. Administrators only.
+    waive_penalty: bool = False
 
 class CancelBookingRequest(BaseModel):
     booking_id: str
@@ -2773,7 +2776,8 @@ async def update_booking_rooms(booking_id: str, request: dict, current_user: dic
 LATE_CHECKOUT_CONFIRM_FROM_NIGHTS = 2
 
 
-async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds: int, extra_bed_days: int) -> dict:
+async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds: int, extra_bed_days: int,
+                         waive_penalty: bool = False) -> dict:
     """What a guest owes at check-out — the ONE calculation behind both the
     check-out screen's quote and the bill check_out() stores, so the amount
     staff collect, the stored total and every report can't differ.
@@ -2804,6 +2808,8 @@ async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds:
     if actual_dt < booked_out_dt:
         if booking.get("planned_early_checkout_date"):
             charged_nights, charge_reason = (actual_dt - check_in_dt).days, "early_checkout_informed"
+        elif waive_penalty:
+            charged_nights, charge_reason = (actual_dt - check_in_dt).days, "early_checkout_penalty_waived"
         else:
             charged_nights, charge_reason = (booked_out_dt - check_in_dt).days, "early_checkout_not_informed"
     elif actual_dt > booked_out_dt:
@@ -2834,9 +2840,17 @@ async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds:
     if late_nights:
         on_time = stay_charges(booking, settings, room_maps, (booked_out_dt - check_in_dt).days)["total"]
         late_extra_amount = round(room_total - on_time, 2)
+    # What the full-stay charge for an unannounced early departure adds (shown so an administrator
+    # can decide to waive it).
+    penalty_amount = 0.0
+    if charge_reason == "early_checkout_not_informed":
+        penalty_amount = round(room_total - stay_charges(priced, settings, room_maps, max(0, (actual_dt - check_in_dt).days))["total"], 2)
+    elif charge_reason == "early_checkout_penalty_waived":
+        penalty_amount = round(stay_charges(priced, settings, room_maps, (booked_out_dt - check_in_dt).days)["total"] - room_total, 2)
     total_due = room_total + extra_bed_charge
     advance_paid = booking.get("advance_paid", 0) or 0
     return {
+        "penalty_amount": penalty_amount,
         "actual_checkout_date": actual_checkout_date,
         "charged_nights": charged_nights,
         "charge_reason": charge_reason,
@@ -2860,6 +2874,7 @@ async def checkout_quote(
     actual_checkout_date: Optional[str] = None,
     extra_beds: int = 0,
     extra_bed_days: int = 0,
+    waive_penalty: bool = False,
     current_user: dict = Depends(require_staff_or_admin_role),
 ):
     """The bill check-out would produce for these inputs, without changing
@@ -2870,7 +2885,9 @@ async def checkout_quote(
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking["status"] != BookingStatus.CHECKED_IN.value:
         raise HTTPException(status_code=400, detail="Booking is not checked in")
-    bill = await _checkout_bill(booking, actual_checkout_date, extra_beds, extra_bed_days)
+    if waive_penalty and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an administrator can waive the early check-out charge")
+    bill = await _checkout_bill(booking, actual_checkout_date, extra_beds, extra_bed_days, waive_penalty)
     bill.pop("priced_booking")
     return bill
 
@@ -2886,7 +2903,10 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
     
     now = datetime.now(timezone.utc).isoformat()
 
-    bill = await _checkout_bill(booking, request.actual_checkout_date, request.extra_beds_checkout, request.extra_bed_days)
+    if request.waive_penalty and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Only an administrator can waive the early check-out charge")
+    bill = await _checkout_bill(booking, request.actual_checkout_date, request.extra_beds_checkout, request.extra_bed_days,
+                                request.waive_penalty)
     if bill["late_nights"] >= LATE_CHECKOUT_CONFIRM_FROM_NIGHTS and not request.confirm_late:
         # Nothing has been saved. The screen shows this and asks again with confirm_late=true.
         raise HTTPException(status_code=409, detail={
@@ -2918,6 +2938,8 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
         "actual_checkout_date": actual_checkout_date,
         "charged_nights": charged_nights,
         "charge_reason": charge_reason,
+        **({"penalty_waived_by": current_user.get("username") or current_user.get("id"),
+            "penalty_waived_amount": bill["penalty_amount"]} if charge_reason == "early_checkout_penalty_waived" else {}),
         "room_rent_total": room_rent_only,       # rent only, as at check-in
         "license_fee_total": license_fee_only,
         "extra_beds_checkout": request.extra_beds_checkout,

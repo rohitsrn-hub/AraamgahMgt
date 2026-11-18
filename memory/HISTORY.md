@@ -5,6 +5,15 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — Administrator "waive penalty" at check-out; Non-Org confirmation at check-in (branch: claude/qa-audit-fixes)
+Owner chose to keep the early-departure rule (full booked stay billed when the
+guest did not announce leaving early at check-in) but let an administrator
+waive it case by case: a checkbox on the check-out screen (admin only, shows
+the rupees waived, saved on the booking with who did it; staff get a refusal).
+Check-in now asks staff to confirm each time a room will be billed at the
+Non-Org rate and says why, to cut wrong Non-Org marks (the cause of ₹4,600
+in October).
+
 ## 2026-11-18 — October register reconciled; corrections, overdue reminder and late check-out guard built (branch: claude/qa-audit-fixes)
 Owner's paper register for October was compared line by line with the app.
 The app was ₹16,500 higher: BK1293 (₹10,800, not in the register, so the guest
