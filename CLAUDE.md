@@ -48,8 +48,12 @@ Vercel site the same day. Never push half-done work.
 - **Late check-out** is billed for the nights actually stayed, to the check-out
   date entered. A check-out 2+ nights after the booked date is refused
   until the user confirms (`confirm_late`), and the Bookings page lists guests still
-  checked in past their check-out date (`GET /bookings/overdue-checkout`). **Early check-out** is billed for actual nights only if the
-  guest said so at check-in, otherwise for the full booked stay.
+  checked in past their check-out date (`GET /bookings/overdue-checkout`).
+- **Early check-out** is billed for actual nights only if the guest said so at
+  check-in, otherwise for the full booked stay. An administrator may waive that
+  full-stay charge at check-out (`waive_penalty`; admin only, saved on the
+  booking with who waived it and how much). Check-in asks staff to confirm
+  every room billed at the Non-Org rate.
 - The check-out screen shows the SERVER's bill (`GET /bookings/{id}/checkout-quote`,
   the same function `check_out` stores). Never re-add client-side bill maths.
 - The Reports page "Audit check" audits only the previous closed month, by design.
