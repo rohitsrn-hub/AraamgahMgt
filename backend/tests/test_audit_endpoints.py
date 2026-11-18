@@ -663,7 +663,7 @@ def test_audit_check_lists_every_unexplained_booking_in_the_month(api, monkeypat
 def test_late_checkout_is_billed_for_the_nights_actually_stayed(api):
     api.seed("bookings", [booking()])                                  # booked 10-12 May, Rs 500/night
     checkin(api)
-    out = checkout(api, actual_checkout_date="2026-05-14", final_payment=1600)
+    out = checkout(api, actual_checkout_date="2026-05-14", final_payment=1600, confirm_late=True)
     assert out["charge_reason"] == "late_checkout" and out["charged_nights"] == 4
     assert out["total_amount"] == 2000 and out["room_rent_total"] == 4 * 470
     assert out["balance_amount"] == 0
@@ -673,7 +673,7 @@ def test_late_checkout_is_billed_for_the_nights_actually_stayed(api):
 def test_late_checkout_of_a_mix_and_match_stay_bills_and_reports_the_extra_nights_in_the_last_room(api):
     api.seed("bookings", [booking(**MIX)])
     checkin(api)
-    out = checkout(api, actual_checkout_date="2026-05-16")            # booked to the 14th, left the 16th
+    out = checkout(api, actual_checkout_date="2026-05-16", confirm_late=True)   # booked to the 14th, left the 16th
     assert out["total_amount"] == 1800 + 2 * 400
     assert [seg["night_date"] for seg in out["room_segments"]][-2:] == ["2026-05-14", "2026-05-15"]
     assert reported_total(api, "b1")["total_amount"] == 2600
@@ -790,3 +790,33 @@ def test_checking_in_on_or_after_the_booked_date_is_unchanged(api, monkeypatch):
     api.seed("bookings", [booking()])
     after = checkin(api)
     assert after["check_in_date"] == "2026-05-10" and "original_check_in_date" not in after
+
+
+# ====================================================================
+# A check-out far after the booked date must be confirmed (BK1293: a month late at the default date)
+# ====================================================================
+
+def test_a_checkout_well_after_the_booked_date_needs_confirmation_and_saves_nothing_until_then(api):
+    api.seed("bookings", [booking()])                                          # booked 10-12 May, Rs 500/night
+    checkin(api)
+    before = api.find_one("bookings", {"id": "b1"})
+    res = api.client.post("/api/bookings/check-out", json={"booking_id": "b1", "staff_id": "s1", "actual_checkout_date": "2026-06-12"})
+    assert res.status_code == 409
+    d = res.json()["detail"]
+    assert d["code"] == "late_checkout_confirmation_required" and d["late_nights"] == 31 and d["extra_amount"] == 15500
+    assert "set the check-out date" in d["message"]
+    assert api.find_one("bookings", {"id": "b1"}) == before, "nothing may be saved before the user confirms"
+    assert api.find_one("rooms", {"id": "r1"})["status"] == "occupied"
+    out = checkout(api, actual_checkout_date="2026-06-12", confirm_late=True)
+    assert out["charged_nights"] == 33 and out["total_amount"] == 33 * 500
+
+
+def test_one_night_late_needs_no_confirmation_and_the_quote_reports_the_lateness(api):
+    api.seed("bookings", [booking()])
+    checkin(api)
+    q = api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "2026-05-13"}).json()
+    assert (q["late_nights"], q["late_extra_amount"], q["booked_check_out_date"]) == (1, 500, "2026-05-12")
+    q2 = api.client.get("/api/bookings/b1/checkout-quote", params={"actual_checkout_date": "2026-05-12"}).json()
+    assert (q2["late_nights"], q2["late_extra_amount"]) == (0, 0)
+    out = checkout(api, actual_checkout_date="2026-05-13")
+    assert out["charge_reason"] == "late_checkout" and out["total_amount"] == 1500

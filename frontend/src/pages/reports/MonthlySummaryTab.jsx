@@ -145,7 +145,7 @@ export default function MonthlySummaryTab({ settings }) {
                   return (
                     <div key={key} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                       <span className={`font-medium ${color}`}>{label}</span>
-                      <span className="text-slate-600 text-sm">{lf.days || 0} days × {fmtINR(lf.rate || 0, 0)}</span>
+                      <span className="text-slate-600 text-sm">{lf.billed_days ?? lf.days ?? 0} days × {fmtINR(lf.rate || 0, 0)}</span>
                       <span className="font-bold text-slate-800">{fmtINR((lf.total || 0), 2)}</span>
                     </div>
                   );
@@ -169,9 +169,9 @@ export default function MonthlySummaryTab({ settings }) {
             <CardContent>
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Row label="Org (Cat I) Room Rent" value={`${report.org_cat_i_days || 0} × ₹${report.rates?.cat_i_room_rent || 470} = ${fmtINR((report.org_cat_i_days || 0) * (report.rates?.cat_i_room_rent || 470), 2)}`} />
-                  <Row label="Org (Cat II) Room Rent" value={`${report.org_cat_ii_days || 0} × ₹${report.rates?.cat_ii_room_rent || 385} = ${fmtINR((report.org_cat_ii_days || 0) * (report.rates?.cat_ii_room_rent || 385), 2)}`} />
-                  <Row label="Non-Org Room Rent" value={`${report.non_org_days || 0} × ₹${report.rates?.non_org_room_rent || 570} = ${fmtINR((report.non_org_days || 0) * (report.rates?.non_org_room_rent || 570), 2)}`} />
+                  <Row label="Org (Cat I) Room Rent" value={`${report.room_rent_by_category?.org_cat_i?.billed_days ?? report.room_rent_by_category?.org_cat_i?.days ?? 0} days × ₹${Number(report.room_rent_by_category?.org_cat_i?.avg_rate || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} avg = ${fmtINR(report.room_rent_by_category?.org_cat_i?.total || 0, 2)}`} />
+                  <Row label="Org (Cat II) Room Rent" value={`${report.room_rent_by_category?.org_cat_ii?.billed_days ?? report.room_rent_by_category?.org_cat_ii?.days ?? 0} days × ₹${Number(report.room_rent_by_category?.org_cat_ii?.avg_rate || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} avg = ${fmtINR(report.room_rent_by_category?.org_cat_ii?.total || 0, 2)}`} />
+                  <Row label="Non-Org Room Rent" value={`${report.room_rent_by_category?.non_org?.billed_days ?? report.room_rent_by_category?.non_org?.days ?? 0} days × ₹${Number(report.room_rent_by_category?.non_org?.avg_rate || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} avg = ${fmtINR(report.room_rent_by_category?.non_org?.total || 0, 2)}`} />
                   <Row label="Room Rent Sub-Total" value={fmtINR((report.room_rent_total || 0), 2)} bold />
                   <Row label="License Fee Total" value={fmtINR((report.total_license_fee || 0), 2)} bold />
                   <Row label="Extra Beds" value={`${report.extra_beds_total || 0} × ₹75 = ${fmtINR(report.extra_bed_amount || 0, 2)}`} />

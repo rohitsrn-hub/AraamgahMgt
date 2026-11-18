@@ -5,6 +5,25 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-18 — October register reconciled; corrections, overdue reminder and late check-out guard built (branch: claude/qa-audit-fixes)
+Owner's paper register for October was compared line by line with the app.
+The app was ₹16,500 higher: BK1293 (₹10,800, not in the register, so the guest
+did not stay), Non-Org rates billed where the register used Org (₹4,600),
+uninformed-early-departure penalties (₹2,000), less 7 extra beds the register
+had but the app did not (₹900). Owner ruled the register correct and the
+penalties waived. Built (nothing in live data changes until the owner presses
+Apply on the Reports page): Preview/Apply/Undo for 20 named bookings (cancel
+BK1293, 9 Org-rate fixes, waive BK1138/BK1184 penalty, 7 extra beds, 3 advance
+splits with the cash unchanged); each is skipped unless the money engine then
+gives exactly the register's amount. Also: Monthly Report room-rent lines now
+use real per-category totals (they used stale base rates and did not add up);
+a red "still checked in past the planned check-out date" reminder on Bookings
+(Check out opens at the booked date; Extend alongside); a check-out dated 2+
+nights after the booked date now needs a confirmation showing the extra
+rupees (BK1293 was billed 31 extra nights by a default of today's date).
+Open for the owner: BK1226, BK1293's ₹400 advance, general Non-Org check-in rule,
+penalty policy going forward.
+
 ## 2026-11-18 — Approved live-data corrections built, with originals saved and an undo (branch: claude/qa-audit-fixes)
 Owner approved correcting what the October check found, provided the original
 values are kept until the manual register is reconciled. Built as an admin

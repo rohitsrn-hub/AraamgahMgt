@@ -16,16 +16,17 @@ values and a way back. So the change is:
   * undoable: Undo restores the original values (and refuses, field by field,
     if the record has been changed since).
 
-Reports are NOT affected by any of these corrections: every report computes
-money from booking_financials(), never from the stored bill. These fix the
+The bill and refund-due corrections do not move any report (every report computes
+money from booking_financials(), never the stored bill). The October-register ones (cancel, Org rate, penalty waiver, extra beds, advances) DO change October reports on purpose. The bill ones fix the
 stored bill (what the booking list and receipts show) and a stale field.
 """
 import logging
 import uuid
+import copy
 from datetime import date, datetime, timezone
 from typing import Dict, List
 
-from utils.report_calc import booking_financials, build_room_maps
+from utils.report_calc import EXTRA_BED_RATE, booking_financials, build_room_maps, resolve_rooms
 from services import backup_service
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,39 @@ APPROVED_REFUND_DUE_RESETS = {
     "BK1365": 200.0, "BK1370": 500.0, "BK1372": 600.0, "BK1443": 800.0, "BK1447": 600.0,
 }
 
+# October 2026 register reconciliation (owner rulings, 18 Nov 2026: "the register is correct";
+# a booking not in the register means the guest did not stay; early-departure penalty waived).
+# booking_number -> what to change. `total` is the register's amount for the booking: the money
+# engine must give exactly that once the change is made, otherwise the booking is skipped.
+#   org_rate      bill every room at the Org rate (the register did; the app had Non-Org)
+#   waive_penalty bill the nights actually stayed instead of the full booked stay
+#   extra_bed     (beds, days) used, charged at check-out (the register had it; the app did not)
+#   advance       (as the app has it, as the register has it): the cash is unchanged, so the
+#                 difference moves between "advance" and "final payment"
+#   cancel_total  the booking was never in the register: cancel it (guard: its stored total)
+APPROVED_RECONCILIATIONS = {
+    "BK1293": {"cancel_total": 10800.0},
+    "BK1184": {"org_rate": True, "waive_penalty": True, "total": 2700.0},
+    "BK1138": {"waive_penalty": True, "total": 675.0},
+    "BK1122": {"org_rate": True, "total": 4800.0},
+    "BK0999": {"org_rate": True, "total": 2700.0},
+    "BK0995": {"org_rate": True, "total": 2400.0},
+    "BK1152": {"org_rate": True, "total": 1350.0},
+    "BK1161": {"org_rate": True, "total": 2400.0},
+    "BK1228": {"org_rate": True, "total": 1200.0},
+    "BK1286": {"org_rate": True, "total": 4200.0, "advance": (0.0, 800.0)},
+    "BK1258": {"org_rate": True, "total": 700.0},
+    "BK1280": {"extra_bed": (1, 3), "total": 2625.0},
+    "BK1267": {"extra_bed": (1, 2), "total": 1550.0},
+    "BK1151": {"extra_bed": (1, 2), "total": 1350.0},
+    "BK1320": {"extra_bed": (1, 2), "total": 1750.0},
+    "BK1324": {"extra_bed": (1, 1), "total": 1675.0},
+    "BK1204": {"extra_bed": (1, 1), "total": 1450.0},
+    "BK1325": {"extra_bed": (1, 1), "total": 875.0},
+    "BK1159": {"advance": (0.0, 500.0)},
+    "BK1279": {"advance": (800.0, 400.0)},
+}
+
 WIDE = (date(2000, 1, 1), date(2100, 1, 1))
 BILL_FIELDS = ("total_amount", "balance_amount", "room_rent_total", "license_fee_total", "charged_nights", "charge_reason")
 REFUND_FIELDS = ("refund_due", "refund_reason")
@@ -52,6 +86,121 @@ REFUND_FIELDS = ("refund_due", "refund_reason")
 
 def _num(v) -> float:
     return round(float(v or 0), 2)
+
+
+def _describe(spec: Dict) -> str:
+    parts = []
+    if spec.get("cancel_total") is not None:
+        parts.append("cancel (guest did not stay; not in the register)")
+    if spec.get("org_rate"):
+        parts.append("bill at the Org rate")
+    if spec.get("waive_penalty"):
+        parts.append("waive the early-departure penalty")
+    if spec.get("extra_bed"):
+        parts.append(f"add extra bed {spec['extra_bed'][0]} x {spec['extra_bed'][1]} day(s)")
+    if spec.get("advance"):
+        parts.append(f"advance {spec['advance'][0]:g} -> {spec['advance'][1]:g} (cash unchanged)")
+    return ", ".join(parts)
+
+
+def _plan_reconciliation(bk: Dict, spec: Dict, settings: Dict, room_maps: Dict) -> Dict:
+    """One October-register correction for one booking. Never changes anything."""
+    item = {"booking_number": bk.get("booking_number"), "kind": "reconciliation", "label": "October register",
+            "description": _describe(spec), "status": "skipped", "reason": None, "before": {}, "after": {}}
+    if spec.get("cancel_total") is not None:
+        if bk.get("status") != "checked_out":
+            item["reason"] = f"booking is {bk.get('status')}, not checked out — not applied"
+            return item
+        if _num(bk.get("total_amount")) != _num(spec["cancel_total"]):
+            item["reason"] = f"stored total is {bk.get('total_amount')}, not the {spec['cancel_total']} the audit saw — not applied"
+            return item
+        after = {"status": "cancelled",
+                 "notes": f"{bk.get('notes') or ''} | Cancelled: not in the paper register, guest did not stay (owner ruling, Nov 2026)"}
+        item.update(status="ready", booking_id=bk["id"], before={k: bk.get(k) for k in after}, after=after,
+                    note=f"The advance of {_num(bk.get('advance_paid')):g} is NOT refunded or changed by this; decide that separately.")
+        return item
+
+    if bk.get("status") != "checked_out":
+        item["reason"] = f"booking is {bk.get('status')}, not checked out — not applied"
+        return item
+
+    cand = copy.deepcopy(bk)
+    after: Dict = {}
+    changes_money = spec.get("total") is not None
+
+    if spec.get("org_rate"):
+        mapping = copy.deepcopy(bk.get("room_guest_mapping") or [])
+        if bk.get("is_org"):
+            for m in mapping:
+                if m.get("charge_category") == "Non-Org":
+                    m["charge_category"] = "Org"
+        else:
+            for rn, cat in resolve_rooms(bk, room_maps):
+                entry = next((m for m in mapping if m.get("room_number") == rn), None)
+                if entry is None:
+                    mapping.append({"room_number": rn, "room_category": cat, "charge_category": "Org"})
+                else:
+                    entry["charge_category"] = "Org"
+        if mapping == (bk.get("room_guest_mapping") or []):
+            item["reason"] = "no room is billed at the Non-Org rate — nothing to change, not applied"
+            return item
+        cand["room_guest_mapping"] = mapping
+        after["room_guest_mapping"] = mapping
+
+    if spec.get("waive_penalty"):
+        if bk.get("charge_reason") != "early_checkout_not_informed":
+            item["reason"] = f"charge reason is {bk.get('charge_reason')}, not an uninformed early check-out — not applied"
+            return item
+        nights = (date.fromisoformat(bk["actual_checkout_date"][:10]) - date.fromisoformat(bk["check_in_date"][:10])).days
+        cand["charge_reason"] = "early_checkout_penalty_waived"
+        cand["charged_nights"] = nights
+        after.update(charge_reason="early_checkout_penalty_waived", charged_nights=nights)
+
+    if spec.get("extra_bed"):
+        if _num(bk.get("extra_bed_charge_checkout")) != 0:
+            item["reason"] = "an extra-bed charge is already recorded — not applied"
+            return item
+        beds, days = spec["extra_bed"]
+        charge = round(beds * days * EXTRA_BED_RATE, 2)
+        cand.update(extra_beds_checkout=beds, extra_bed_days=days, extra_bed_charge_checkout=charge)
+        after.update(extra_beds_checkout=beds, extra_bed_days=days, extra_bed_charge_checkout=charge)
+
+    if changes_money:
+        fin = booking_financials(cand, settings, *WIDE, room_maps)
+        if _num(fin["total_amount"]) != _num(spec["total"]):
+            item["reason"] = f"the money engine gives {fin['total_amount']} after this change, not the register's {spec['total']} — not applied"
+            return item
+        after.update(total_amount=_num(fin["total_amount"]), room_rent_total=_num(fin["room_rent"]),
+                     license_fee_total=_num(fin["license_fee"]))
+
+    advance, final = _num(bk.get("advance_paid")), _num(bk.get("final_payment"))
+    if spec.get("advance"):
+        seen, new = spec["advance"]
+        if advance != _num(seen):
+            item["reason"] = f"stored advance is {advance:g}, not the {seen:g} the audit saw — not applied"
+            return item
+        new_final = round(final - (new - advance), 2)
+        if new_final < 0:
+            item["reason"] = "the final payment is too small to move the difference out of — not applied"
+            return item
+        after.update(advance_paid=_num(new), final_payment=new_final)
+        advance, final = _num(new), new_final
+
+    total_now = after.get("total_amount", _num(bk.get("total_amount")))
+    if changes_money or spec.get("advance"):
+        after["balance_amount"] = round(total_now - advance - final, 2)
+    # Drop fields that would not change, so the preview shows only real differences.
+    after = {k: v for k, v in after.items() if v != bk.get(k) and not (isinstance(v, float) and v == _num(bk.get(k)))}
+    if not after:
+        item["reason"] = "already matches the register"
+        return item
+    collected = round(advance + final, 2)
+    note = None
+    if collected != total_now:
+        note = (f"Cash collected is {collected:g} and the corrected bill is {total_now:g}: "
+                f"{'over-collected' if collected > total_now else 'still to collect'} by {abs(collected - total_now):g}.")
+    item.update(status="ready", booking_id=bk["id"], before={k: bk.get(k) for k in after}, after=after, note=note)
+    return item
 
 
 async def plan_corrections(db) -> List[Dict]:
@@ -109,6 +258,17 @@ async def plan_corrections(db) -> List[Dict]:
             continue
         after = {"refund_due": 0.0, "refund_reason": None}
         item.update(status="ready", booking_id=bk["id"], before={k: bk.get(k) for k in after}, after=after)
+
+    for number, spec in APPROVED_RECONCILIATIONS.items():
+        bk = await db.bookings.find_one({"booking_number": number}, {"_id": 0})
+        if not bk:
+            plan.append({"booking_number": number, "kind": "reconciliation", "label": "October register",
+                         "description": _describe(spec), "status": "skipped", "reason": "booking not found",
+                         "before": {}, "after": {}})
+            continue
+        plan.append(_plan_reconciliation(bk, spec, settings, room_maps))
+    for item in plan:
+        item.setdefault("label", "bill" if item["kind"] == "bill" else "refund due")
     return plan
 
 
@@ -126,7 +286,7 @@ async def apply_corrections(db, user: str) -> Dict:
     for p in ready:
         guard = {"id": p["booking_id"], **{k: v for k, v in p["before"].items()}}
         entry = {"amended_at": now, "source": "data_correction", "batch_id": batch_id,
-                 "reason": "Owner-approved correction (Nov 2026)",
+                 "reason": "Owner-approved correction (Nov 2026)" + (f": {p['description']}" if p.get("description") else ""),
                  "changes": [f"{k}: {p['before'][k]} -> {p['after'][k]}" for k in p["after"]]}
         res = await db.bookings.update_one(guard, {"$set": {**p["after"], "updated_at": now}, "$push": {"amendment_log": entry}})
         if res.matched_count == 0:

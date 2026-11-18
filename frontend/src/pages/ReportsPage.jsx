@@ -66,8 +66,8 @@ export default function ReportsPage({ settings }) {
     const pre = await axios.get(`${API}/admin/corrections`);
     const ready = pre.data.preview.filter((p) => p.status === "ready");
     if (ready.length === 0) { await showCorr(pre.data, "Nothing to apply."); return; }
-    const list = ready.map((p) => `${p.booking_number} (${p.kind === "bill" ? "bill" : "refund due"})`).join(", ");
-    if (!window.confirm(`Apply ${ready.length} correction(s)?\n\n${list}\n\nA full backup is taken first and every original value is saved, so this can be undone.`)) return;
+    const list = ready.map((p) => `${p.booking_number}: ${p.description || p.label}`).join("\n");
+    if (!window.confirm(`Apply ${ready.length} correction(s)?\n\n${list}\n\nThese change live bookings and the October reports. A full backup is taken first and every original value is saved, so this can be undone.`)) return;
     const res = await axios.post(`${API}/admin/corrections/apply`);
     await showCorr(res.data, `${res.data.applied} correction(s) applied. Keep the copied details.`);
   });
@@ -110,8 +110,9 @@ export default function ReportsPage({ settings }) {
           <div className="mt-4 pt-3 border-t border-slate-200" data-testid="corrections-box">
             <p className="font-semibold text-slate-700">Approved data corrections</p>
             <p className="text-slate-600 mt-1">
-              A few stored bills and stale values agreed after the October check. Preview changes nothing. Apply takes a full backup
-              first and saves every original value; Undo puts them back. Reports are not affected either way.
+              Corrections agreed after the October check and the register comparison. Preview changes nothing. Apply takes a full backup
+              first and saves every original value; Undo puts them back. The October register corrections DO change October's
+              reports (they make the app match the register), so run the Audit check and the Monthly Report again after Apply.
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               <button onClick={previewCorrections} disabled={corrBusy} className="px-3 py-2 rounded-lg bg-white border border-slate-300 font-semibold disabled:opacity-60">Preview</button>

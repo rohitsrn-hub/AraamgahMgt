@@ -473,6 +473,8 @@ class CheckOutRequest(BaseModel):
     extra_bed_days: Optional[int] = 0
     # Actual checkout date (for early checkout calculation)
     actual_checkout_date: Optional[str] = None  # YYYY-MM-DD format
+    # Staff have seen the "this bills N extra nights" warning for a check-out well after the booked date
+    confirm_late: bool = False
 
 class CancelBookingRequest(BaseModel):
     booking_id: str
@@ -2237,6 +2239,35 @@ async def list_stale_confirmed_bookings(current_user: dict = Depends(require_sta
         })
     return {"as_of": today, "count": len(result), "bookings": result}
 
+# Registered BEFORE /bookings/{booking_id} (see the note on stale-confirmed above).
+@api_router.get("/bookings/overdue-checkout")
+async def list_overdue_checkouts(current_user: dict = Depends(require_staff_or_admin_role)):
+    """Guests who are checked in but whose planned check-out date has passed — they should have
+    been checked out and haven't been. Powers the reminder banner on the Bookings page and the
+    Dashboard, so a forgotten check-out is noticed the next day instead of weeks later.
+
+    (Why this matters: one such booking was eventually checked out a month late with the date
+    left at "today", and billed 31 extra nights.) Overstay stays a deliberate non-blocker — this
+    only REMINDS; it never blocks a room or changes a bill."""
+    today = ist_today_str()
+    candidates = await db.bookings.find({
+        "status": BookingStatus.CHECKED_IN.value,
+        "check_out_date": {"$lt": today},
+    }, {"_id": 0}).sort("check_out_date", 1).to_list(500)
+    result = []
+    for bk in candidates:
+        result.append({
+            "id": bk.get("id"),
+            "booking_number": bk.get("booking_number"),
+            "guest_name": bk.get("guest_name"),
+            "rooms": bk.get("room_numbers") or ([bk["room_number"]] if bk.get("room_number") else []),
+            "check_in_date": bk.get("check_in_date"),
+            "check_out_date": bk.get("check_out_date"),
+            "days_overdue": (date_type.fromisoformat(today) - date_type.fromisoformat(str(bk["check_out_date"])[:10])).days,
+        })
+    return {"as_of": today, "count": len(result), "bookings": result}
+
+
 @api_router.get("/bookings/{booking_id}")
 async def get_booking(booking_id: str, current_user: dict = Depends(get_current_user_with_db)):
     booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
@@ -2736,6 +2767,12 @@ async def update_booking_rooms(booking_id: str, request: dict, current_user: dic
     updated_booking = await db.bookings.find_one({"id": booking_id}, {"_id": 0})
     return {"message": "Room assignments updated", "booking": updated_booking}
 
+# A check-out this many nights (or more) after the booked date must be confirmed by the user,
+# with the extra amount shown. A 1-night slip is routine; a month is a forgotten check-out left at
+# the default date of "today" (BK1293 was billed 31 extra nights that way).
+LATE_CHECKOUT_CONFIRM_FROM_NIGHTS = 2
+
+
 async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds: int, extra_bed_days: int) -> dict:
     """What a guest owes at check-out — the ONE calculation behind both the
     check-out screen's quote and the bill check_out() stores, so the amount
@@ -2779,6 +2816,7 @@ async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds:
         charged_nights, charge_reason = (booked_out_dt - check_in_dt).days, "normal"
     charged_nights = max(0, charged_nights)
 
+    late_nights = max(0, (actual_dt - booked_out_dt).days)
     charges = stay_charges(priced, settings, room_maps, charged_nights)
     if charges["rooms"] or charged_nights == 0:
         room_rent_only, license_fee_only = charges["room_rent"], charges["license_fee"]
@@ -2792,12 +2830,19 @@ async def _checkout_bill(booking: dict, request_date: Optional[str], extra_beds:
 
     extra_bed_charge = max(0, extra_beds or 0) * max(0, extra_bed_days or 0) * EXTRA_BED_RATE
     room_total = room_rent_only + license_fee_only
+    late_extra_amount = 0.0
+    if late_nights:
+        on_time = stay_charges(booking, settings, room_maps, (booked_out_dt - check_in_dt).days)["total"]
+        late_extra_amount = round(room_total - on_time, 2)
     total_due = room_total + extra_bed_charge
     advance_paid = booking.get("advance_paid", 0) or 0
     return {
         "actual_checkout_date": actual_checkout_date,
         "charged_nights": charged_nights,
         "charge_reason": charge_reason,
+        "booked_check_out_date": booked_out_dt.isoformat(),
+        "late_nights": late_nights,
+        "late_extra_amount": late_extra_amount,
         "room_rent": room_rent_only,
         "license_fee": license_fee_only,
         "room_total": round(room_total, 2),
@@ -2842,6 +2887,19 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
     now = datetime.now(timezone.utc).isoformat()
 
     bill = await _checkout_bill(booking, request.actual_checkout_date, request.extra_beds_checkout, request.extra_bed_days)
+    if bill["late_nights"] >= LATE_CHECKOUT_CONFIRM_FROM_NIGHTS and not request.confirm_late:
+        # Nothing has been saved. The screen shows this and asks again with confirm_late=true.
+        raise HTTPException(status_code=409, detail={
+            "code": "late_checkout_confirmation_required",
+            "late_nights": bill["late_nights"],
+            "extra_amount": bill["late_extra_amount"],
+            "booked_check_out_date": bill["booked_check_out_date"],
+            "actual_checkout_date": bill["actual_checkout_date"],
+            "message": (f"This check-out is dated {bill['actual_checkout_date']}, {bill['late_nights']} night(s) after the booked "
+                        f"date ({bill['booked_check_out_date']}), and bills ₹{bill['late_extra_amount']:,.0f} more. "
+                        "If the guest actually left on the booked date, set the check-out date to that day. "
+                        "Confirm only if they really stayed."),
+        })
     actual_checkout_date = bill["actual_checkout_date"]
     charged_nights = bill["charged_nights"]
     charge_reason = bill["charge_reason"]
@@ -4376,6 +4434,11 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
     cat_ii_license_fee_total = 0.0
     non_org_room_rent_total = 0.0
     non_org_license_fee_total = 0.0
+    # BILLED room-days per category (an uninformed early check-out is billed for
+    # its full booked nights, so billed days can exceed physical days). Money is
+    # always summed from booking_financials(); these are only so a printed
+    # "days x rate = amount" line can be made to add up.
+    org_cat_i_billed = org_cat_ii_billed = non_org_billed = 0
 
     for bk in bookings:
         fin = booking_financials(bk, settings, month_start, month_end, room_maps)
@@ -4409,14 +4472,17 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
             if room_is_org:
                 if room["category"] == "Cat I":
                     org_cat_i_days += room["nights"]
+                    org_cat_i_billed += room["billed_nights"]
                     cat_i_room_rent_total += room["room_rent"]
                     cat_i_license_fee_total += room["license_fee"]
                 else:
                     org_cat_ii_days += room["nights"]
+                    org_cat_ii_billed += room["billed_nights"]
                     cat_ii_room_rent_total += room["room_rent"]
                     cat_ii_license_fee_total += room["license_fee"]
             else:
                 non_org_days += room["nights"]
+                non_org_billed += room["billed_nights"]
                 non_org_room_rent_total += room["room_rent"]
                 non_org_license_fee_total += room["license_fee"]
 
@@ -4485,9 +4551,20 @@ async def get_monthly_report(month: int = Query(..., ge=1, le=12), year: int = Q
         "org_cat_i_days": org_cat_i_days, "org_cat_ii_days": org_cat_ii_days, "non_org_days": non_org_days,
         "extra_beds_total": extra_beds_total,
         "license_fees": {
-            "org_cat_i": {"days": org_cat_i_days, "rate": cat_i_lf, "total": lf_org_cat_i},
-            "org_cat_ii": {"days": org_cat_ii_days, "rate": cat_ii_lf, "total": lf_org_cat_ii},
-            "non_org": {"days": non_org_days, "rate": non_org_lf, "total": lf_non_org}
+            "org_cat_i": {"days": org_cat_i_days, "billed_days": org_cat_i_billed, "rate": cat_i_lf, "total": lf_org_cat_i},
+            "org_cat_ii": {"days": org_cat_ii_days, "billed_days": org_cat_ii_billed, "rate": cat_ii_lf, "total": lf_org_cat_ii},
+            "non_org": {"days": non_org_days, "billed_days": non_org_billed, "rate": non_org_lf, "total": lf_non_org}
+        },
+        # The REAL room rent per category (summed from each booking's own resolved rate, so it
+        # stays right after a rate revision). The printed/on-screen "days x rate" lines used to be
+        # recomputed from today's base rate in the browser and no longer added up to the sub-total.
+        "room_rent_by_category": {
+            "org_cat_i": {"days": org_cat_i_days, "billed_days": org_cat_i_billed, "total": round(cat_i_room_rent_total, 2),
+                          "avg_rate": round(cat_i_room_rent_total / org_cat_i_billed, 2) if org_cat_i_billed else cat_i_rr},
+            "org_cat_ii": {"days": org_cat_ii_days, "billed_days": org_cat_ii_billed, "total": round(cat_ii_room_rent_total, 2),
+                           "avg_rate": round(cat_ii_room_rent_total / org_cat_ii_billed, 2) if org_cat_ii_billed else cat_ii_rr},
+            "non_org": {"days": non_org_days, "billed_days": non_org_billed, "total": round(non_org_room_rent_total, 2),
+                        "avg_rate": round(non_org_room_rent_total / non_org_billed, 2) if non_org_billed else non_org_rr},
         },
         "room_rent_total": room_rent_total,
         "total_license_fee": total_license_fee,

@@ -46,7 +46,9 @@ Vercel site the same day. Never push half-done work.
   counted as revenue. (`booking_financials` counts only
   `extra_bed_charge_checkout`, in the month of the actual check-out.)
 - **Late check-out** is billed for the nights actually stayed, to the check-out
-  date entered. **Early check-out** is billed for actual nights only if the
+  date entered. A check-out 2+ nights after the booked date is refused
+  until the user confirms (`confirm_late`), and the Bookings page lists guests still
+  checked in past their check-out date (`GET /bookings/overdue-checkout`). **Early check-out** is billed for actual nights only if the
   guest said so at check-in, otherwise for the full booked stay.
 - The check-out screen shows the SERVER's bill (`GET /bookings/{id}/checkout-quote`,
   the same function `check_out` stores). Never re-add client-side bill maths.

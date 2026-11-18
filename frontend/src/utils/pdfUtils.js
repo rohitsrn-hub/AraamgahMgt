@@ -413,9 +413,11 @@ export function generateMonthlyReportPDF(data, settings) {
 
   const lf = data.license_fees || {};
   const lfRows = [
-    ["Org (Cat I)", `${lf.org_cat_i?.days || 0} days × ₹${lf.org_cat_i?.rate || 30}`, fmtINR((lf.org_cat_i?.total || 0), 2)],
-    ["Org (Cat II)", `${lf.org_cat_ii?.days || 0} days × ₹${lf.org_cat_ii?.rate || 15}`, fmtINR((lf.org_cat_ii?.total || 0), 2)],
-    ["Non-Org", `${lf.non_org?.days || 0} days × ₹${lf.non_org?.rate || 30}`, fmtINR((lf.non_org?.total || 0), 2)],
+    // billed_days (not physical days): an uninformed early check-out is billed for its full booked
+    // nights, so only billed days multiply out to the printed amount.
+    ["Org (Cat I)", `${lf.org_cat_i?.billed_days ?? lf.org_cat_i?.days ?? 0} days × ₹${lf.org_cat_i?.rate || 30}`, fmtINR((lf.org_cat_i?.total || 0), 2)],
+    ["Org (Cat II)", `${lf.org_cat_ii?.billed_days ?? lf.org_cat_ii?.days ?? 0} days × ₹${lf.org_cat_ii?.rate || 15}`, fmtINR((lf.org_cat_ii?.total || 0), 2)],
+    ["Non-Org", `${lf.non_org?.billed_days ?? lf.non_org?.days ?? 0} days × ₹${lf.non_org?.rate || 30}`, fmtINR((lf.non_org?.total || 0), 2)],
     ["TOTAL LICENSE FEE", "", fmtINR((data.total_license_fee || 0), 2)],
   ];
 
@@ -438,11 +440,19 @@ export function generateMonthlyReportPDF(data, settings) {
   doc.text(`FINANCIAL SUMMARY — ${data.month_name?.toUpperCase()} ${data.year}`, 10, y);
   y += 4;
 
-  const r = data.rates || {};
+  // Per-category room rent comes from the server (each booking's own resolved rate). These lines
+  // were recomputed here as days × today's BASE rate (470/385/570), which ignored the August rate
+  // revision, so the three lines no longer added up to the Room Rent Sub-Total printed under them.
+  const rc = data.room_rent_by_category || {};
+  const rentLine = (label, c) => [
+    label,
+    `${c?.billed_days ?? c?.days ?? 0} days × ₹${Number(c?.avg_rate || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })} avg (room rent)`,
+    fmtINR(c?.total || 0, 2),
+  ];
   const summaryRows = [
-    ["Org (Cat I)", `${data.org_cat_i_days || 0} days × ₹${r.cat_i_room_rent || 470} (room rent)`, fmtINR(((data.org_cat_i_days || 0) * (r.cat_i_room_rent || 470)), 2)],
-    ["Org (Cat II)", `${data.org_cat_ii_days || 0} days × ₹${r.cat_ii_room_rent || 385} (room rent)`, fmtINR(((data.org_cat_ii_days || 0) * (r.cat_ii_room_rent || 385)), 2)],
-    ["Non-Org", `${data.non_org_days || 0} days × ₹${r.non_org_room_rent || 570} (room rent)`, fmtINR(((data.non_org_days || 0) * (r.non_org_room_rent || 570)), 2)],
+    rentLine("Org (Cat I)", rc.org_cat_i),
+    rentLine("Org (Cat II)", rc.org_cat_ii),
+    rentLine("Non-Org", rc.non_org),
     ["Room Rent Sub-Total", "", fmtINR((data.room_rent_total || 0), 2)],
     ["License Fee Total", "", fmtINR((data.total_license_fee || 0), 2)],
     ["Extra Beds", `${data.extra_beds_total || 0} bed-nights × ₹75`, fmtINR((data.extra_bed_amount || 0), 2)],

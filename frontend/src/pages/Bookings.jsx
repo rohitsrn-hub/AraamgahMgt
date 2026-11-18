@@ -91,6 +91,7 @@ export default function Bookings() {
   const [loading, setLoading] = useState(true);
   const [staleConfirmed, setStaleConfirmed] = useState([]);
   const [staleBannerOpen, setStaleBannerOpen] = useState(true);
+  const [overdueCheckouts, setOverdueCheckouts] = useState([]);   // checked in, planned check-out date passed, not checked out
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [loadingRooms, setLoadingRooms] = useState(false);
@@ -411,6 +412,18 @@ export default function Bookings() {
     }
   }, []);
 
+  // Guests still "Checked In" after their planned check-out date. Usually staff forgot to process
+  // the check-out; sometimes the guest stayed on (Extend). Shown on every visit until resolved.
+  const fetchOverdueCheckouts = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/bookings/overdue-checkout`);
+      setOverdueCheckouts(res.data.bookings || []);
+    } catch (error) {
+      console.error("Error fetching overdue check-outs:", error);
+      toast.warning("Could not check for guests who have not checked out on time. The reminder list may be incomplete.", { id: "overdue-checkout-failed" });
+    }
+  }, []);
+
   const handleMarkDeparted = async (bk) => {
     const input = window.prompt(
       `Confirm ${bk.guest_name} (${bk.booking_number}) actually departed on (YYYY-MM-DD):`,
@@ -424,6 +437,7 @@ export default function Bookings() {
       });
       toast.success(`${bk.booking_number} closed out`);
       fetchStaleConfirmed();
+      fetchOverdueCheckouts();
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || "Failed to close out booking");
@@ -492,6 +506,7 @@ export default function Bookings() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { fetchStaleConfirmed(); }, [fetchStaleConfirmed]);
+  useEffect(() => { fetchOverdueCheckouts(); }, [fetchOverdueCheckouts]);
 
   const filteredBookings = bookings.filter(booking => {
     const roomNums = (booking.room_numbers || [booking.room_number || ""]).join(", ");
@@ -1100,9 +1115,21 @@ export default function Bookings() {
   const handleProceedToFeedback = () => {
     if (!actionForm.staff_id) { toast.error("Please select staff member"); return; }
 
+    // A check-out dated well after the booked date bills extra nights: make staff confirm it.
+    let confirmLate = false;
+    if ((checkoutQuote?.late_nights || 0) >= 2) {
+      const ok = window.confirm(
+        `This check-out is dated ${checkoutDate}, ${checkoutQuote.late_nights} nights after the booked date ` +
+        `(${checkoutQuote.booked_check_out_date}). It adds ${fmtINR(checkoutQuote.late_extra_amount)} to the bill.\n\n` +
+        "Press OK only if the guest really stayed until then. If they left on the booked date, press Cancel and change the Checkout Date."
+      );
+      if (!ok) return;
+      confirmLate = true;
+    }
+
     // Zero or negative payment — skip all payment detail validation
     if (actionForm.final_payment <= 0) {
-      setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm } });
+      setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm, confirm_late: confirmLate } });
       setShowCheckOut(false);
       setShowFeedback(true);
       return;
@@ -1120,7 +1147,7 @@ export default function Bookings() {
       }
     }
 
-    setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm } });
+    setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm, confirm_late: confirmLate } });
     setShowCheckOut(false);
     setShowFeedback(true);
   };
@@ -1140,6 +1167,7 @@ export default function Bookings() {
         extra_beds_checkout: form.extra_beds_checkout || 0,
         extra_bed_days: form.extra_bed_days || 0,
         actual_checkout_date: form.actual_checkout_date || istTodayStr(),
+        confirm_late: !!form.confirm_late,
         // Include payment details
         card_last4: form.card_last4 || undefined,
         card_type: form.card_type || undefined,
@@ -1176,8 +1204,10 @@ export default function Bookings() {
         family_members: [] 
       });
       fetchData();
+      fetchOverdueCheckouts();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Check-out failed");
+      const d = error.response?.data?.detail;
+      toast.error((d && typeof d === "object" ? d.message : d) || "Check-out failed");
     }
   };
 
@@ -1362,8 +1392,13 @@ export default function Bookings() {
     }
   };
 
-  const openCheckOutDialog = (booking) => {
+  // defaultDate: for a guest already past their booked check-out date the screen starts at the
+  // BOOKED date, not today — so a forgotten check-out is not silently billed for every day since.
+  // Staff must change the date deliberately if the guest really stayed on.
+  const openCheckOutDialog = (booking, defaultDate) => {
     setSelectedBooking(booking);
+    const overdue = booking?.check_out_date && booking.check_out_date < istTodayStr();
+    setActionForm(prev => ({ ...prev, actual_checkout_date: defaultDate || (overdue ? booking.check_out_date : undefined) }));
     setShowCheckOut(true);
   };
 
@@ -1939,6 +1974,50 @@ export default function Bookings() {
                   </Button>
                 </div>
               ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Checked in, planned check-out date passed, not yet checked out */}
+      {overdueCheckouts.length > 0 && (
+        <Card className="earms-card border-2 border-red-300 bg-red-50" data-testid="overdue-checkout-banner">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <Warning size={22} className="text-red-600 mt-0.5 flex-shrink-0" weight="fill" />
+              <div>
+                <p className="font-semibold text-red-900">
+                  {overdueCheckouts.length} guest{overdueCheckouts.length > 1 ? "s are" : " is"} still checked in past the planned check-out date
+                </p>
+                <p className="text-sm text-red-800 mt-0.5">
+                  These bookings were due to check out but have not been checked out. If the guest has left, check them out
+                  (the screen opens at the booked check-out date). If they are staying longer, use Extend.
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 space-y-2">
+              {overdueCheckouts.map((bk) => {
+                const full = bookings.find((b) => b.id === bk.id) || bk;
+                return (
+                  <div key={bk.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-white rounded-lg border border-red-200 p-3">
+                    <div className="text-sm text-slate-700">
+                      <span className="font-medium">{bk.booking_number}</span> — {bk.guest_name} — room(s) {(bk.rooms || []).join(", ")}
+                      <br className="sm:hidden" />
+                      <span className="text-slate-500"> · due out {format(parseISO(bk.check_out_date), "dd/MM/yyyy")} · {bk.days_overdue} day{bk.days_overdue > 1 ? "s" : ""} overdue</span>
+                    </div>
+                    {!isViewer && (
+                      <div className="flex gap-2 flex-shrink-0">
+                        <Button size="sm" variant="outline" onClick={() => openCheckOutDialog(full, bk.check_out_date)} className="text-red-700 border-red-400 hover:bg-red-100">
+                          Check out
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => openExtendDialog(full)}>
+                          Extend
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>

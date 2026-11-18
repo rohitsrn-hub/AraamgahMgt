@@ -184,3 +184,53 @@ def test_backup_history_says_which_backups_can_really_be_restored(api, tmp_path)
     ])
     history = {b["backup_id"]: b["restorable"] for b in asyncio.run(backup_service.get_backup_history(api.db))}
     assert history == {"lost": False, "kept": True, "bad": False}
+
+
+# ---------------- Monthly Report: printed lines must add up ----------------
+
+def test_monthly_report_gives_real_per_category_rent_that_adds_up_to_the_subtotal(api):
+    """After a rate revision, days x today's base rate no longer equals what was billed. The report
+    must hand the screens the real per-category totals (and billed days, which include an
+    uninformed early check-out's penalty nights) so every printed line adds up."""
+    asyncio.run(api.db.app_settings.update_one({}, {"$set": {
+        "cat_i_room_rent": 470, "cat_i_license_fee": 30, "cat_ii_room_rent": 385, "cat_ii_license_fee": 15,
+        "non_org_room_rent": 570, "non_org_license_fee": 30,
+        "rate_history": [{"id": "h", "effective_date": "2026-08-16", "cat_i_room_rent": 670, "cat_ii_room_rent": 585,
+                          "non_org_room_rent": 770}]}}))
+    api.seed("bookings", [
+        booking(status="checked_out", check_in_date="2026-10-10", check_out_date="2026-10-12", actual_checkout_date="2026-10-12"),
+        booking(id="b2", booking_number="BK0002", status="checked_out", check_in_date="2026-10-10", check_out_date="2026-10-13",
+                actual_checkout_date="2026-10-11", charge_reason="early_checkout_not_informed",    # 1 night stayed, 3 billed
+                room_ids=["r3"], room_numbers=["C2-07"], room_categories=["Cat II"]),
+    ])
+    rep = api.client.get("/api/reports/monthly?month=10&year=2026").json()
+    cat = rep["room_rent_by_category"]
+    assert cat["org_cat_i"] == {"days": 2, "billed_days": 2, "total": 1340.0, "avg_rate": 670.0}
+    assert cat["org_cat_ii"] == {"days": 1, "billed_days": 3, "total": 1755.0, "avg_rate": 585.0}
+    assert round(sum(c["total"] for c in cat.values()), 2) == rep["room_rent_total"] == 3095.0
+    lf = rep["license_fees"]
+    assert lf["org_cat_ii"]["billed_days"] * lf["org_cat_ii"]["rate"] == lf["org_cat_ii"]["total"] == 45
+    assert rep["grand_total"] == rep["room_rent_total"] + rep["total_license_fee"] + rep["extra_bed_amount"]
+
+
+# ---------------- overdue check-out reminder ----------------
+
+def test_overdue_checkout_reminder_lists_checked_in_guests_past_their_booked_date(api, monkeypatch):
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-05-20")
+    api.seed("bookings", [
+        booking(id="late", booking_number="BKLATE", status="checked_in", check_in_date="2026-05-10", check_out_date="2026-05-12"),
+        booking(id="today", booking_number="BKTODAY", status="checked_in", check_in_date="2026-05-18", check_out_date="2026-05-20",
+                room_ids=["r2"], room_numbers=["C1-02"]),                    # due today: not overdue yet
+        booking(id="conf", booking_number="BKCONF", status="confirmed", check_in_date="2026-05-10", check_out_date="2026-05-12",
+                room_ids=["r3"], room_numbers=["C2-07"]),                    # never checked in: the other banner
+        booking(id="out", booking_number="BKOUT", status="checked_out", check_in_date="2026-05-10", check_out_date="2026-05-12",
+                room_ids=["r4"], room_numbers=["C2-08"]),
+    ])
+    data = api.client.get("/api/bookings/overdue-checkout").json()
+    assert data["count"] == 1
+    assert data["bookings"][0]["booking_number"] == "BKLATE" and data["bookings"][0]["days_overdue"] == 8
+    assert data["bookings"][0]["rooms"] == ["C1-01"]
+    # reminding changes nothing, and it does not block the room (deliberate overstay rule)
+    assert api.find_one("bookings", {"id": "late"})["status"] == "checked_in"
+    api.as_role("viewer")
+    assert api.client.get("/api/bookings/overdue-checkout").status_code == 403
