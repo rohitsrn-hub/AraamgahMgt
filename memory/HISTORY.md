@@ -5,6 +5,16 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-19 — October re-check after corrections: reports agree at ₹2,53,000; some items open (branch: claude/qa-audit-fixes)
+Second run the same day: all four reports agree (₹2,53,000, 376 room-days, 134
+bookings); the earlier disagreement did not repeat and was most likely the
+corrections being applied while the check ran. Reported = billed for all 133
+October check-outs (₹2,47,950). Uninformed early check-outs now 0 and the Org-rate
+differences are gone. Still open: BK1293 still counted (134 bookings, so not
+cancelled — reason unknown), BK1204's extra bed apparently not applied,
+₹1,500 not collected (BK1286 800, BK1159 500, BK1170 200), ₹475 over-collected
+(BK1279 400, BK1204 75). Register grand total not yet compared with ₹2,53,000.
+
 ## 2026-11-19 — October audit re-run: four reports disagree; Audit check now says which bookings (branch: claude/qa-audit-fixes)
 Re-run on 19 Nov: room-days agree (376) but revenue differs by report
 (allotment ₹2,54,625, guest details ₹2,53,825, monthly ₹2,53,000, occupancy
