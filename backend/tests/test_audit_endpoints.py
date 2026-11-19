@@ -850,3 +850,27 @@ def test_staff_cannot_waive_and_nothing_is_saved(api):
     assert r.status_code == 403
     assert api.find_one("bookings", {"id": "b1"})["status"] == "checked_in"
     assert checkout(api, actual_checkout_date="2026-05-11")["total_amount"] == 2000      # staff still get the normal rule
+
+
+def test_audit_check_names_the_bookings_behind_a_report_disagreement(api, monkeypatch):
+    api.seed("bookings", [booking(id="p", booking_number="BKP", status="checked_out", actual_checkout_date="2026-05-12",
+                                  charged_nights=2, charge_reason="normal", total_amount=1000.0, advance_paid=400.0, final_payment=600.0)])
+    monkeypatch.setattr(server, "ist_today_str", lambda: "2026-06-03")
+    ok = api.client.get("/api/reports/audit-check").json()["reports"]
+    assert ok["consistent"] is True and "disagreements" not in ok
+    real = server.get_guest_details_report
+
+    async def skewed(*a, **kw):                       # a report that has drifted by 200 on one booking
+        out = await real(*a, **kw)
+        out["total_revenue"] -= 200
+        for r in out["guest_party_members"]:
+            if r["relationship"] == "Self":
+                r["total_amount"] -= 200
+        return out
+    monkeypatch.setattr(server, "get_guest_details_report", skewed)
+    bad = api.client.get("/api/reports/audit-check").json()["reports"]
+    assert bad["consistent"] is False
+    d = bad["disagreements"]
+    assert d["totals_changed_between_two_runs"] is False and d["direct_calculation_total"] == 1000
+    assert d["bookings_where_allotment_guest_details_and_direct_calculation_differ"] == [
+        {"bk": "BKP", "allotment": 1000.0, "guest_details": 800.0, "direct_calculation": 1000.0}]

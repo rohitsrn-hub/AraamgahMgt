@@ -5,6 +5,16 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-19 — October audit re-run: four reports disagree; Audit check now says which bookings (branch: claude/qa-audit-fixes)
+Re-run on 19 Nov: room-days agree (376) but revenue differs by report
+(allotment ₹2,54,625, guest details ₹2,53,825, monthly ₹2,53,000, occupancy
+₹2,52,725). Corrections were NOT yet applied (same short/over-collected lists as
+before). BK1293 as a checked-out late stay (18 nights, ₹10,800 in October) was
+tested and keeps all four reports equal, so it is not the cause by itself. The
+Audit check now adds a "disagreements" block when the reports differ: per-booking
+and per-room amounts against a direct calculation, plus whether the totals
+changed between two runs (edits in progress). Cause still open.
+
 ## 2026-11-18 — Administrator "waive penalty" at check-out; Non-Org confirmation at check-in (branch: claude/qa-audit-fixes)
 Owner chose to keep the early-departure rule (full booked stay billed when the
 guest did not announce leaving early at check-in) but let an administrator

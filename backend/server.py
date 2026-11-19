@@ -5160,6 +5160,44 @@ def previous_closed_month(today_str: str) -> tuple:
     return (year - 1, 12) if month == 1 else (year, month - 1)
 
 
+async def _report_disagreements(month: int, year: int, settings: dict, room_maps: dict) -> dict:
+    """Used only when the four reports disagree: say WHICH bookings/rooms differ.
+    Every report is supposed to sum booking_financials() over the same bookings, so the
+    reference here is that function run directly. Also runs the cross-check a second time:
+    if the totals moved between the two runs, bookings were being edited while it ran."""
+    first = await reconcile_reports(month=month, year=year)
+    second = await reconcile_reports(month=month, year=year)
+    ms = f"{year}-{month:02d}-01"
+    me = f"{year}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+    ps, pe = date_type.fromisoformat(ms), date_type.fromisoformat(me)
+    bookings = await db.bookings.find(report_booking_query(ms, me), {"_id": 0}).to_list(5000)
+    engine, engine_rooms = {}, {}
+    for b in bookings:
+        fin = booking_financials(b, settings, ps, pe, room_maps)
+        if not fin["rooms"]:
+            continue
+        engine[b.get("booking_number")] = fin["total_amount"]
+        for r in fin["rooms"]:
+            engine_rooms[r["room_number"]] = round(engine_rooms.get(r["room_number"], 0.0) + r["revenue"], 2)
+    allot = await get_room_allotment_report(filter_type="monthly", month=month, year=year)
+    guest = await get_guest_details_report(filter_type="monthly", month=month, year=year)
+    occ = await get_room_occupancy_report(filter_type="monthly", month=month, year=year)
+    a_by = {r["booking_number"]: r["total_amount"] for r in allot["allotments"]}
+    g_by = {r["booking_number"]: r["total_amount"] for r in guest["guest_party_members"] if r.get("relationship") == "Self"}
+    o_by = {r["room_number"]: round(r["revenue"], 2) for r in occ["room_details"]}
+    bookings_diff = [{"bk": k, "allotment": a_by.get(k), "guest_details": g_by.get(k), "direct_calculation": engine.get(k)}
+                     for k in sorted(set(a_by) | set(g_by) | set(engine))
+                     if not (a_by.get(k) == g_by.get(k) == engine.get(k))]
+    rooms_diff = [{"room": k, "occupancy": o_by.get(k), "direct_calculation": engine_rooms.get(k)}
+                  for k in sorted(set(o_by) | set(engine_rooms)) if o_by.get(k, 0) != engine_rooms.get(k, 0)]
+    return {
+        "totals_changed_between_two_runs": first["totals"] != second["totals"],
+        "bookings_where_allotment_guest_details_and_direct_calculation_differ": bookings_diff[:40],
+        "rooms_where_occupancy_and_direct_calculation_differ": rooms_diff[:40],
+        "direct_calculation_total": round(sum(engine.values()), 2),
+    }
+
+
 @api_router.get("/reports/audit-check")
 async def audit_check(current_user: dict = Depends(require_admin_role)):
     """Month-end audit of the PREVIOUS CLOSED MONTH only (owner's rule: run on
@@ -5186,6 +5224,8 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
     try:
         rec = await reconcile_reports(month=month, year=year)
         reports = {"consistent": rec["consistent"], "mismatches": rec["mismatches"], "totals": rec["totals"]}
+        if not rec["consistent"]:
+            reports["disagreements"] = await _report_disagreements(month, year, settings, room_maps)
     except Exception as e:  # report the failure, don't hide it
         reports = {"consistent": False, "error": str(e)}
 
