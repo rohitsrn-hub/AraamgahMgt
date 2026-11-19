@@ -53,11 +53,13 @@ APPROVED_REFUND_DUE_RESETS = {
 #   org_rate      bill every room at the Org rate (the register did; the app had Non-Org)
 #   waive_penalty bill the nights actually stayed instead of the full booked stay
 #   extra_bed     (beds, days) used, charged at check-out (the register had it; the app did not)
+#   extra_bed_top_up  the booking already has a bed charge but the register has more: raise the
+#                 bed days so the bill equals the register's amount
 #   advance       (as the app has it, as the register has it): the cash is unchanged, so the
 #                 difference moves between "advance" and "final payment"
 #   cancel_total  the booking was never in the register: cancel it (guard: its stored total)
 APPROVED_RECONCILIATIONS = {
-    "BK1293": {"cancel_total": 10800.0},
+    "BK1293": {"cancel_total": 21000.0},   # stored bill (35 nights to its 18 Nov check-out); October reports carry 10,800 of it
     "BK1184": {"org_rate": True, "waive_penalty": True, "total": 2700.0},
     "BK1138": {"waive_penalty": True, "total": 675.0},
     "BK1122": {"org_rate": True, "total": 4800.0},
@@ -69,12 +71,12 @@ APPROVED_RECONCILIATIONS = {
     "BK1286": {"org_rate": True, "total": 4200.0, "advance": (0.0, 800.0)},
     "BK1258": {"org_rate": True, "total": 700.0},
     "BK1280": {"extra_bed": (1, 3), "total": 2625.0},
-    "BK1267": {"extra_bed": (1, 2), "total": 1550.0},
+    "BK1267": {"extra_bed_top_up": True, "total": 1550.0},
     "BK1151": {"extra_bed": (1, 2), "total": 1350.0},
-    "BK1320": {"extra_bed": (1, 2), "total": 1750.0},
-    "BK1324": {"extra_bed": (1, 1), "total": 1675.0},
-    "BK1204": {"extra_bed": (1, 1), "total": 1450.0},
-    "BK1325": {"extra_bed": (1, 1), "total": 875.0},
+    "BK1320": {"extra_bed_top_up": True, "total": 1750.0},
+    "BK1324": {"extra_bed_top_up": True, "total": 1675.0},
+    "BK1204": {"extra_bed_top_up": True, "total": 1450.0},
+    "BK1325": {"extra_bed_top_up": True, "total": 875.0},
     "BK1159": {"advance": (0.0, 500.0)},
     "BK1279": {"advance": (800.0, 400.0)},
 }
@@ -98,6 +100,8 @@ def _describe(spec: Dict) -> str:
         parts.append("waive the early-departure penalty")
     if spec.get("extra_bed"):
         parts.append(f"add extra bed {spec['extra_bed'][0]} x {spec['extra_bed'][1]} day(s)")
+    if spec.get("extra_bed_top_up"):
+        parts.append("raise the extra-bed charge to the register's amount")
     if spec.get("advance"):
         parts.append(f"advance {spec['advance'][0]:g} -> {spec['advance'][1]:g} (cash unchanged)")
     return ", ".join(parts)
@@ -164,6 +168,26 @@ def _plan_reconciliation(bk: Dict, spec: Dict, settings: Dict, room_maps: Dict) 
         charge = round(beds * days * EXTRA_BED_RATE, 2)
         cand.update(extra_beds_checkout=beds, extra_bed_days=days, extra_bed_charge_checkout=charge)
         after.update(extra_beds_checkout=beds, extra_bed_days=days, extra_bed_charge_checkout=charge)
+
+    if spec.get("extra_bed_top_up"):
+        old = _num(bk.get("extra_bed_charge_checkout"))
+        if old <= 0:
+            item["reason"] = "no extra-bed charge is recorded, so there is nothing to top up — not applied"
+            return item
+        now_total = booking_financials(cand, settings, *WIDE, room_maps)["total_amount"]
+        new_charge = round(old + (_num(spec["total"]) - _num(now_total)), 2)
+        beds = int(bk.get("extra_beds_checkout") or 0)
+        if new_charge <= old:
+            item["reason"] = "the bill is not below the register's amount — not applied"
+            return item
+        if beds <= 0 or new_charge % (beds * EXTRA_BED_RATE) != 0:
+            beds = 1
+        if new_charge % (beds * EXTRA_BED_RATE) != 0:
+            item["reason"] = f"an extra-bed charge of {new_charge:g} is not a whole number of bed-days — not applied"
+            return item
+        days = int(new_charge // (beds * EXTRA_BED_RATE))
+        cand.update(extra_beds_checkout=beds, extra_bed_days=days, extra_bed_charge_checkout=new_charge)
+        after.update(extra_beds_checkout=beds, extra_bed_days=days, extra_bed_charge_checkout=new_charge)
 
     if changes_money:
         fin = booking_financials(cand, settings, *WIDE, room_maps)

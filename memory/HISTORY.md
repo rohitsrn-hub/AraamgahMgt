@@ -5,6 +5,15 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-19 — Corrections applied (14 of 20); BK1293 and 5 extra beds fixed up for a second Apply (branch: claude/qa-audit-fixes)
+Owner pressed Apply at 00:52 on 19 Nov (explains the one-off report mismatch
+that run). Applied: both penalties waived, 9 Org-rate fixes, extra beds on
+BK1280/BK1151, advances on BK1159/BK1279. Skipped: BK1293 (its stored bill is
+₹21,000 for 35 nights, my guard expected the October part, ₹10,800 — now
+corrected) and 5 extra beds (BK1267, 1320, 1324, 1204, 1325) which already had
+a smaller bed charge — now a "top up to the register's amount" action. Nothing
+further changes until Apply is pressed again.
+
 ## 2026-11-19 — October re-check after corrections: reports agree at ₹2,53,000; some items open (branch: claude/qa-audit-fixes)
 Second run the same day: all four reports agree (₹2,53,000, 376 room-days, 134
 bookings); the earlier disagreement did not repeat and was most likely the
