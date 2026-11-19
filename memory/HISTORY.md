@@ -5,6 +5,18 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-19 — October vs paper register: ₹242,275 vs ₹242,650; payments follow the register (branch: claude/qa-audit-fixes)
+After the second Apply the four reports agree at ₹2,42,275 (358 room-days, 133
+bookings; BK1293 cancelled). The register's amount column totals ₹2,42,650. The
+₹375 gap is exactly four extra-bed top-ups not yet applied (BK1267 150, BK1320
+150, BK1324 75, BK1325 75 = 450) less BK1031's ₹75 bed, which the register
+left out of its amount column but included in its balance (app is right).
+Register shows every October guest fully paid (advance + balance); the app's
+payment fields were off for BK1286 (₹800 missing), BK1159 (₹500 missing) and
+BK1279 (₹400 extra). Corrections now set those to the register's figures (the
+dashboard cash log, a separate collection, is untouched). BK1170 is a September
+stay and is not in the October register. Pending: owner's Apply.
+
 ## 2026-11-19 — Corrections applied (14 of 20); BK1293 and 5 extra beds fixed up for a second Apply (branch: claude/qa-audit-fixes)
 Owner pressed Apply at 00:52 on 19 Nov (explains the one-off report mismatch
 that run). Applied: both penalties waived, 9 Org-rate fixes, extra beds on

@@ -24,6 +24,7 @@ SPECS = {
     "BKZ": {"waive_penalty": True, "total": 500.0},                              # uninformed early departure
     "BKE": {"extra_bed": (1, 2), "total": 1150.0},                               # bed the register had
     "BKA": {"advance": (0.0, 500.0)},                                            # advance recorded differently
+    "BKP": {"set_payments": ((400.0, 600.0), (400.0, 800.0))},                   # register shows it paid in full
     "BKX": {"cancel_total": 1000.0},                                             # not in the register
     "BKT": {"extra_bed_top_up": True, "total": 1300.0},                          # had a 1-day bed, register has 3 days
 }
@@ -57,6 +58,7 @@ def seed(api):
         out(id="a", booking_number="BKA", advance_paid=0.0, total_amount=1000.0, final_payment=1000.0, balance_amount=0.0),
         out(id="t", booking_number="BKT", total_amount=1150.0, extra_beds_checkout=1, extra_bed_days=2,
             extra_bed_charge_checkout=150.0, final_payment=750.0, balance_amount=0.0),
+        out(id="p", booking_number="BKP", total_amount=1200.0, advance_paid=400.0, final_payment=600.0, balance_amount=200.0),
         out(id="x", booking_number="BKX", total_amount=1000.0, final_payment=600.0, balance_amount=0.0),
     ])
 
@@ -82,7 +84,7 @@ def test_preview_describes_each_change_and_changes_nothing(api):
 def test_apply_makes_the_reports_match_the_register_amounts(api):
     seed(api)
     res = api.client.post("/api/admin/corrections/apply").json()
-    assert res["applied"] == 7 and res["backup_id_before"]
+    assert res["applied"] == 8 and res["backup_id_before"]
     now = docs(api)
     assert {i: reported_total(api, i)["total_amount"] for i in "nmze"} == {"n": 1000, "m": 1000, "z": 500, "e": 1150}
     assert now["z"]["charged_nights"] == 1 and now["z"]["charge_reason"] == "early_checkout_penalty_waived"
@@ -90,6 +92,7 @@ def test_apply_makes_the_reports_match_the_register_amounts(api):
     assert (now["a"]["advance_paid"], now["a"]["final_payment"], now["a"]["total_amount"]) == (500.0, 500.0, 1000.0)
     assert now["a"]["advance_paid"] + now["a"]["final_payment"] == 1000.0, "the cash is unchanged"
     assert now["x"]["status"] == "cancelled"
+    assert (now["p"]["advance_paid"], now["p"]["final_payment"], now["p"]["balance_amount"]) == (400.0, 800.0, 0.0)
     assert (now["t"]["extra_beds_checkout"], now["t"]["extra_bed_days"], now["t"]["extra_bed_charge_checkout"], now["t"]["total_amount"]) == (1, 4, 300.0, 1300.0)
     assert now["m"]["room_guest_mapping"][0]["charge_category"] == "Org" and now["m"]["room_guest_mapping"][0]["guest"] == "x"
     assert now["n"]["room_guest_mapping"] == [{"room_number": "C1-01", "room_category": "Cat I", "charge_category": "Org"}]
@@ -107,7 +110,7 @@ def test_undo_puts_every_original_back(api):
     seed(api)
     original = copy.deepcopy(docs(api))
     batch = api.client.post("/api/admin/corrections/apply").json()["batch_id"]
-    assert api.client.post(f"/api/admin/corrections/undo/{batch}").json()["restored"] == 7
+    assert api.client.post(f"/api/admin/corrections/undo/{batch}").json()["restored"] == 8
     now = docs(api)
     for i, o in original.items():
         n = dict(now[i])
@@ -154,7 +157,7 @@ def test_the_real_approved_list_covers_exactly_the_agreed_bookings():
     assert "BK1293" in real
     assert sum(1 for v in real.values() if v.get("extra_bed")) == 2 and sum(1 for v in real.values() if v.get("extra_bed_top_up")) == 5
     assert real["BK1293"]["cancel_total"] == 21000.0
-    assert sum(1 for v in real.values() if v.get("org_rate")) == 9
+    assert sum(1 for v in real.values() if v.get("org_rate")) == 8
     assert {n for n, v in real.items() if v.get("waive_penalty")} == {"BK1138", "BK1184"}
-    assert {n for n, v in real.items() if v.get("advance")} == {"BK1159", "BK1279", "BK1286"}
+    assert {n for n, v in real.items() if v.get("set_payments")} == {"BK1159", "BK1279", "BK1286"}
     assert "BK1226" not in real and "BK1031" not in real

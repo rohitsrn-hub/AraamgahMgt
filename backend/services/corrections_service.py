@@ -55,6 +55,8 @@ APPROVED_REFUND_DUE_RESETS = {
 #   extra_bed     (beds, days) used, charged at check-out (the register had it; the app did not)
 #   extra_bed_top_up  the booking already has a bed charge but the register has more: raise the
 #                 bed days so the bill equals the register's amount
+#   set_payments  ((advance, final) in the app now, (advance, final) in the register): the booking's
+#                 payment fields are set to the register's figures (the dashboard's cash log is separate)
 #   advance       (as the app has it, as the register has it): the cash is unchanged, so the
 #                 difference moves between "advance" and "final payment"
 #   cancel_total  the booking was never in the register: cancel it (guard: its stored total)
@@ -68,7 +70,10 @@ APPROVED_RECONCILIATIONS = {
     "BK1152": {"org_rate": True, "total": 1350.0},
     "BK1161": {"org_rate": True, "total": 2400.0},
     "BK1228": {"org_rate": True, "total": 1200.0},
-    "BK1286": {"org_rate": True, "total": 4200.0, "advance": (0.0, 800.0)},
+    # Org rate/advance split already applied 19 Nov 00:52. The register shows the advance AND the
+    # full balance paid at check-out (it records every guest as fully paid), so the payments are
+    # set to the register's figures: (advance, final payment) as the app has them -> as the register has them.
+    "BK1286": {"set_payments": ((800.0, 2600.0), (800.0, 3400.0))},
     "BK1258": {"org_rate": True, "total": 700.0},
     "BK1280": {"extra_bed": (1, 3), "total": 2625.0},
     "BK1267": {"extra_bed_top_up": True, "total": 1550.0},
@@ -77,8 +82,8 @@ APPROVED_RECONCILIATIONS = {
     "BK1324": {"extra_bed_top_up": True, "total": 1675.0},
     "BK1204": {"extra_bed_top_up": True, "total": 1450.0},
     "BK1325": {"extra_bed_top_up": True, "total": 875.0},
-    "BK1159": {"advance": (0.0, 500.0)},
-    "BK1279": {"advance": (800.0, 400.0)},
+    "BK1159": {"set_payments": ((500.0, 200.0), (500.0, 700.0))},
+    "BK1279": {"set_payments": ((400.0, 1200.0), (400.0, 800.0))},
 }
 
 WIDE = (date(2000, 1, 1), date(2100, 1, 1))
@@ -102,6 +107,9 @@ def _describe(spec: Dict) -> str:
         parts.append(f"add extra bed {spec['extra_bed'][0]} x {spec['extra_bed'][1]} day(s)")
     if spec.get("extra_bed_top_up"):
         parts.append("raise the extra-bed charge to the register's amount")
+    if spec.get("set_payments"):
+        (a0, f0), (a1, f1) = spec["set_payments"]
+        parts.append(f"payments: advance {a0:g} + final {f0:g} -> advance {a1:g} + final {f1:g} (as the register)")
     if spec.get("advance"):
         parts.append(f"advance {spec['advance'][0]:g} -> {spec['advance'][1]:g} (cash unchanged)")
     return ", ".join(parts)
@@ -209,6 +217,15 @@ def _plan_reconciliation(bk: Dict, spec: Dict, settings: Dict, room_maps: Dict) 
             return item
         after.update(advance_paid=_num(new), final_payment=new_final)
         advance, final = _num(new), new_final
+
+    if spec.get("set_payments"):
+        (a0, f0), (a1, f1) = spec["set_payments"]
+        if (advance, final) != (_num(a0), _num(f0)):
+            item["reason"] = f"stored advance/final payment are {advance:g}/{final:g}, not the {a0:g}/{f0:g} the audit saw — not applied"
+            return item
+        after.update(advance_paid=_num(a1), final_payment=_num(f1))
+        advance, final = _num(a1), _num(f1)
+        changes_money = True
 
     total_now = after.get("total_amount", _num(bk.get("total_amount")))
     if changes_money or spec.get("advance"):
