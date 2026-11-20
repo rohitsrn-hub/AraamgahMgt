@@ -35,6 +35,7 @@ def approved(tmp_path, monkeypatch):
     monkeypatch.setattr(backup_service, "BACKUP_DIR", tmp_path)
     monkeypatch.setattr(corrections_service, "APPROVED_BILL_CORRECTIONS", {})
     monkeypatch.setattr(corrections_service, "APPROVED_REFUND_DUE_RESETS", {})
+    monkeypatch.setattr(corrections_service, "APPROVED_CASH_LOG_SYNC", {})
     monkeypatch.setattr(corrections_service, "APPROVED_RECONCILIATIONS", SPECS)
 
 

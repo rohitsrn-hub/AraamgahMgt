@@ -5,6 +5,16 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-20 — October fully reconciled; root causes fixed (branch: claude/qa-audit-fixes)
+October = ₹2,42,275 in all reports; register ₹2,42,650; the ₹375 is ₹450 of beds on
+1-Nov check-outs (counted in November by ruling) less BK1031's ₹75 that the register's
+amount column omits. Payment fields now match the register (owner confirmed BK1286
+₹4,200, BK1159 ₹1,200, BK1279 ₹1,200). Built: payments-log sync correction (+800, +500,
+−400, dated to the original month; Net Revenue changes), Audit check `cash_log_differs`,
+check-out refuses a payment differing from the bill without a reason, Room Occupancy
+shows money actually paid. Root causes in docs/october-2026-root-causes.md. Open:
+Non-Org rule at check-in; beds on month-crossing stays.
+
 ## 2026-11-19 — October vs paper register: ₹242,275 vs ₹242,650; payments follow the register (branch: claude/qa-audit-fixes)
 After the second Apply the four reports agree at ₹2,42,275 (358 room-days, 133
 bookings; BK1293 cancelled). The register's amount column totals ₹2,42,650. The

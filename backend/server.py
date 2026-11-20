@@ -478,6 +478,11 @@ class CheckOutRequest(BaseModel):
     # Administrator forgives the full-stay charge for an early departure the guest did not announce
     # at check-in: billed for the nights actually stayed. Administrators only.
     waive_penalty: bool = False
+    # The amount collected differs from the balance due (guest still owes, or paid more): staff
+    # must confirm and say why. October 2026: unentered advances and unentered extra beds were
+    # all saved silently as an unexplained shortfall or excess.
+    confirm_payment_difference: bool = False
+    payment_difference_reason: Optional[str] = None
 
 class CancelBookingRequest(BaseModel):
     booking_id: str
@@ -2920,6 +2925,19 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
                         "If the guest actually left on the booked date, set the check-out date to that day. "
                         "Confirm only if they really stayed."),
         })
+    balance_due = round(bill["total_due"] - (bill["advance_paid"] or 0), 2)
+    difference = round(request.final_payment - balance_due, 2)
+    if abs(difference) > 0.5:
+        reason = (request.payment_difference_reason or "").strip()
+        if not request.confirm_payment_difference or not reason:
+            raise HTTPException(status_code=409, detail={
+                "code": "payment_difference_confirmation_required",
+                "balance_due": balance_due, "final_payment": request.final_payment, "difference": difference,
+                "message": (f"The balance due is ₹{balance_due:,.0f} but ₹{request.final_payment:,.0f} is being recorded "
+                            f"({'₹%s more than the bill' % format(difference, ',.0f') if difference > 0 else '₹%s still owed' % format(-difference, ',.0f')}). "
+                            "Check for an advance or extra bed that was not entered, or a wrong rate. "
+                            "If the amount is right, give the reason."),
+            })
     actual_checkout_date = bill["actual_checkout_date"]
     charged_nights = bill["charged_nights"]
     charge_reason = bill["charge_reason"]
@@ -2950,6 +2968,9 @@ async def check_out(request: CheckOutRequest, current_user: dict = Depends(requi
         "final_payment": request.final_payment,
         "updated_at": now
     }
+    if abs(difference) > 0.5:
+        update_fields["payment_difference"] = difference
+        update_fields["payment_difference_reason"] = (request.payment_difference_reason or "").strip()
     
     if charge_reason == "late_checkout" and bill["priced_booking"].get("room_segments"):
         update_fields["room_segments"] = bill["priced_booking"]["room_segments"]
@@ -4698,11 +4719,11 @@ async def get_room_occupancy_report(
         bk_to   = stay_out.isoformat() if stay_out else "N/A"
         total_members = 1 + len(bk.get("family_members", []))
 
+        # What was actually collected at check-out, not "bill minus advance": that assumed every
+        # guest paid in full and hid October's unrecorded shortfalls from this report.
         final_paid = 0.0
         if bk.get("status") == "checked_out":
-            total_amt = bk.get("total_amount", 0) or 0
-            advance   = bk.get("advance_paid", 0) or 0
-            final_paid = max(0.0, round(total_amt - advance, 2))
+            final_paid = round(bk.get("final_payment", 0) or 0, 2)
 
         # Credit every room in the booking; room["revenue"] already carries the
         # extra-bed charge on the first room so per-room revenues sum to the
@@ -5321,6 +5342,25 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         for b in active
         if abs((b.get("refund_due") or 0) - max(0.0, (b.get("advance_paid", 0) or 0) - (b.get("total_amount", 0) or 0))) > 0.5
     ]
+    # The dashboard's Net Revenue counts the payments log, not the booking's own advance /
+    # final-payment fields. If the two disagree, the dashboard and the bookings tell different
+    # stories about the same cash (the October corrections exposed exactly this).
+    ids = [b["id"] for b in checked_out]
+    log_rows = await db.payments.find({"booking_id": {"$in": ids}}, {"_id": 0}).to_list(50000) if ids else []
+    log = {}
+    for r in log_rows:
+        t = log.setdefault(r["booking_id"], {"advance": 0.0, "final": 0.0})
+        if r.get("payment_type") in t:
+            t[r["payment_type"]] += float(r.get("amount") or 0)
+    cash_log_differs = []
+    for b in checked_out:
+        t = log.get(b["id"], {"advance": 0.0, "final": 0.0})
+        adv, fin = round(b.get("advance_paid", 0) or 0, 2), round(max(0, b.get("final_payment", 0) or 0), 2)
+        if abs(adv - t["advance"]) > 0.5 or abs(fin - t["final"]) > 0.5:
+            cash_log_differs.append({"bk": b.get("booking_number"), "booking_advance": adv, "log_advance": round(t["advance"], 2),
+                                     "booking_final": fin, "log_final": round(t["final"], 2)})
+    summary["cash_log_differs_from_bookings"] = len(cash_log_differs)
+
     return {
         "audited_month": month_key,
         "period": {"from": period_start.isoformat(), "to": period_end.isoformat()},
@@ -5333,6 +5373,9 @@ async def audit_check(current_user: dict = Depends(require_admin_role)):
         "under_collected": sorted(under_collected, key=lambda r: -r["short_by"])[:80],
         "over_collected": sorted(over_collected, key=lambda r: -r["extra"])[:40],
         "unexplained": unexplained,
+        # Bookings whose payments-log entries (what the dashboard counts) differ from the booking's
+        # own advance / final payment.
+        "cash_log_differs": cash_log_differs[:80],
         "month_counts": month_counts,
         "current_state": {
             "active_bookings_with_wrong_refund_due": wrong_refund_due,

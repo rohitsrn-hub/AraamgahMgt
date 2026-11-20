@@ -54,6 +54,12 @@ Vercel site the same day. Never push half-done work.
   full-stay charge at check-out (`waive_penalty`; admin only, saved on the
   booking with who waived it and how much). Check-in asks staff to confirm
   every room billed at the Non-Org rate.
+- **Check-out payment** must equal the balance due; a different amount is refused
+  until staff confirm and give a reason (`confirm_payment_difference`,
+  `payment_difference_reason`, stored on the booking).
+- **Two records of cash** exist: the booking's `advance_paid`/`final_payment` and the
+  `payments` log (what Dashboard Net Revenue counts). Anything that changes one must
+  change the other; the Audit check lists bookings where they differ (`cash_log_differs`).
 - The check-out screen shows the SERVER's bill (`GET /bookings/{id}/checkout-quote`,
   the same function `check_out` stores). Never re-add client-side bill maths.
 - The Reports page "Audit check" audits only the previous closed month, by design.

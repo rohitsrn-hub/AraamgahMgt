@@ -86,6 +86,18 @@ APPROVED_RECONCILIATIONS = {
     "BK1279": {"set_payments": ((400.0, 1200.0), (400.0, 800.0))},
 }
 
+# The dashboard's Net Revenue counts the PAYMENTS LOG (db.payments), not the booking's advance /
+# final-payment fields. The October payment-field corrections (BK1286, BK1159, BK1279) changed the
+# booking fields only, so the log is brought into line with them: booking_number -> the difference
+# (advance, final payment) between the booking fields and the log that the audit expects to find.
+# An adjustment row is added in the month the original money was recorded (the booking's own
+# advance row, else the date the booking was made), so each month's Net Revenue is right.
+APPROVED_CASH_LOG_SYNC = {
+    "BK1286": (800.0, 0.0),     # ₹800 advance taken (register serials 111-112) but never entered
+    "BK1159": (500.0, 0.0),     # ₹500 advance taken (register serial 125) but never entered
+    "BK1279": (-400.0, 0.0),    # advance entered as ₹800; register serial 129 shows ₹400
+}
+
 WIDE = (date(2000, 1, 1), date(2100, 1, 1))
 BILL_FIELDS = ("total_amount", "balance_amount", "room_rent_total", "license_fee_total", "charged_nights", "charge_reason")
 REFUND_FIELDS = ("refund_due", "refund_reason")
@@ -244,6 +256,49 @@ def _plan_reconciliation(bk: Dict, spec: Dict, settings: Dict, room_maps: Dict) 
     return item
 
 
+async def payments_log_totals(db, booking_id: str) -> Dict[str, float]:
+    """What the payments log holds for one booking: advance, final and refund sums."""
+    rows = await db.payments.find({"booking_id": booking_id}, {"_id": 0}).to_list(500)
+    out = {"advance": 0.0, "final": 0.0, "refund": 0.0}
+    for r in rows:
+        if r.get("payment_type") in out:
+            out[r["payment_type"]] = round(out[r["payment_type"]] + float(r.get("amount") or 0), 2)
+    return out
+
+
+async def _plan_cash_log(db, number: str, expected) -> Dict:
+    item = {"booking_number": number, "kind": "cash_log", "label": "payments log",
+            "description": f"payments log: advance {expected[0]:+g}, final {expected[1]:+g} (to match the booking)",
+            "status": "skipped", "reason": None, "before": {}, "after": {}}
+    bk = await db.bookings.find_one({"booking_number": number}, {"_id": 0})
+    if not bk:
+        item["reason"] = "booking not found"
+        return item
+    log = await payments_log_totals(db, bk["id"])
+    diff = (round(_num(bk.get("advance_paid")) - log["advance"], 2),
+            round(max(0.0, _num(bk.get("final_payment"))) - log["final"], 2))
+    if diff == (0.0, 0.0):
+        item["reason"] = "the payments log already matches the booking"
+        return item
+    if diff != (_num(expected[0]), _num(expected[1])):
+        item["reason"] = (f"the log differs from the booking by advance {diff[0]:+g}, final {diff[1]:+g}, "
+                          f"not the {expected[0]:+g}, {expected[1]:+g} expected — not applied")
+        return item
+    first_adv = await db.payments.find({"booking_id": bk["id"], "payment_type": "advance"}, {"_id": 0}).sort("created_at", 1).to_list(1)
+    first_fin = await db.payments.find({"booking_id": bk["id"], "payment_type": "final"}, {"_id": 0}).sort("created_at", 1).to_list(1)
+    rows = []
+    for ptype, amount, anchor in (("advance", diff[0], first_adv[0]["created_at"] if first_adv else bk.get("created_at")),
+                                  ("final", diff[1], first_fin[0]["created_at"] if first_fin else bk.get("actual_check_out") or bk.get("created_at"))):
+        if amount:
+            rows.append({"id": str(uuid.uuid4()), "booking_id": bk["id"], "booking_number": number, "amount": amount,
+                         "payment_type": ptype, "payment_mode": bk.get("payment_mode"),
+                         "created_at": anchor if isinstance(anchor, str) else (anchor.isoformat() if anchor else datetime.now(timezone.utc).isoformat()),
+                         "correction": "Owner-approved: payments log aligned with the paper register (Nov 2026)"})
+    item.update(status="ready", booking_id=bk["id"], before={"log": log},
+                after={"rows_to_add": rows}, note="Changes the dashboard's Net Revenue for the month of each row.")
+    return item
+
+
 async def plan_corrections(db) -> List[Dict]:
     """What would change, without changing anything."""
     settings = await db.app_settings.find_one({}, {"_id": 0}) or {}
@@ -308,6 +363,8 @@ async def plan_corrections(db) -> List[Dict]:
                          "before": {}, "after": {}})
             continue
         plan.append(_plan_reconciliation(bk, spec, settings, room_maps))
+    for number, expected in APPROVED_CASH_LOG_SYNC.items():
+        plan.append(await _plan_cash_log(db, number, expected))
     for item in plan:
         item.setdefault("label", "bill" if item["kind"] == "bill" else "refund due")
     return plan
@@ -325,6 +382,19 @@ async def apply_corrections(db, user: str) -> Dict:
     now = datetime.now(timezone.utc).isoformat()
     applied = 0
     for p in ready:
+        if p["kind"] == "cash_log":
+            rows = p["after"]["rows_to_add"]
+            for r in rows:
+                await db.payments.insert_one({**r, "correction_batch_id": batch_id})
+            applied += 1
+            p["status"] = "applied"
+            await db.data_corrections.insert_one({
+                "id": str(uuid.uuid4()), "batch_id": batch_id, "applied_at": now, "applied_by": user,
+                "collection": "payments", "record_id": p["booking_id"], "booking_number": p["booking_number"],
+                "kind": "cash_log", "original": p["before"], "new": {"payment_ids": [r["id"] for r in rows]},
+                "reverted_at": None, "backup_id_before": backup["backup_id"],
+            })
+            continue
         guard = {"id": p["booking_id"], **{k: v for k, v in p["before"].items()}}
         entry = {"amended_at": now, "source": "data_correction", "batch_id": batch_id,
                  "reason": "Owner-approved correction (Nov 2026)" + (f": {p['description']}" if p.get("description") else ""),
@@ -352,6 +422,13 @@ async def undo_batch(db, batch_id: str, user: str) -> Dict:
     now = datetime.now(timezone.utc).isoformat()
     results, restored = [], 0
     for r in rows:
+        if r.get("collection") == "payments":
+            ids = r["new"]["payment_ids"]
+            res = await db.payments.delete_many({"id": {"$in": ids}, "correction_batch_id": batch_id})
+            restored += 1
+            await db.data_corrections.update_one({"id": r["id"]}, {"$set": {"reverted_at": now, "reverted_by": user}})
+            results.append({"booking_number": r["booking_number"], "status": "restored", "removed_log_rows": res.deleted_count})
+            continue
         # Only if the record still holds exactly what the correction set.
         res = await db.bookings.update_one(
             {"id": r["record_id"], **r["new"]},

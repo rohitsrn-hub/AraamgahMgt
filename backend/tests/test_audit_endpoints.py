@@ -160,7 +160,9 @@ def checkin(api, booking_id="b1", **extra):
 
 
 def checkout(api, booking_id="b1", **extra):
-    body = {"booking_id": booking_id, "staff_id": "s1"}
+    # Most tests are about the bill, not the payment: confirm any payment difference unless a test says otherwise.
+    body = {"booking_id": booking_id, "staff_id": "s1",
+            "confirm_payment_difference": True, "payment_difference_reason": "not under test"}
     body.update(extra)
     res = api.client.post("/api/bookings/check-out", json=body)
     assert res.status_code == 200, res.text
@@ -874,3 +876,34 @@ def test_audit_check_names_the_bookings_behind_a_report_disagreement(api, monkey
     assert d["totals_changed_between_two_runs"] is False and d["direct_calculation_total"] == 1000
     assert d["bookings_where_allotment_guest_details_and_direct_calculation_differ"] == [
         {"bk": "BKP", "allotment": 1000.0, "guest_details": 800.0, "direct_calculation": 1000.0}]
+
+
+# ====================================================================
+# A payment that differs from the balance due must be confirmed with a reason
+# ====================================================================
+
+def test_a_short_or_excess_payment_is_refused_until_confirmed_with_a_reason(api):
+    api.seed("bookings", [booking()])                    # Rs 1000, advance 400 -> balance due 600
+    checkin(api)
+    body = {"booking_id": "b1", "staff_id": "s1", "actual_checkout_date": "2026-05-12", "final_payment": 400}
+    r = api.client.post("/api/bookings/check-out", json=body)
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert d["code"] == "payment_difference_confirmation_required" and d["balance_due"] == 600 and d["difference"] == -200
+    assert "still owed" in d["message"]
+    r = api.client.post("/api/bookings/check-out", json={**body, "confirm_payment_difference": True})     # no reason
+    assert r.status_code == 409
+    assert api.find_one("bookings", {"id": "b1"})["status"] == "checked_in"
+    r = api.client.post("/api/bookings/check-out", json={**body, "confirm_payment_difference": True,
+                                                          "payment_difference_reason": "guest will pay tomorrow"})
+    assert r.status_code == 200
+    b = r.json()["booking"]
+    assert (b["payment_difference"], b["payment_difference_reason"], b["balance_amount"]) == (-200, "guest will pay tomorrow", 200)
+
+
+def test_paying_exactly_the_balance_needs_no_confirmation(api):
+    api.seed("bookings", [booking()])
+    checkin(api)
+    r = api.client.post("/api/bookings/check-out", json={"booking_id": "b1", "staff_id": "s1",
+                                                          "actual_checkout_date": "2026-05-12", "final_payment": 600})
+    assert r.status_code == 200 and "payment_difference" not in r.json()["booking"]

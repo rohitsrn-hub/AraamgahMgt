@@ -1143,9 +1143,29 @@ export default function Bookings() {
       confirmLate = true;
     }
 
+    // The amount collected must match the bill, or staff say why (an unentered advance or extra
+    // bed was the usual cause of October's unexplained shortfalls and excess payments).
+    let paymentDifferenceReason = "";
+    if (checkoutQuote) {
+      const due = Number(checkoutQuote.amount_due_now || 0);
+      const paid = Number(actionForm.final_payment || 0);
+      const diff = Math.round((paid - due) * 100) / 100;
+      if (Math.abs(diff) > 0.5) {
+        const what = diff < 0 ? `${fmtINR(-diff, 0)} will remain unpaid` : `${fmtINR(diff, 0)} more than the bill`;
+        const reason = window.prompt(
+          `Amount due is ${fmtINR(due, 0)} but ${fmtINR(paid, 0)} is entered (${what}).\n\n` +
+          "First check: an advance taken but not entered? An extra bed not entered? A wrong rate?\n" +
+          "If the amount is right, type the reason (it is saved on the booking). Cancel to go back and fix it."
+        );
+        if (reason === null) return;
+        if (!reason.trim()) { toast.error("A reason is needed when the amount differs from the bill"); return; }
+        paymentDifferenceReason = reason.trim();
+      }
+    }
+
     // Zero or negative payment — skip all payment detail validation
     if (actionForm.final_payment <= 0) {
-      setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm, confirm_late: confirmLate } });
+      setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm, confirm_late: confirmLate, payment_difference_reason: paymentDifferenceReason } });
       setShowCheckOut(false);
       setShowFeedback(true);
       return;
@@ -1163,7 +1183,7 @@ export default function Bookings() {
       }
     }
 
-    setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm, confirm_late: confirmLate } });
+    setPendingCheckoutBooking({ ...selectedBooking, _checkoutForm: { ...actionForm, confirm_late: confirmLate, payment_difference_reason: paymentDifferenceReason } });
     setShowCheckOut(false);
     setShowFeedback(true);
   };
@@ -1184,6 +1204,8 @@ export default function Bookings() {
         extra_bed_days: form.extra_bed_days || 0,
         actual_checkout_date: form.actual_checkout_date || istTodayStr(),
         confirm_late: !!form.confirm_late,
+        confirm_payment_difference: !!form.payment_difference_reason,
+        payment_difference_reason: form.payment_difference_reason || undefined,
         waive_penalty: user?.role === "admin" && !!form.waive_penalty,
         // Include payment details
         card_last4: form.card_last4 || undefined,
