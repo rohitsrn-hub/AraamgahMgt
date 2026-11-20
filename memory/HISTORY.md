@@ -5,6 +5,14 @@ feature or fix (newest first). Product terms, not code terms.
 
 ---
 
+## 2026-11-20 — OCTOBER 2026 CLOSED: ₹2,42,275 (branch: claude/qa-audit-fixes)
+Final audit check after all corrections: four reports agree at ₹2,42,275 (358
+room-days, 133 bookings); reported = billed for all 133 October check-outs
+(₹2,48,025); payments log matches every booking (cash_log_differs empty); collected
+₹2,47,825. Only open money: BK1170 ₹200 unpaid (September stay, not in the October
+register). Register difference ₹375 explained (₹450 beds on 1-Nov check-outs counted
+in November, less BK1031's ₹75). Next month's check compares against ₹2,42,275.
+
 ## 2026-11-20 — October fully reconciled; root causes fixed (branch: claude/qa-audit-fixes)
 October = ₹2,42,275 in all reports; register ₹2,42,650; the ₹375 is ₹450 of beds on
 1-Nov check-outs (counted in November by ruling) less BK1031's ₹75 that the register's
